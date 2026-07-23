@@ -1,0 +1,3 @@
+# S005: component without a package
+component C:
+    pin A: role=input

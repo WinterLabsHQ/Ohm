@@ -1,0 +1,7 @@
+# S003: generated package with unmapped pad (pad 4 has no pin) and unmapped pin
+component C:
+    package = generate(SOT, pins=4)
+    pin A: role=input, pad=1
+    pin B: role=output, pad=2
+    pin G: role=ground, pad=3
+    pin V: role=power_in

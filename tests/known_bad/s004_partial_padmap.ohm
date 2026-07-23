@@ -1,0 +1,5 @@
+# S004 (warning): external footprint with a partial pin->pad map
+component C:
+    package = "SOT-23"
+    pin A: role=input, pad=1
+    pin B: role=output

@@ -1,0 +1,11 @@
+# S002: pad id outside the generated pad set
+component C:
+    package = generate(SOIC, pins=8)
+    pin A: role=input, pad=1
+    pin B: role=output, pad=2
+    pin C1: role=passive, pad=3
+    pin C2: role=passive, pad=4
+    pin C3: role=passive, pad=5
+    pin C4: role=passive, pad=6
+    pin C5: role=passive, pad=7
+    pin V: role=power_in, pad=9

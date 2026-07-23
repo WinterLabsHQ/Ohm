@@ -1,0 +1,6 @@
+# S001: two pins mapped to the same pad
+component C:
+    package = "SOT-23"
+    pin A: role=input, pad=1
+    pin B: role=output, pad=1
+    pin G: role=ground, pad=3
