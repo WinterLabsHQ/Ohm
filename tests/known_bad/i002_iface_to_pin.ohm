@@ -1,0 +1,13 @@
+# I002: whole interface connected to a single pin
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+
+component MCU:
+    package = "QFN-16"
+    pin SCL: role=bidirectional, pad=5
+
+module M:
+    bus = io(I2C)
+    u = MCU()
+    bus ~ u.SCL

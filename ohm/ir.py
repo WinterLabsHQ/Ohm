@@ -159,6 +159,7 @@ class NetLow:
     name: str
     nodes: tuple[NetNode, ...]
     ports: tuple[str, ...]  # external port-member labels on this net
+    conn_spans: tuple[Span, ...] = ()  # source `~` connections that formed this net
 
 
 @dataclass(frozen=True)

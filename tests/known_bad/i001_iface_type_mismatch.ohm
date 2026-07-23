@@ -1,0 +1,28 @@
+# I001: connecting two different interface types
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+
+interface SPI:
+    sck:  Signal, role=output
+    mosi: Signal, role=output
+    miso: Signal, role=input
+
+component MCU:
+    package = "QFN-16"
+    pin SCL: role=bidirectional, pad=5
+    pin SDA: role=bidirectional, pad=6
+
+module A:
+    bus = io(I2C)
+    u = MCU()
+    bus.scl ~ u.SCL
+    bus.sda ~ u.SDA
+
+module B:
+    bus = io(SPI)
+
+module Top:
+    a = A()
+    b = B()
+    a.bus ~ b.bus

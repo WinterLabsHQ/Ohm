@@ -1,0 +1,10 @@
+# I006 (warning): net whose endpoints are all inputs — nothing drives it
+component Buf:
+    package = "SOT-23-5"
+    pin IN:  role=input, pad=1
+    pin OUT: role=output, pad=4
+
+module M:
+    a = Buf()
+    b = Buf()
+    a.IN ~ b.IN

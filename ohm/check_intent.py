@@ -1,0 +1,118 @@
+"""P6 ★ HEADLINE: Tier-I intent checker (manual Part 2/P6, compiler design §4.3).
+
+Catches what standard ERC cannot, using declared intent (D3):
+  I001  connecting different interface types
+  I002  connecting a whole interface to a non-interface endpoint
+  I003  multiple drivers (output/power_out) on one net
+  I005  swapped members of a `require`-related interface (SDA↔SCL, D+↔D−)
+  I006  net whose endpoints are all inputs (undriven) — warning
+
+Connection-shape checks run per module (hierarchical view); driver/undriven
+rules run on the flat nets, the root-cause place — every wiring path lands
+there. Never mutates IR; never halts.
+"""
+
+from __future__ import annotations
+
+from ohm import ir
+from ohm.diagnostics import Diagnostic, Span
+from ohm.lower import lower
+
+_NO_SPAN = Span(1, 1, 1, 1)
+_DRIVERS = {"output", "power_out"}
+_SINKS = {"input", "power_in"}
+
+
+def _d(sev, code, msg, span, path, help_=None):
+    return Diagnostic(sev, code, msg, span or _NO_SPAN, file=path, help=help_)
+
+
+def _classify(refparts, module, comps, mods):
+    """Endpoint → ("pin", comp, pin) | ("iface", iface) | ("member", iface, member) | None."""
+    base = refparts[0]
+    inst = next((i for i in module.instances if i.name == base), None)
+    if inst is not None:
+        if inst.def_ref in comps:
+            return ("pin", comps[inst.def_ref], refparts[1]) if len(refparts) > 1 else None
+        if inst.def_ref in mods:
+            sub = mods[inst.def_ref]
+            port = next((p for p in sub.ports if p.name == refparts[1]), None) if len(refparts) > 1 else None
+            if port is None:
+                return None
+            return ("iface", port.interface) if len(refparts) == 2 else ("member", port.interface, refparts[2])
+    port = next((p for p in module.ports if p.name == base), None)
+    if port is not None:
+        return ("iface", port.interface) if len(refparts) == 1 else ("member", port.interface, refparts[1])
+    return None
+
+
+def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
+    diags: list[Diagnostic] = []
+    comps = {c.name: c for c in design.components}
+    mods = {m.name: m for m in design.modules}
+    ifaces = {i.name: i for i in design.interfaces}
+    require_members = {
+        name: {m for rel in iface.requires for m in rel.members}
+        for name, iface in ifaces.items()
+    }
+
+    # ---- connection-shape checks (per module) ----
+    for module in design.modules:
+        for conn in module.connections:
+            left = _classify(conn.left, module, comps, mods)
+            right = _classify(conn.right, module, comps, mods)
+            if left is None or right is None:
+                continue  # resolver already diagnosed unknowns
+            lk, rk = left[0], right[0]
+            if lk == "iface" and rk == "iface":
+                if left[1] != right[1]:
+                    diags.append(_d(
+                        "error", "I001",
+                        f"cannot connect interface '{left[1]}' to interface '{right[1]}'",
+                        conn.span, path,
+                        "interfaces must be the same type; connect members explicitly to adapt"))
+            elif "iface" in (lk, rk):
+                other = right if lk == "iface" else left
+                iface_name = left[1] if lk == "iface" else right[1]
+                what = f"pin '{other[2]}'" if other[0] == "pin" else f"member '{other[2]}'"
+                diags.append(_d(
+                    "error", "I002",
+                    f"cannot connect whole interface '{iface_name}' to {what}",
+                    conn.span, path, "connect member-to-member, or interface-to-interface"))
+            elif lk == "member" and rk == "member" and left[1] == right[1]:
+                m1, m2 = left[2], right[2]
+                req = require_members.get(left[1], set())
+                if m1 != m2 and (m1 in req or m2 in req):
+                    rel = next(r for r in ifaces[left[1]].requires if m1 in r.members or m2 in r.members)
+                    diags.append(_d(
+                        "error", "I005",
+                        f"swapped interface members: '{m1}' ~ '{m2}' violates "
+                        f"require {rel.kind}({', '.join(rel.members)}) on '{left[1]}'",
+                        conn.span, path, f"connect '{m1}' ~ '{m1}'"))
+
+    # ---- net-level role rules (flat view — every wiring path lands here) ----
+    # ponytail: lower() recomputed here; pure + cheap, keeps one net algorithm
+    low, _ = lower(design, path)
+    part_comp = {p.ref: comps[p.component] for p in low.parts}
+    for net in low.nets:
+        noderoles = []
+        for node in net.nodes:
+            pin = next((p for p in part_comp[node.part_ref].pins if p.name == node.pin), None)
+            if pin is not None:
+                noderoles.append((node, pin))
+        net_span = net.conn_spans[0] if net.conn_spans else None
+        related = tuple(p.span for _, p in noderoles if p.span is not None)
+        drivers = [(n, p) for n, p in noderoles if p.role in _DRIVERS]
+        if len(drivers) >= 2:
+            names = ", ".join(f"{n.part_ref}.{p.name} ({p.role})" for n, p in drivers)
+            diags.append(Diagnostic("error", "I003",
+                                    f"net '{net.name}' has multiple drivers: {names}",
+                                    net_span or drivers[1][1].span or _NO_SPAN,
+                                    file=path, related=related))
+        if not net.ports and noderoles and all(p.role in _SINKS for _, p in noderoles):
+            names = ", ".join(f"{n.part_ref}.{p.name}" for n, p in noderoles)
+            diags.append(Diagnostic("warning", "I006",
+                                    f"net '{net.name}' has no driver (all endpoints are inputs): {names}",
+                                    net_span or noderoles[0][1].span or _NO_SPAN,
+                                    file=path, related=related))
+    return diags

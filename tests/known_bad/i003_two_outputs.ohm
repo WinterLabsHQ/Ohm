@@ -1,0 +1,10 @@
+# I003: two outputs (drivers) tied to the same net
+component Buf:
+    package = "SOT-23-5"
+    pin IN:  role=input, pad=1
+    pin OUT: role=output, pad=4
+
+module M:
+    a = Buf()
+    b = Buf()
+    a.OUT ~ b.OUT

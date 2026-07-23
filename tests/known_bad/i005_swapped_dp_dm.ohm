@@ -1,0 +1,17 @@
+# I005: USB D+ and D- crossed
+interface USB2:
+    dp: Signal, role=bidirectional
+    dm: Signal, role=bidirectional
+    require pair(dp, dm)
+
+module ConnBlock:
+    usb = io(USB2)
+
+module DevBlock:
+    usb = io(USB2)
+
+module Board:
+    conn = ConnBlock()
+    dev = DevBlock()
+    conn.usb.dp ~ dev.usb.dm
+    conn.usb.dm ~ dev.usb.dp

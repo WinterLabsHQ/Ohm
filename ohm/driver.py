@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ohm import ir
+from ohm.check_intent import check_intent
 from ohm.check_structural import check_structural
 from ohm.check_units import annotate_units, check_units
 from ohm.diagnostics import Diagnostic, has_errors
@@ -16,8 +17,8 @@ from ohm.lower import lower
 from ohm.parse import parse
 from ohm.resolve import resolve
 
-# checker registry — Tier-I (P6) appends here
-CHECKERS = [check_units, check_structural]
+# checker registry — Tier-Q (P9) appends here
+CHECKERS = [check_units, check_structural, check_intent]
 
 
 @dataclass

@@ -26,6 +26,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     parts: list[tuple[str, ir.ComponentDef]] = []  # (ref, def) in walk order
     slots: dict[str, tuple] = {}  # label -> (_PIN, part_ref, pin_name, pad) | (_PORT,)
     parent: dict[str, str] = {}  # union-find
+    edges: list[tuple[str, object]] = []  # (label, connection Span) for diagnostics
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -80,6 +81,8 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         for conn in module.connections:
             left = expand(conn.left, module, prefix)
             right = expand(conn.right, module, prefix)
+            if conn.span is not None and left:
+                edges.append((left[0], conn.span))
             if len(left) == 1 and len(right) == 1:
                 union(left[0], right[0])
             else:  # interface expansion: pair by member name (last label segment)
@@ -120,6 +123,9 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             )
         )
         name = port_labels[0] if port_labels else members[0]
-        nets.append(ir.NetLow(name, nodes, port_labels))
+        root = find(members[0])
+        spans = {s for lbl, s in edges if find(lbl) == root}
+        conn_spans = tuple(sorted(spans, key=lambda s: (s.line, s.col, s.end_line, s.end_col)))
+        nets.append(ir.NetLow(name, nodes, port_labels, conn_spans))
     nets.sort(key=lambda n: n.name)
     return ir.IRLow(tuple(parts_low), tuple(nets)), diags
