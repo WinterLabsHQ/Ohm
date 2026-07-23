@@ -182,3 +182,38 @@ def test_std_kinds_loads_and_conforms(tmp_path):
     f.write_text(src)
     result = compile_source(src, str(f))
     assert result.ok, [d.machine() for d in result.diagnostics]
+
+
+# ---------- K2 adversarial-audit fixes: contracts must not false-reject real parts ----------
+def test_lm317_ldo_without_gnd_conforms():
+    # LM317/LT3080 floating regulators have IN/OUT/ADJ, no GND — gnd is optional
+    src = ("use std.kinds\ncomponent LM317(LDO):\n    package = generate(SOT23, pins=3)\n"
+           "    pin ADJ: role=input, pad=1\n    pin OUT: role=power_out, pad=2, is=vout\n"
+           "    pin IN: role=power_in, pad=3, is=vin\n")
+    assert not [c for c in codes(src) if c.startswith("K")]
+
+
+def test_open_drain_output_satisfies_required_output():
+    # LM393/LM339-class open-drain comparator: open_collector role satisfies out:output
+    src = ("use std.kinds\ncomponent Cmp(Comparator):\n    package = generate(SOT23, pins=5)\n"
+           "    pin OUT: role=open_collector, pad=1, is=out\n"
+           "    pin VSS: role=power_in, pad=2, is=vneg\n    pin INP: role=input, pad=3, is=inp\n"
+           "    pin INN: role=input, pad=4, is=inn\n    pin VDD: role=power_in, pad=5, is=vpos\n")
+    assert not [c for c in codes(src) if c.startswith("K")]
+
+
+def test_i2c_sensor_without_output_conforms():
+    # digital I2C sensors carry data on bidirectional SDA — Sensor.signal is optional
+    src = ("use std.kinds\ncomponent Dig(Sensor):\n    package = generate(SOT23, pins=6)\n"
+           "    pin SDA: role=bidirectional, pad=1\n    pin SCL: role=input, pad=2\n"
+           "    pin VDD: role=power_in, pad=3\n    pin GND: role=ground, pad=4\n"
+           "    pin A0: role=input, pad=5\n    pin INT: role=output, pad=6\n")
+    assert not [c for c in codes(src) if c.startswith("K")]
+
+
+def test_integrated_buck_without_sw_conforms():
+    # Recom R-78 / TPSM modules: integrated inductor, no SW node — sw is optional
+    src = ("use std.kinds\ncomponent Buck(SwitchingConverter):\n    package = \"X\"\n"
+           "    pin VIN: role=power_in, pad=1, is=vin\n    pin GND: role=ground, pad=2, is=gnd\n"
+           "    pin VOUT: role=power_out, pad=3\n")
+    assert not [c for c in codes(src) if c.startswith("K")]

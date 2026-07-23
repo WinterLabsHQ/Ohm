@@ -88,13 +88,13 @@ kind VoltageReference:
 kind LDO:
     requires vin: power_in
     requires vout: power_out
-    requires gnd: ground
+    optional gnd: ground          # floating adjustable regs (LM317, LT3080) have no GND
     optional en: input            # fixed 3-pin LDOs have none
 
 kind SwitchingConverter:
     requires vin: power_in
     requires gnd: ground
-    requires sw: output           # controllers (no integrated switch) are a distinct kind
+    optional sw: output           # integrated-inductor modules (Recom R-78) expose no SW node
 
 # ---------- logic / interface ----------
 kind LogicGate:
@@ -132,10 +132,11 @@ kind Fuse(TwoTerminal)
 kind Connector:
     optional shield: ground
 
-# A sensor's only near-universal is "produces a signal"; supply is NOT universal
-# (thermocouples, photodiodes, piezo are self-powered).
+# A sensor is a nominal category — even "produces a signal" is not universal:
+# I2C/SPI digital sensors carry data on a bidirectional bus, not an `output` pin
+# (BME280, SHT31, MPU6050). So `signal` is optional; declaring (Sensor) is intent.
 kind Sensor:
-    requires signal: output
+    optional signal: output
 
 # ---------- more two-terminal passives (refine TwoTerminal, no new members) ----------
 kind FerriteBead(TwoTerminal)

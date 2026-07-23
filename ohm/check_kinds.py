@@ -22,6 +22,17 @@ from ohm.diagnostics import Diagnostic, Span
 
 _NO_SPAN = Span(1, 1, 1, 1)
 
+# a required role is satisfied by these pin roles (open-drain/-collector ARE outputs,
+# just wired-OR — a required `output` accepts them; ADR-008)
+_ROLE_SATISFIES: dict[str, set[str]] = {
+    "output": {"output", "open_collector", "open_drain"},
+    "power_in": {"power_in", "ground"},  # ground is a power_in specialization
+}
+
+
+def _role_ok(pin_role: str, required_role: str) -> bool:
+    return pin_role == required_role or pin_role in _ROLE_SATISFIES.get(required_role, set())
+
 
 def _d(code: str, msg: str, span: Span | None, path: str, sev: str = "error",
        help_: str | None = None) -> Diagnostic:
@@ -96,7 +107,7 @@ def check_kinds(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                     "K005", f"pin '{pin.name}' of '{comp.name}' binds is='{m}', which no "
                     f"declared kind defines", pin.span, path, help_=_closest(m, known_members)))
                 continue
-            if m in req_role and pin.role != req_role[m]:
+            if m in req_role and not _role_ok(pin.role, req_role[m]):
                 diags.append(_d(
                     "K003", f"pin '{pin.name}' binds is='{m}' but its role is '{pin.role}'; "
                     f"kind requires '{m}' to be '{req_role[m]}'", pin.span, path))
