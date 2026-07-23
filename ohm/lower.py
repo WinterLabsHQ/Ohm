@@ -104,8 +104,16 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         for inst in module.instances:
             if inst.def_ref in comps:
                 parts.append((f"{prefix}{inst.name}", comps[inst.def_ref], inst.overrides))
-            elif inst.def_ref in mods and inst.def_ref not in stack:  # cycle guard
-                walk(mods[inst.def_ref], f"{prefix}{inst.name}.", stack | {inst.def_ref})
+            elif inst.def_ref in mods:
+                if inst.def_ref in stack:  # cycle: unrealizable hierarchy, not just a skip
+                    diags.append(Diagnostic(
+                        "error", "R014",
+                        f"recursive module instantiation: '{inst.def_ref}' instantiates"
+                        f" itself (via '{prefix}{inst.name}')",
+                        inst.span or Span(1, 1, 1, 1), file=path,
+                    ))
+                else:
+                    walk(mods[inst.def_ref], f"{prefix}{inst.name}.", stack | {inst.def_ref})
         for conn in module.connections:
             left = expand(conn.left, module, prefix)
             right = expand(conn.right, module, prefix)

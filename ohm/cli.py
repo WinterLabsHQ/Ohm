@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("--strict", action="store_true",
                          help="exit 1 (and emit nothing) on any warning or worse")
     p_build.add_argument("--debug-passes", action="store_true",
-                         help="print per-pass debug info while compiling")
+                         help="verify checkers do not mutate the IR (asserts on violation)")
     p_build.add_argument("--target-kicad", default="7",
                          help="KiCad major version to target (v1 supports: 7)")
     # ponytail: single 'declared' provider today; the flag is the provider seam
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--strict", action="store_true",
                          help="exit 1 on any warning or worse")
     p_check.add_argument("--debug-passes", action="store_true",
-                         help="print per-pass debug info while compiling")
+                         help="verify checkers do not mutate the IR (asserts on violation)")
     p_check.add_argument("--explain", metavar="CODE",
                          help="print the explanation for a diagnostic code and exit")
 
@@ -190,15 +190,8 @@ def main(argv: list[str] | None = None) -> int:
             print(formatted, end="")
         return 0
     emit = args.command == "build"
-    if getattr(args, "debug_passes", False):
-        try:
-            result = compile_source(source, args.file, emit=emit, debug_passes=True)
-        except TypeError:
-            # ponytail: driver hasn't grown debug_passes yet (concurrent change);
-            # flag is accepted but a no-op until it lands
-            result = compile_source(source, args.file, emit=emit)
-    else:
-        result = compile_source(source, args.file, emit=emit)
+    result = compile_source(source, args.file, emit=emit,
+                            debug_passes=getattr(args, "debug_passes", False))
     _report(result, source, args.json_diagnostics)
     if not result.ok:
         return 1

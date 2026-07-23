@@ -135,3 +135,17 @@ def test_config_in_assert_still_legal():
     )
     _, diags = build(src)
     assert diags == [], [d.machine() for d in diags]
+
+
+def test_connect_submodule_internal_instance_rejected():
+    # verification-loop catch: `s.inner ~ c.P` must not silently vanish
+    src = (
+        "component C:\n    package = \"X\"\n    pin P: role=passive, pad=1\n"
+        "module Sub:\n    inner = C()\n"
+        "module Top:\n    s = Sub()\n    c = C()\n    s.inner ~ c.P\n"
+    )
+    from ohm.driver import compile_source
+
+    result = compile_source(src, "internal.ohm")
+    hits = [d for d in result.diagnostics if d.code == "R003" and "internal" in d.message]
+    assert hits and not result.ok

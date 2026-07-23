@@ -338,8 +338,16 @@ class _Resolver:
             names = {m.name for m in target.members}
             kind = f"member on interface '{target.name}'"
         elif isinstance(target, A.ModuleDecl):
+            port_names = {i.name for i in target.items if isinstance(i, A.Binding)
+                          and i.call.callee.dotted() == "io"}
             names = {i.name for i in target.items if isinstance(i, A.Binding)}
             kind = f"port on module '{target.name}'"
+            if connect and member in names and member not in port_names:
+                self.diags.append(_err(
+                    "R003", f"'{member}' is internal to module '{target.name}', not a port"
+                    " — connect endpoints must be io() ports", ref.span, self.path,
+                    _suggest(member, port_names)))
+                return False
         else:
             return True  # config or poisoned target: nothing to validate
         if member not in names:

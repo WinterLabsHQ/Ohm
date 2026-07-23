@@ -77,6 +77,7 @@ EXPLAIN: dict[str, str] = {
     "R011": "Connect endpoints must be a pin, a whole io() port, or an interface member — a bare component/module instance or a config value cannot carry a net.",
     "R012": "An instance override names a config/attr the target does not declare — modules accept only declared configs; components accept new attrs unless the name is a near-miss of a declared attr or pin.",
     "R013": "An argument in a require relation or obligation is not usable (keyword args and literal obligation args are ignored).",
+    "R014": "A module instantiates itself, directly or through a cycle — the hierarchy cannot be built. Break the cycle.",
     "U001": "Adding/subtracting quantities of different dimensions (e.g. volts + ohms). Convert or fix the expression.",
     "U002": "Comparing quantities of different dimensions. Both sides of a comparison must share a dimension.",
     "U003": "Unknown unit. See the v1 unit table in the language spec.",

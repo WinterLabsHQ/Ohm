@@ -35,9 +35,17 @@ def test_dedent_error_becomes_p001():
 
 
 # ---------- finding 3: self-instantiating module must not recurse forever ----------
-def test_recursive_module_does_not_recurse():
-    result = compile_source("module M:\n    m = M()\n", "rec.ohm", emit=False)  # was RecursionError
-    assert isinstance(result.diagnostics, list)
+def test_recursive_module_is_r014_error():
+    result = compile_source("module M:\n    m = M()\n", "rec.ohm")  # was RecursionError
+    assert any(d.code == "R014" for d in result.diagnostics)
+    assert not result.ok and result.low is None  # unrealizable design emits nothing
+
+
+def test_mutually_recursive_modules_are_r014_error():
+    src = "module A:\n    b = B()\nmodule B:\n    a = A()\n"
+    result = compile_source(src, "mutual.ohm")
+    assert any(d.code == "R014" for d in result.diagnostics)
+    assert not result.ok
 
 
 # ---------- finding 4: LSP server survives a compile_source exception ----------
