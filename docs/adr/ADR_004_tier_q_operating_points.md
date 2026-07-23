@@ -30,3 +30,18 @@ already generic); `ir.Pin` gains `voltage`/`current`.
 
 Undeclared values ⇒ unchecked (D3: detectability is bounded by declared intent;
 never claim more).
+
+Bidirectional pins participate only through explicit declarations: a
+`bidirectional` pin with `voltage=` counts as a declared source (Q001/Q004);
+with `current=` it joins the Q002 draw sum. Without declarations it stays
+unchecked, as before.
+
+## Q005 — coarse thermal check (added)
+- **Q005** over-temperature: when a part declares attrs `theta_ja` (plain
+  number, degC/W) and `tmax` (temperature quantity), and its dissipation is
+  computable via the Q003 path (2-pin resistive part, both net voltages
+  known): 25 degC + P_hi × theta_ja > tmax ⇒ error.
+
+**Fixed-ambient assumption**: ambient is fixed at 25 degC. v1 has no ambient
+or enclosure model; a declared ambient attr can relax this later without
+changing the check's shape.

@@ -151,6 +151,10 @@ def test_generated_symbol_parses_in_kicad(tmp_path):
     lib = tmp_path / "ohm_gen.kicad_sym"
     lib.write_text(emit_symbol("SOIC8", pins))
     r = subprocess.run(["kicad-cli", "sym", "upgrade", str(lib)], capture_output=True, text=True)
-    if r.returncode != 0 and "invalid" in (r.stderr + r.stdout).lower():
-        pytest.fail(r.stderr + r.stdout)
-    # non-zero for other reasons (e.g. command unsupported) is inconclusive, not a failure
+    if r.returncode != 0:
+        out = r.stderr + r.stdout
+        low = out.lower()
+        if any(m in low for m in ("unknown command", "invalid command", "unrecognized",
+                                  "no such command", "usage:")):
+            pytest.skip(f"kicad-cli 'sym upgrade' unsupported here: {out.strip()[:200]}")
+        pytest.fail(out)

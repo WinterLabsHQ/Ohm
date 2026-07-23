@@ -36,20 +36,24 @@ class CompileResult:
         return not has_errors(self.diagnostics)
 
 
-def compile_source(source: str, path: str = "<string>", *, emit: bool = True) -> CompileResult:
+def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
+                   debug_passes: bool = False) -> CompileResult:
     result = CompileResult()
     program, pdiags = parse(source, path)
     result.diagnostics += pdiags
-    if has_errors(pdiags):
-        return result  # fatal boundary: no analysis on unparsed source
+    # parse errors are not fatal to analysis: resolve + checkers still run on the
+    # recovered partial Program (design §5 best-effort); lower/emit never runs.
     design, rdiags = resolve(program, path)
     result.diagnostics += rdiags
     result.design_high = design
     design, udiags = annotate_units(design, path)
     result.diagnostics += udiags
     result.design = design
+    snapshot = ir.to_json(design) if debug_passes else None
     for checker in CHECKERS:
         result.diagnostics += checker(design, path)
+        if debug_passes and ir.to_json(design) != snapshot:
+            raise AssertionError(f"checker '{checker.__name__}' mutated the design")
     if emit and result.ok:
         low, ldiags = lower(design, path)
         result.low = dataclasses.replace(low, holes=collect_holes(design))

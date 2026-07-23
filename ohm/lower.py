@@ -5,14 +5,14 @@ One deterministic walk from the top module: flatten instances (uniquified as
 slots into nets. Interface-typed endpoints expand member-by-member matched by
 name (type/role legality is Tier-I's job, P6 — lowering only wires).
 
-Net naming (deterministic, order-independent): lexicographically smallest
-port-member label on the net, else smallest pin label.
+Net naming (deterministic, order-independent): shallowest (fewest dots), then
+lexicographically smallest port-member label on the net, else pin label.
 """
 
 from __future__ import annotations
 
 from ohm import ir
-from ohm.diagnostics import Diagnostic
+from ohm.diagnostics import Diagnostic, Span
 
 _PIN, _PORT = "pin", "port"
 
@@ -50,8 +50,20 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         i = ifaces.get(name)
         return [m[0] for m in i.members] if i else []
 
-    def expand(refparts: tuple[str, ...], module: ir.Module, prefix: str) -> list[str]:
-        """Endpoint ref → slot labels (one per member for interface endpoints)."""
+    def expand(
+        refparts: tuple[str, ...], module: ir.Module, prefix: str, create: bool = True
+    ) -> list[str]:
+        """Endpoint ref → slot labels (one per member for interface endpoints).
+
+        create=False (constraint refs): look up existing slots only — never
+        fabricate a slot (a phantom single-node net) for an unconnected pin.
+        """
+
+        def mk(label: str, info: tuple) -> str | None:
+            if create or label in slots:
+                return slot(label, info)
+            return None
+
         base = refparts[0]
         inst = next((i for i in module.instances if i.name == base), None)
         if inst is not None and len(refparts) < 2:
@@ -61,18 +73,21 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             pin_name = refparts[1]
             pin = next((p for p in comp.pins if p.name == pin_name), None)
             pad = pin.pad if pin else None
-            return [slot(f"{prefix}{base}.{pin_name}", (_PIN, f"{prefix}{base}", pin_name, pad))]
+            lbl = mk(f"{prefix}{base}.{pin_name}", (_PIN, f"{prefix}{base}", pin_name, pad))
+            return [lbl] if lbl is not None else []
         if inst is not None and inst.def_ref in mods:
             sub = mods[inst.def_ref]
             port = next((p for p in sub.ports if p.name == refparts[1]), None)
             if port is None:
                 return []
             members = [refparts[2]] if len(refparts) > 2 else iface_members(port.interface)
-            return [slot(f"{prefix}{base}.{port.name}.{m}", (_PORT,)) for m in members]
+            got = (mk(f"{prefix}{base}.{port.name}.{m}", (_PORT,)) for m in members)
+            return [l for l in got if l is not None]
         port = next((p for p in module.ports if p.name == base), None)
         if port is not None:
             members = [refparts[1]] if len(refparts) > 1 else iface_members(port.interface)
-            return [slot(f"{prefix}{base}.{m}", (_PORT,)) for m in members]
+            got = (mk(f"{prefix}{base}.{m}", (_PORT,)) for m in members)
+            return [l for l in got if l is not None]
         return []  # config or unresolvable (already diagnosed by resolver)
 
     def walk(module: ir.Module, prefix: str, stack: frozenset[str]) -> None:
@@ -95,7 +110,17 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
                     if member in rmap:
                         union(lbl, rmap[member])
         for con in module.constraints:
-            labels = [lbl for parts_ in con.ref_args for lbl in expand(parts_, module, prefix)]
+            labels: list[str] = []
+            for parts_ in con.ref_args:
+                got = expand(parts_, module, prefix, create=False)
+                if not got:
+                    diags.append(Diagnostic(
+                        "warning", "I007",
+                        f"constraint references '{'.'.join(parts_)}' which is not"
+                        " connected to any net",
+                        con.span or Span(1, 1, 1, 1), file=path,
+                    ))
+                labels.extend(got)
             raw_constraints.append((con.kind, labels, con.params))
 
     top = mods.get(design.top) if design.top else None
@@ -133,7 +158,8 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
                 key=lambda n: (n.part_ref, n.pin),
             )
         )
-        name = port_labels[0] if port_labels else members[0]
+        # shallowest label wins: a top-level `vin.v` must beat a deep `a.pwr.v`
+        name = min(port_labels or members, key=lambda l: (l.count("."), l))
         root = find(members[0])
         spans = {s for lbl, s in edges if find(lbl) == root}
         conn_spans = tuple(sorted(spans, key=lambda s: (s.line, s.col, s.end_line, s.end_col)))

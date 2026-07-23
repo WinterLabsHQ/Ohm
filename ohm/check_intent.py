@@ -5,7 +5,7 @@ Catches what standard ERC cannot, using declared intent (D3):
   I002  connecting a whole interface to a non-interface endpoint
   I003  multiple drivers (output/power_out) on one net
   I005  swapped members of a `require`-related interface (SDA↔SCL, D+↔D−)
-  I006  net whose endpoints are all inputs (undriven) — warning
+  I006  net with input/power_in endpoints and no driver (undriven) — warning
 
 Connection-shape checks run per module (hierarchical view); driver/undriven
 rules run on the flat nets, the root-cause place — every wiring path lands
@@ -140,10 +140,13 @@ def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                                     f"net '{net.name}' has multiple drivers: {names}",
                                     net_span or drivers[1][1].span or _NO_SPAN,
                                     file=path, related=related))
-        if not net.ports and noderoles and all(p.role in _SINKS for _, p in noderoles):
-            names = ", ".join(f"{n.part_ref}.{p.name}" for n, p in noderoles)
+        # inputs with zero drivers warn even through passives (series-R still floats);
+        # nets touching a port are exempt — external drive possible
+        sinks = [(n, p) for n, p in noderoles if p.role in _SINKS]
+        if not net.ports and sinks and not drivers:
+            names = ", ".join(f"{n.part_ref}.{p.name}" for n, p in sinks)
             diags.append(Diagnostic("warning", "I006",
-                                    f"net '{net.name}' has no driver (all endpoints are inputs): {names}",
-                                    net_span or noderoles[0][1].span or _NO_SPAN,
+                                    f"net '{net.name}' has no driver for its input endpoints: {names}",
+                                    net_span or sinks[0][1].span or _NO_SPAN,
                                     file=path, related=related))
     return diags

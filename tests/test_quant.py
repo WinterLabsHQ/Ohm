@@ -2,6 +2,9 @@
 deterministically; ratings come through ratings_iface; builds stay hermetic
 (ratings frozen into the design)."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,9 +39,23 @@ def test_known_bad_fixture(fixture, code, line):
 
 
 def test_q_checks_deterministic():
-    a = [d.machine() for d in run("q003_overpower.ohm").diagnostics]
-    b = [d.machine() for d in run("q003_overpower.ohm").diagnostics]
-    assert a == b
+    # fresh interpreter per run with different hash seeds: catches set/dict
+    # iteration-order nondeterminism that two in-process runs never would
+    fixture = KNOWN_BAD / "q003_overpower.ohm"
+    snippet = (
+        "from pathlib import Path\n"
+        "from ohm.driver import compile_source\n"
+        f"src = Path({str(fixture)!r}).read_text()\n"
+        f"for d in compile_source(src, {fixture.name!r}).diagnostics:\n"
+        "    print(d.machine())\n"
+    )
+    outs = []
+    for seed in ("0", "1"):
+        r = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True,
+                           env={**os.environ, "PYTHONHASHSEED": seed})
+        assert r.returncode == 0, r.stderr
+        outs.append(r.stdout)
+    assert outs[0] == outs[1]
 
 
 def test_q001_message_has_values():

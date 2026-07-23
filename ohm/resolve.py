@@ -26,6 +26,19 @@ def _suggest(name: str, candidates) -> str | None:
     return f"did you mean '{close[0]}'?" if close else None
 
 
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance, capped early when only <=2 matters."""
+    if abs(len(a) - len(b)) > 2:
+        return 3
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[-1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
 def _value(expr: A.Expr) -> ir.Value | None:
     """AST literal/ref → IR value (attrs, overrides, defaults)."""
     match expr:
@@ -189,7 +202,12 @@ class _Resolver:
                     default = None
                     for k, v in item.call.kwargs:
                         if k == "default":
-                            default = _value(v)
+                            if isinstance(v, (A.QuantityLit, A.Num, A.Str)):
+                                default = _value(v)
+                            else:
+                                self.diags.append(_err(
+                                    "R002", "config default must be a literal value",
+                                    item.span, path))
                     if bind(item.name, "", item.span):
                         configs.append(ir.Config(item.name, type_name, default, item.span))
                 else:
@@ -202,6 +220,7 @@ class _Resolver:
                         poisoned.add(item.name)
                         bind(item.name, "", item.span)
                         continue
+                    self._check_overrides(item, target)
                     overrides = tuple((k, _value(v)) for k, v in item.call.kwargs)
                     if bind(item.name, callee, item.span):
                         instances.append(ir.Instance(item.name, callee, overrides, item.span))
@@ -241,6 +260,29 @@ class _Resolver:
                          tuple(connections), tuple(asserts), tuple(obligations),
                          tuple(constraints), decl.span)
 
+    def _check_overrides(self, item: A.Binding, target: A.ComponentDecl | A.ModuleDecl) -> None:
+        """R012: unknown instance-override kwargs. Modules: strict (declared configs
+        only). Components: new attrs are legal (divider.ohm introduces 'value'),
+        but a name within edit-distance 2 of a declared attr/pin is a typo."""
+        if isinstance(target, A.ModuleDecl):
+            declared = {b.name for b in target.items
+                        if isinstance(b, A.Binding) and b.call.callee.dotted() == "config"}
+            for k, _ in item.call.kwargs:
+                if k not in declared:
+                    self.diags.append(_err(
+                        "R012", f"unknown config '{k}' on module '{target.name}'",
+                        item.span, self.path, _suggest(k, declared)))
+        else:
+            declared = {a.name for a in target.attrs} | {p.name for p in target.pins}
+            for k, _ in item.call.kwargs:
+                if k in declared:
+                    continue
+                close = min(declared, key=lambda n: _edit_distance(k, n), default=None)
+                if close is not None and _edit_distance(k, close) <= 2:
+                    self.diags.append(_err(
+                        "R012", f"unknown attr '{k}' on component '{target.name}'",
+                        item.span, self.path, f"did you mean '{close}'?"))
+
     def _check_ref(self, ref: A.Ref, scope: dict, poisoned: set, module: str,
                    connect: bool = False) -> bool:
         """Validate base binding and (when depth>=2) the pin/member name."""
@@ -271,9 +313,16 @@ class _Resolver:
         member = ref.parts[1]
         if isinstance(target, A.ComponentDecl):
             # pins, declared attrs, and per-instance overrides are all addressable
-            names = {p.name for p in target.pins} | {a.name for a in target.attrs}
+            pin_names = {p.name for p in target.pins}
+            names = pin_names | {a.name for a in target.attrs}
             names |= self._current_overrides.get(base, set())
             kind = f"pin or attr on component '{target.name}'"
+            if connect and member in names and member not in pin_names:
+                self.diags.append(_err(
+                    "R003", f"'{member}' is an attr on component '{target.name}', not a pin"
+                    " — connect endpoints must be pins", ref.span, self.path,
+                    _suggest(member, pin_names)))
+                return False
         elif isinstance(target, A.InterfaceDecl):
             names = {m.name for m in target.members}
             kind = f"member on interface '{target.name}'"

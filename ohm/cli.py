@@ -58,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
                          default="all")
     p_build.add_argument("--dump-ir", choices=["high", "typed", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
+    p_build.add_argument("--debug-passes", action="store_true",
+                         help="print per-pass debug info while compiling")
     p_build.add_argument("--target-kicad", default="7",
                          help="KiCad major version to target (v1 supports: 7)")
     # ponytail: single 'declared' provider today; the flag is the provider seam
@@ -69,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     p_check = sub.add_parser("check", help="run all checks, no emit (fast inner loop)")
     p_check.add_argument("file", nargs="?")
     p_check.add_argument("--json-diagnostics", action="store_true")
+    p_check.add_argument("--debug-passes", action="store_true",
+                         help="print per-pass debug info while compiling")
     p_check.add_argument("--explain", metavar="CODE",
                          help="print the explanation for a diagnostic code and exit")
 
@@ -177,7 +181,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(formatted, end="")
         return 0
-    result = compile_source(source, args.file, emit=(args.command == "build"))
+    emit = args.command == "build"
+    if getattr(args, "debug_passes", False):
+        try:
+            result = compile_source(source, args.file, emit=emit, debug_passes=True)
+        except TypeError:
+            # ponytail: driver hasn't grown debug_passes yet (concurrent change);
+            # flag is accepted but a no-op until it lands
+            result = compile_source(source, args.file, emit=emit)
+    else:
+        result = compile_source(source, args.file, emit=emit)
     _report(result, source, args.json_diagnostics)
     if not result.ok:
         return 1

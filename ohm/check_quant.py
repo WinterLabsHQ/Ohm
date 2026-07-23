@@ -8,6 +8,10 @@ through `ratings_iface` and are frozen in the source — hermetic by constructio
   Q002  declared current draws on a net exceed the driver's imax
   Q003  worst-case (ΔV)²/R power in a 2-pin resistive part exceeds pmax
   Q004  conflicting declared voltages on one net (incl. driver-to-ground shorts)
+  Q005  25degC ambient + P_hi x theta_ja exceeds tmax (coarse thermal, ADR-004)
+
+Bidirectional pins count only through their declarations: with `voltage=` they
+are declared sources (Q001/Q004), with `current=` they join the Q002 draw sum.
 
 Undeclared values are unchecked, by design (D3) — never claim more.
 """
@@ -25,6 +29,7 @@ from ohm.units import Interval
 
 _NO_SPAN = Span(1, 1, 1, 1)
 _ZERO = Interval(Decimal(0), Decimal(0))
+_AMBIENT = Decimal(25)  # fixed 25 degC ambient for Q005 (ADR-004)
 _DRIVER_ROLES = {"power_out", "output"}
 _SINK_ROLES = {"power_in", "input"}
 
@@ -40,7 +45,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
     comps = {c.name: c for c in design.components}
     low, _ = lower(design, path)  # ponytail: recomputed like check_intent; pure + cheap
     part_comp = {p.ref: comps[p.component] for p in low.parts}
-    net_voltage: dict[tuple[str, str], Interval] = {}  # (part_ref, pin) -> net V
+    net_voltage: dict[tuple[str, str], tuple[str, Interval]] = {}  # (part_ref, pin) -> (net, V)
 
     for net in low.nets:
         span = net.conn_spans[0] if net.conn_spans else _NO_SPAN
@@ -54,7 +59,8 @@ def check_quant(design: ir.Design, path: str = "<string>",
         # --- declared net voltage (drivers + ground pins) ---
         declared: list[tuple[str, Interval]] = []
         for node, _, pin in pins:
-            if pin.role in _DRIVER_ROLES and (v := _iv(pin.voltage)) is not None:
+            if (pin.role in _DRIVER_ROLES or pin.role == "bidirectional") \
+                    and (v := _iv(pin.voltage)) is not None:
                 declared.append((f"{node.part_ref}.{pin.name}", v))
             elif pin.role == "ground":
                 declared.append((f"{node.part_ref}.{pin.name}", _ZERO))
@@ -71,7 +77,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
         elif declared:
             hull = Interval(min(v.lo for _, v in declared), max(v.hi for _, v in declared))
             for node, _, pin in pins:
-                net_voltage[(node.part_ref, pin.name)] = hull
+                net_voltage[(node.part_ref, pin.name)] = (net.name, hull)
 
             # --- Q001: over-voltage against each pin's vmax rating ---
             for node, comp, pin in pins:
@@ -86,7 +92,8 @@ def check_quant(design: ir.Design, path: str = "<string>",
         # --- Q002: sum of declared draws vs the driver's imax ---
         drivers = [(node, comp, pin) for node, comp, pin in pins if pin.role in _DRIVER_ROLES]
         draws = [(node, iv) for node, _, pin in pins
-                 if pin.role in _SINK_ROLES and (iv := _iv(pin.current)) is not None]
+                 if (pin.role in _SINK_ROLES or pin.role == "bidirectional")
+                 and (iv := _iv(pin.current)) is not None]
         if len(drivers) == 1 and draws:
             node, comp, pin = drivers[0]
             imax = _iv(provider.ratings(comp, pin).imax)
@@ -106,14 +113,18 @@ def check_quant(design: ir.Design, path: str = "<string>",
         comp = part_comp[part.ref]
         if len(comp.pins) != 2:
             continue
-        value = dict(part.attrs).get("value")
+        attrs = dict(part.attrs)
+        value = attrs.get("value")
         r = quantity_qty(value) if isinstance(value, ir.Quantity) else None
         if r is None or r.dim != "resistance" or r.iv.lo <= 0:
             continue
-        v1 = net_voltage.get((part.ref, comp.pins[0].name))
-        v2 = net_voltage.get((part.ref, comp.pins[1].name))
-        if v1 is None or v2 is None:
+        nv1 = net_voltage.get((part.ref, comp.pins[0].name))
+        nv2 = net_voltage.get((part.ref, comp.pins[1].name))
+        if nv1 is None or nv2 is None:
             continue
+        (net1, v1), (net2, v2) = nv1, nv2
+        if net1 == net2:
+            continue  # both pins on one net: ΔV ≡ 0, not two decorrelated samples
         diff = v1 - v2
         dv_max = max(abs(diff.lo), abs(diff.hi))
         p_hi = dv_max * dv_max / r.iv.lo
@@ -126,4 +137,18 @@ def check_quant(design: ir.Design, path: str = "<string>",
                     f"(ΔV={dv_max}V across {r.iv.lo}ohm) but pmax={pmax.lo}W",
                     pin.span or _NO_SPAN, file=path))
                 break  # one report per part
+
+        # --- Q005: coarse thermal — 25degC ambient + P_hi × theta_ja vs tmax ---
+        theta = attrs.get("theta_ja")
+        tmax_q = attrs.get("tmax")
+        tmax = quantity_qty(tmax_q) if isinstance(tmax_q, ir.Quantity) else None
+        if isinstance(theta, Decimal) and tmax is not None and tmax.dim == "temperature":
+            t_hi = _AMBIENT + p_hi * theta  # ponytail: ambient fixed at 25degC (ADR-004)
+            if t_hi > tmax.iv.lo:
+                diags.append(Diagnostic(
+                    "error", "Q005",
+                    f"part '{part.ref}' ({comp.name}) reaches {t_hi}degC "
+                    f"(25degC ambient + {p_hi}W × theta_ja={theta}degC/W) "
+                    f"but tmax={tmax.iv.lo}degC",
+                    comp.span or _NO_SPAN, file=path))
     return diags

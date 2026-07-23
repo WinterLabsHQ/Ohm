@@ -67,16 +67,27 @@ def test_double_build_byte_identical():
 
 
 # ---------- hermeticity (non-negotiable N1) ----------
-FORBIDDEN = ["socket", "requests", "urllib", "http.client", "subprocess",
-             "time", "random", "datetime"]
+FORBIDDEN = {"socket", "requests", "urllib", "http", "subprocess",
+             "time", "random", "datetime"}
 
 
 def test_no_forbidden_imports_in_build_path():
+    """Real import statements only (ast-based) — prose mentioning a module name
+    in a docstring or EXPLAIN text must not trip the gate."""
+    import ast as pyast
+
     for py in OHM_PKG.rglob("*.py"):
-        text = py.read_text()
-        for mod in FORBIDDEN:
-            assert f"import {mod}" not in text and f"from {mod}" not in text, \
-                f"{py.name} imports forbidden module '{mod}' (breaks hermeticity N1)"
+        tree = pyast.parse(py.read_text())
+        for node in pyast.walk(tree):
+            names = []
+            if isinstance(node, pyast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, pyast.ImportFrom) and node.module:
+                names = [node.module]
+            for name in names:
+                root = name.split(".")[0]
+                assert root not in FORBIDDEN, \
+                    f"{py.name} imports forbidden module '{name}' (breaks hermeticity N1)"
 
 
 # ---------- no output from an errored design (design invariant 4) ----------

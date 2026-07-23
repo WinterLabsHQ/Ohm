@@ -34,7 +34,12 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>") -> str:
     ]
     y = 20
     for p in low.parts:
-        fp = p.package if isinstance(p.package, str) else ""
+        if isinstance(p.package, str):
+            fp = p.package
+        elif isinstance(p.package, ir.GenerateSpec):
+            fp = f"ohm:{p.component}"  # sibling generated .kicad_mod (P11)
+        else:
+            fp = ""
         out.append(
             f'  (text "{p.designator}: {p.component} ({fp}) [{p.ref}]"'
             f' (at 20 {y} 0) (effects (font (size 2 2)))'

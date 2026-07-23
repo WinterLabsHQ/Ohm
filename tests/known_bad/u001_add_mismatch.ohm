@@ -1,0 +1,2 @@
+module M:
+    assert 3.3V + 10ohm <= 5V

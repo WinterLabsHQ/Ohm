@@ -77,7 +77,12 @@ class _ZenImporter:
         return name
 
     def _add_part(self, ref: str, component: str, package: str | None,
-                  attrs: list[tuple[str, str]], pins: list[tuple[str, str | None]]) -> None:
+                  attrs: list[tuple[str, str]], pins: list[tuple[str, str | None]],
+                  node: ast.AST) -> None:
+        if any(p.ref == ref for p in self.parts):
+            self.diags.append(Diagnostic(
+                "error", "Z005", f"duplicate instance name '{ref}'", _span(node), file=self.path))
+            return  # keep first, skip duplicate
         designator = ref  # .zen instance names ARE designators (R1, U1, ...)
         self.parts.append(ir.PartLow(ref, designator, component, package, tuple(attrs)))
         for pin, net in pins:
@@ -92,13 +97,22 @@ class _ZenImporter:
         for key in ("prefix", "mpn", "datasheet"):
             if (v := _str_const(kw.get(key))) is not None:
                 attrs.append((key, v))
-        pins: list[tuple[str, str | None]] = []
+        pins: dict[str, str | None] = {}
         pins_node = kw.get("pins")
         if isinstance(pins_node, ast.Dict):
             for k, v in zip(pins_node.keys, pins_node.values):
                 if (pin := _str_const(k)) is not None:
-                    pins.append((pin, self._net_of(v)))
-        self._add_part(ref, "Component", package, attrs, pins)
+                    if pin in pins:
+                        self.diags.append(Diagnostic(
+                            "warning", "Z006", f"pin '{pin}' bound more than once",
+                            _span(k), file=self.path))
+                    pins[pin] = self._net_of(v)  # last binding wins
+        else:
+            self.diags.append(Diagnostic(
+                "warning", "Z004",
+                f"component '{ref}' has no statically-readable pins dict",
+                _span(call), file=self.path))
+        self._add_part(ref, "Component", package, attrs, list(pins.items()), call)
 
     def _generic_call(self, call: ast.Call, generic: str) -> None:
         kw = {k.arg: k.value for k in call.keywords if k.arg}
@@ -116,7 +130,7 @@ class _ZenImporter:
                 pins.append((key, net))
             elif (s := _str_const(node)) is not None:
                 attrs.append((key, s))
-        self._add_part(ref, component, package, attrs, pins)
+        self._add_part(ref, component, package, attrs, pins, call)
 
     def run(self, source: str) -> ir.IRLow:
         try:

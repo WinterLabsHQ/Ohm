@@ -14,19 +14,32 @@ from ohm.parse import parse
 _INDENT = "    "
 
 
+def _comment_start(line: str) -> int:
+    """Index of the first '#' outside a string literal, or -1.
+
+    Ohm strings have no escapes (STRING: /"[^"\\n]*"/), so an even count of
+    preceding '"' means the '#' is outside any string.
+    """
+    idx = line.find("#")
+    while idx != -1:
+        if line[:idx].count('"') % 2 == 0:
+            return idx
+        idx = line.find("#", idx + 1)
+    return -1
+
+
 def _comments(source: str) -> tuple[dict[int, str], dict[int, str]]:
     """(full_line, trailing) comments keyed by 1-based line number."""
     full, trailing = {}, {}
     for i, line in enumerate(source.splitlines(), start=1):
-        if "#" not in line:
+        idx = _comment_start(line)
+        if idx == -1:
             continue
-        before, _, comment = line.partition("#")
-        if '"' in before and before.count('"') % 2 == 1:
-            continue  # '#' inside a string literal
-        if before.strip():
-            trailing[i] = "#" + comment.rstrip()
+        comment = line[idx:].rstrip()
+        if line[:idx].strip():
+            trailing[i] = comment
         else:
-            full[i] = "#" + comment.rstrip()
+            full[i] = comment
     return full, trailing
 
 
@@ -48,28 +61,28 @@ def _item_line(item: A.ModuleItem) -> str:
             return f"constraint {A.to_src(item.call)}"
 
 
-def _decl_lines(decl: A.Decl) -> list[tuple[int, str]]:
-    """[(source_line, formatted_text)] for a declaration."""
-    out: list[tuple[int, str]] = []
+def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
+    """[(source_line, source_end_line, formatted_text)] for a declaration."""
+    out: list[tuple[int, int, str]] = []
     if isinstance(decl, A.InterfaceDecl):
-        out.append((decl.span.line, f"interface {decl.name}:"))
+        out.append((decl.span.line, decl.span.line, f"interface {decl.name}:"))
         for m in decl.members:
             attrs = "".join(f", {_attr(a)}" for a in m.attrs)
-            out.append((m.span.line, f"{_INDENT}{m.name}: {m.signal_type}{attrs}"))
+            out.append((m.span.line, m.span.end_line, f"{_INDENT}{m.name}: {m.signal_type}{attrs}"))
         for r in decl.requires:
-            out.append((r.span.line, f"{_INDENT}require {A.to_src(r.relation)}"))
+            out.append((r.span.line, r.span.end_line, f"{_INDENT}require {A.to_src(r.relation)}"))
     elif isinstance(decl, A.ComponentDecl):
-        out.append((decl.span.line, f"component {decl.name}:"))
+        out.append((decl.span.line, decl.span.line, f"component {decl.name}:"))
         for a in decl.attrs:
-            out.append((a.span.line, f"{_INDENT}{a.name} = {A.to_src(a.value)}"))
+            out.append((a.span.line, a.span.end_line, f"{_INDENT}{a.name} = {A.to_src(a.value)}"))
         for p in decl.pins:
             attrs = ", ".join(_attr(a) for a in p.attrs)
-            out.append((p.span.line, f"{_INDENT}pin {p.name}: {attrs}"))
+            out.append((p.span.line, p.span.end_line, f"{_INDENT}pin {p.name}: {attrs}"))
     else:
-        out.append((decl.span.line, f"module {decl.name}:"))
+        out.append((decl.span.line, decl.span.line, f"module {decl.name}:"))
         for item in decl.items:
-            out.append((item.span.line, f"{_INDENT}{_item_line(item)}"))
-    return out
+            out.append((item.span.line, item.span.end_line, f"{_INDENT}{_item_line(item)}"))
+    return out[:1] + sorted(out[1:], key=lambda t: t[0])  # body in source order
 
 
 def format_source(source: str, path: str = "<string>") -> tuple[str, list[Diagnostic]]:
@@ -77,18 +90,20 @@ def format_source(source: str, path: str = "<string>") -> tuple[str, list[Diagno
     if has_errors(diags):
         return source, diags
     full, trailing = _comments(source)
-    lines: list[tuple[int, str]] = []
+    lines: list[tuple[int, int, str]] = []
     for decl in program.decls:
         if lines:
-            lines.append((lines[-1][0], ""))  # one blank line between decls
+            lines.append((lines[-1][0], lines[-1][0], ""))  # one blank line between decls
         lines.extend(_decl_lines(decl))
     out: list[str] = []
     pending = sorted(full)
-    for src_line, text in lines:
+    for src_line, end_line, text in lines:
+        indent = text[: len(text) - len(text.lstrip())]
         while pending and pending[0] <= src_line:
-            out.append(full[pending.pop(0)])
-        if src_line in trailing and text:
-            text = f"{text}  {trailing[src_line]}"
+            out.append(indent + full[pending.pop(0)])  # full-line comments keep the item's indent
+        tr = [ln for ln in range(src_line, end_line + 1) if ln in trailing]
+        if tr and text:  # merge trailing comments from every line of a multiline item
+            text = f"{text}  {' '.join(trailing.pop(ln) for ln in tr)}"
         out.append(text)
     out.extend(full[line] for line in pending)  # comments after the last item
     return "\n".join(out) + "\n", diags

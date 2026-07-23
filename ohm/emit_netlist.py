@@ -11,7 +11,18 @@ from ohm import __version__
 
 
 def _q(s: str) -> str:
-    return '"' + s.replace('"', '\\"') + '"'
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _value_text(v: ir.Value) -> str:
+    """Canonical text for an attr value; Quantities render as authored (10kohm +/- 1%)."""
+    if isinstance(v, ir.Quantity):
+        s = f"{v.value}{v.unit}"
+        if v.tol_raw is not None:
+            tval, tunit = v.tol_raw
+            s += f" +/- {tval}{tunit or '%'}"
+        return s
+    return str(v)
 
 
 def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
@@ -19,9 +30,15 @@ def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
     out.append(f"  (design (source {_q(source)}) (tool {_q('ohm ' + __version__)}))")
     out.append("  (components")
     for p in low.parts:
-        fp = p.package if isinstance(p.package, str) else ""
+        if isinstance(p.package, str):
+            fp = p.package
+        elif isinstance(p.package, ir.GenerateSpec):
+            fp = f"ohm:{p.component}"  # sibling generated .kicad_mod (P11)
+        else:
+            fp = ""
         attrs = dict(p.attrs)
-        value = str(attrs.get("mpn", p.component))
+        raw = attrs.get("value")
+        value = _value_text(raw) if raw is not None else str(attrs.get("mpn", p.component))
         out.append(
             f"    (comp (ref {_q(p.designator)}) (value {_q(value)})"
             f" (footprint {_q(fp)}) (fields (field (name \"ohm_ref\") {_q(p.ref)})))"

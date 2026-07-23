@@ -1,0 +1,354 @@
+{
+ "__type__": "Design",
+ "components": [
+  {
+   "__type__": "ComponentDef",
+   "attrs": [
+    [
+     "mpn",
+     "NCP1529ASNT1G"
+    ]
+   ],
+   "name": "NCP1529",
+   "package": "TSOT-23-5",
+   "padmap": [],
+   "pins": [
+    {
+     "__type__": "Pin",
+     "current": null,
+     "imax": null,
+     "name": "EN",
+     "pad": null,
+     "pmax": null,
+     "role": "input",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 24,
+      "end_line": 12,
+      "line": 12
+     },
+     "vmax": null,
+     "voltage": null
+    },
+    {
+     "__type__": "Pin",
+     "current": null,
+     "imax": null,
+     "name": "GND",
+     "pad": null,
+     "pmax": null,
+     "role": "ground",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 25,
+      "end_line": 13,
+      "line": 13
+     },
+     "vmax": null,
+     "voltage": null
+    },
+    {
+     "__type__": "Pin",
+     "current": null,
+     "imax": null,
+     "name": "SW",
+     "pad": null,
+     "pmax": null,
+     "role": "power_out",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 28,
+      "end_line": 14,
+      "line": 14
+     },
+     "vmax": null,
+     "voltage": null
+    },
+    {
+     "__type__": "Pin",
+     "current": null,
+     "imax": null,
+     "name": "VIN",
+     "pad": null,
+     "pmax": null,
+     "role": "power_in",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 38,
+      "end_line": 15,
+      "line": 15
+     },
+     "vmax": {
+      "__type__": "Quantity",
+      "tol_hi": null,
+      "tol_lo": null,
+      "tol_raw": null,
+      "unit": "V",
+      "value": "6.0"
+     },
+     "voltage": null
+    },
+    {
+     "__type__": "Pin",
+     "current": null,
+     "imax": null,
+     "name": "FB",
+     "pad": null,
+     "pmax": null,
+     "role": "input",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 24,
+      "end_line": 16,
+      "line": 16
+     },
+     "vmax": null,
+     "voltage": null
+    }
+   ],
+   "span": {
+    "__type__": "Span",
+    "col": 1,
+    "end_col": 24,
+    "end_line": 16,
+    "line": 9
+   }
+  }
+ ],
+ "interfaces": [
+  {
+   "__type__": "InterfaceDef",
+   "members": [
+    [
+     "scl",
+     "Signal",
+     "bidirectional"
+    ],
+    [
+     "sda",
+     "Signal",
+     "bidirectional"
+    ]
+   ],
+   "name": "I2C",
+   "requires": [],
+   "span": {
+    "__type__": "Span",
+    "col": 1,
+    "end_col": 36,
+    "end_line": 3,
+    "line": 1
+   }
+  },
+  {
+   "__type__": "InterfaceDef",
+   "members": [
+    [
+     "v",
+     "Signal",
+     "power_in"
+    ],
+    [
+     "gnd",
+     "Signal",
+     "ground"
+    ]
+   ],
+   "name": "Power",
+   "requires": [],
+   "span": {
+    "__type__": "Span",
+    "col": 1,
+    "end_col": 29,
+    "end_line": 7,
+    "line": 5
+   }
+  }
+ ],
+ "modules": [
+  {
+   "__type__": "Module",
+   "asserts": [
+    {
+     "__type__": "AssertRec",
+     "expr": {
+      "__type__": "BinOp",
+      "left": {
+       "__type__": "Ref",
+       "parts": [
+        "vin",
+        "v",
+        "voltage"
+       ],
+       "span": {
+        "__type__": "Span",
+        "col": 12,
+        "end_col": 25,
+        "end_line": 24,
+        "line": 24
+       }
+      },
+      "op": "<=",
+      "right": {
+       "__type__": "Ref",
+       "parts": [
+        "reg",
+        "VIN",
+        "vmax"
+       ],
+       "span": {
+        "__type__": "Span",
+        "col": 29,
+        "end_col": 41,
+        "end_line": 24,
+        "line": 24
+       }
+      },
+      "span": {
+       "__type__": "Span",
+       "col": 12,
+       "end_col": 41,
+       "end_line": 24,
+       "line": 24
+      }
+     },
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 41,
+      "end_line": 24,
+      "line": 24
+     }
+    }
+   ],
+   "configs": [],
+   "connections": [
+    {
+     "__type__": "Connection",
+     "left": [
+      "vin",
+      "v"
+     ],
+     "right": [
+      "reg",
+      "VIN"
+     ],
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 22,
+      "end_line": 22,
+      "line": 22
+     }
+    },
+    {
+     "__type__": "Connection",
+     "left": [
+      "vin",
+      "gnd"
+     ],
+     "right": [
+      "reg",
+      "GND"
+     ],
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 22,
+      "end_line": 23,
+      "line": 23
+     }
+    }
+   ],
+   "constraints": [],
+   "instances": [
+    {
+     "__type__": "Instance",
+     "def_ref": "NCP1529",
+     "name": "reg",
+     "overrides": [],
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 21,
+      "end_line": 21,
+      "line": 21
+     }
+    }
+   ],
+   "name": "Supply",
+   "obligations": [
+    {
+     "__type__": "ObligationRec",
+     "args": [
+      [
+       "vout",
+       "v"
+      ]
+     ],
+     "bound": {
+      "__type__": "QuantityLit",
+      "span": {
+       "__type__": "Span",
+       "col": 33,
+       "end_col": 37,
+       "end_line": 25,
+       "line": 25
+      },
+      "tol": null,
+      "unit": "mV",
+      "value": "50"
+     },
+     "kind": "ripple",
+     "op": "<",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 37,
+      "end_line": 25,
+      "line": 25
+     }
+    }
+   ],
+   "ports": [
+    {
+     "__type__": "Port",
+     "interface": "Power",
+     "name": "vin",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 21,
+      "end_line": 19,
+      "line": 19
+     }
+    },
+    {
+     "__type__": "Port",
+     "interface": "Power",
+     "name": "vout",
+     "span": {
+      "__type__": "Span",
+      "col": 5,
+      "end_col": 21,
+      "end_line": 20,
+      "line": 20
+     }
+    }
+   ],
+   "span": {
+    "__type__": "Span",
+    "col": 1,
+    "end_col": 37,
+    "end_line": 25,
+    "line": 18
+   }
+  }
+ ],
+ "top": "Supply"
+}

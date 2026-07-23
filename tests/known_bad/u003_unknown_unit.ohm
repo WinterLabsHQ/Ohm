@@ -1,0 +1,2 @@
+module M:
+    assert 5furlong <= 5V

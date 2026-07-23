@@ -49,8 +49,21 @@ def _parser() -> Lark:
 _CACHED: Lark | None = None
 
 
-def _span(meta) -> Span:
-    return Span(meta.line, meta.column, meta.end_line, meta.end_column)
+def _span(meta, children=None) -> Span:
+    # meta of rules that swallow a trailing _NL (or _DEDENT) bleeds into the next
+    # line; when children are given, take the end from the last positioned child
+    # (AST node or token) so statements/decls end where their source text ends.
+    end_line, end_col = meta.end_line, meta.end_column
+    if children is not None:
+        for c in reversed(children):
+            if isinstance(c, Token):
+                end_line, end_col = c.end_line, c.end_column
+                break
+            span = getattr(c, "span", None)
+            if isinstance(span, Span):
+                end_line, end_col = span.end_line, span.end_col
+                break
+    return Span(meta.line, meta.column, end_line, end_col)
 
 
 def _tok_span(tok: Token) -> Span:
@@ -132,53 +145,53 @@ class _ToAst(Transformer):
     # ---------- interface ----------
     def member_decl(self, meta, children):
         name, sigtype, *attrs = children
-        return A.Member(str(name), str(sigtype), tuple(attrs), _span(meta))
+        return A.Member(str(name), str(sigtype), tuple(attrs), _span(meta, children))
 
     def require_decl(self, meta, children):
-        return A.Require(children[0], _span(meta))
+        return A.Require(children[0], _span(meta, children))
 
     def interface_decl(self, meta, children):
         name, *items = children
         members = tuple(i for i in items if isinstance(i, A.Member))
         requires = tuple(i for i in items if isinstance(i, A.Require))
-        return A.InterfaceDecl(str(name), members, requires, _span(meta))
+        return A.InterfaceDecl(str(name), members, requires, _span(meta, children))
 
     # ---------- component ----------
     def pin_decl(self, meta, children):
         name, *attrs = children
-        return A.PinDecl(str(name), tuple(attrs), _span(meta))
+        return A.PinDecl(str(name), tuple(attrs), _span(meta, children))
 
     def attr_decl(self, meta, children):
         name, value = children
-        return A.Attr(str(name), value, _span(meta))
+        return A.Attr(str(name), value, _span(meta, children))
 
     def component_decl(self, meta, children):
         name, *items = children
         attrs = tuple(i for i in items if isinstance(i, A.Attr))
         pins = tuple(i for i in items if isinstance(i, A.PinDecl))
-        return A.ComponentDecl(str(name), attrs, pins, _span(meta))
+        return A.ComponentDecl(str(name), attrs, pins, _span(meta, children))
 
     # ---------- module ----------
     def binding(self, meta, children):
         name, call = children
-        return A.Binding(str(name), call, _span(meta))
+        return A.Binding(str(name), call, _span(meta, children))
 
     def connect(self, meta, children):
-        return A.Connect(children[0], children[1], _span(meta))
+        return A.Connect(children[0], children[1], _span(meta, children))
 
     def assert_stmt(self, meta, children):
-        return A.AssertStmt(children[0], _span(meta))
+        return A.AssertStmt(children[0], _span(meta, children))
 
     def obligation_stmt(self, meta, children):
         call, op, bound = children
-        return A.ObligationStmt(call, op, bound, _span(meta))
+        return A.ObligationStmt(call, op, bound, _span(meta, children))
 
     def constraint_stmt(self, meta, children):
-        return A.ConstraintStmt(children[0], _span(meta))
+        return A.ConstraintStmt(children[0], _span(meta, children))
 
     def module_decl(self, meta, children):
         name, *items = children
-        return A.ModuleDecl(str(name), tuple(items), _span(meta))
+        return A.ModuleDecl(str(name), tuple(items), _span(meta, children))
 
     # ---------- top ----------
     def top_decl(self, meta, children):
@@ -188,8 +201,16 @@ class _ToAst(Transformer):
         return A.Program(tuple(children))
 
 
-def _syntax_diag(exc: LarkError, path: str) -> Diagnostic:
-    line = max(getattr(exc, "line", 1) or 1, 1)
+def _syntax_diag(exc: LarkError, path: str, source: str = "") -> Diagnostic:
+    raw_line = getattr(exc, "line", None)
+    if raw_line is not None and raw_line <= 0:
+        # unexpected EOF (lark reports -1:-1): point at the last non-empty line
+        src_lines = source.splitlines()
+        last = next((i for i in range(len(src_lines), 0, -1) if src_lines[i - 1].strip()), 1)
+        end_col = len(src_lines[last - 1]) + 1 if last <= len(src_lines) else 1
+        return Diagnostic("error", "P001", "unexpected end of file",
+                          Span(last, 1, last, end_col), file=path)
+    line = max(raw_line or 1, 1)
     col = max(getattr(exc, "column", 1) or 1, 1)
     if isinstance(exc, UnexpectedToken):
         tok = exc.token
@@ -206,12 +227,17 @@ def _syntax_diag(exc: LarkError, path: str) -> Diagnostic:
 def _blocks(source: str) -> list[tuple[int, str]]:
     """Split into (start_line_0based, text) top-level blocks.
 
-    A block starts at a non-blank, non-comment line with no leading whitespace.
+    A block starts at a non-blank, non-comment line with no leading whitespace,
+    unless a paren is still open (a multiline call continuation may sit at col 0).
     """
     blocks: list[tuple[int, list[str]]] = []
+    depth = 0
     for i, line in enumerate(source.splitlines(keepends=True)):
         stripped = line.strip()
-        starts_new = line[:1] not in (" ", "\t") and stripped and not stripped.startswith("#")
+        starts_new = (depth == 0 and line[:1] not in (" ", "\t")
+                      and stripped and not stripped.startswith("#"))
+        code = re.sub(r'"[^"\n]*"', "", line).split("#", 1)[0]
+        depth = max(depth + code.count("(") - code.count(")"), 0)
         if starts_new or not blocks:
             blocks.append((i, [line]))
         else:
@@ -236,7 +262,7 @@ def parse(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnost
             prog = _ToAst().transform(_parser().parse(padded))
             decls.extend(prog.decls)
         except LarkError as exc:
-            diags.append(_syntax_diag(exc, path))
+            diags.append(_syntax_diag(exc, path, padded))
     return A.Program(tuple(decls)), diags
 
 

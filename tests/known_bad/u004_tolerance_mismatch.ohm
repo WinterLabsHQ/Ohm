@@ -1,0 +1,3 @@
+component R:
+    package = "R_0402"
+    value = 10kohm +/- 5V

@@ -271,6 +271,10 @@ def fold_asserts(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
         where = f" (in {label.rstrip('.')})" if label else ""
         for a in module.asserts:
             if not isinstance(a.expr, A.BinOp) or a.expr.op in ("+", "-", "*", "/"):
+                diags.append(Diagnostic(
+                    "error", "C004",
+                    f"assert must be a comparison (<, <=, >, >=, ==, !=){where}: {A.to_src(a.expr)}",
+                    a.span, file=path))
                 continue
             left, right = eval_expr(a.expr.left, env), eval_expr(a.expr.right, env)
             if left is None or right is None or left.dim != right.dim:
