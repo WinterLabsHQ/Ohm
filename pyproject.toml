@@ -18,6 +18,14 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["ohm", "ohm.pkggen", "shared"]
 
+[tool.mypy]
+python_version = "3.12"
+files = ["ohm", "shared"]
+
+[[tool.mypy.overrides]]
+module = "lark.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 110
 target-version = "py312"

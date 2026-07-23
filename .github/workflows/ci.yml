@@ -12,5 +12,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: ruff check ohm/ shared/ tests/
+      - run: mypy
       - run: pytest -q
-      # mypy gate deferred: 39 annotation-level errors to clean first (PROGRESS.md)

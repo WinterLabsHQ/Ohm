@@ -15,7 +15,9 @@ _NET_CTORS = {"Net", "Power", "Ground", "NotConnected"}
 _SKIP_CTORS = {"interface", "config", "load", "Part", "Symbol"}
 
 
-def _span(node: ast.AST) -> Span:
+def _span(node: ast.AST | None) -> Span:
+    if node is None:
+        return Span(1, 1, 1, 1)
     return Span(getattr(node, "lineno", 1), getattr(node, "col_offset", 0) + 1,
                 getattr(node, "end_lineno", 1), getattr(node, "end_col_offset", 0) + 1)
 
@@ -24,7 +26,7 @@ def _call_name(call: ast.Call) -> str | None:
     return call.func.id if isinstance(call.func, ast.Name) else None
 
 
-def _str_const(node: ast.AST) -> str | None:
+def _str_const(node: ast.AST | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
@@ -100,13 +102,13 @@ class _ZenImporter:
         pins: dict[str, str | None] = {}
         pins_node = kw.get("pins")
         if isinstance(pins_node, ast.Dict):
-            for k, v in zip(pins_node.keys, pins_node.values):
-                if (pin := _str_const(k)) is not None:
+            for knode, vnode in zip(pins_node.keys, pins_node.values):
+                if (pin := _str_const(knode)) is not None:
                     if pin in pins:
                         self.diags.append(Diagnostic(
                             "warning", "Z006", f"pin '{pin}' bound more than once",
-                            _span(k), file=self.path))
-                    pins[pin] = self._net_of(v)  # last binding wins
+                            _span(knode), file=self.path))
+                    pins[pin] = self._net_of(vnode)  # last binding wins
         else:
             self.diags.append(Diagnostic(
                 "warning", "Z004",
@@ -119,7 +121,8 @@ class _ZenImporter:
         ref = _str_const(kw.get("name")) or f"U${len(self.parts) + 1}"
         component = generic.rsplit("/", 1)[-1].removesuffix(".zen")
         package = _str_const(kw.get("package")) or _str_const(kw.get("footprint"))
-        attrs, pins = [], []
+        attrs: list[tuple[str, str]] = []
+        pins: list[tuple[str, str | None]] = []
         for key, node in kw.items():
             if key in ("name", "package", "footprint"):
                 continue
@@ -147,7 +150,8 @@ class _ZenImporter:
                 var = stmt.targets[0].id
                 fn = _call_name(stmt.value)
                 if fn == "Module":
-                    self.module_vars[var] = _str_const(stmt.value.args[0]) if stmt.value.args else var
+                    self.module_vars[var] = (_str_const(stmt.value.args[0]) or var) \
+                        if stmt.value.args else var
                 elif fn == "NotConnected":  # no-connect var: pins wired to it are dropped
                     self.nonnet_vars.add(var)
                 elif fn in _NET_CTORS:

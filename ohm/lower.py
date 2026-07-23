@@ -33,10 +33,11 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     inst_of = {m.name: first_by_name(m.instances) for m in design.modules}
     pins_of = {c.name: first_by_name(c.pins) for c in design.components}
 
-    parts: list[tuple[str, ir.ComponentDef]] = []  # (ref, def) in walk order
+    # (ref, def, overrides) in walk order
+    parts: list[tuple[str, ir.ComponentDef, tuple[tuple[str, ir.Value], ...]]] = []
     slots: dict[str, tuple] = {}  # label -> (_PIN, part_ref, pin_name, pad) | (_PORT,)
     parent: dict[str, str] = {}  # union-find
-    edges: list[tuple[str, object]] = []  # (label, connection Span) for diagnostics
+    edges: list[tuple[str, Span]] = []  # (label, connection Span) for diagnostics
     raw_constraints: list[tuple[str, list[str], tuple[str, ...]]] = []  # (kind, labels, params)
 
     def find(x: str) -> str:

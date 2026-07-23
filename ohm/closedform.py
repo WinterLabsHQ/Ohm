@@ -16,14 +16,16 @@ surfaced honestly as info C003 (D3: we check exactly what is declared).
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
 from ohm import ast_nodes as A
 from ohm import ir, units
-from ohm.diagnostics import Diagnostic
+from ohm.diagnostics import Diagnostic, Span
 from ohm.units import DIMENSIONLESS, Interval
 
+_NO_SPAN = Span(1, 1, 1, 1)
 _Q4 = Decimal("0.0001")
 
 
@@ -143,7 +145,7 @@ def microstrip_z0(w: Qty, h: Qty, er: Qty) -> Qty | None:
     return Qty(Interval(z, z), "resistance")
 
 
-FUNCTIONS = {
+FUNCTIONS: dict[str, Callable[..., "Qty | None"]] = {
     "divider": divider,
     "series": series,
     "parallel": parallel,
@@ -173,7 +175,9 @@ class Env:
         if len(parts) == 1:
             return self.configs.get(parts[0])
         inst = self.instances.get(parts[0])
-        comp = self.comps.get(inst.def_ref) if inst is not None else None
+        if inst is None:
+            return None
+        comp = self.comps.get(inst.def_ref)
         if comp is None:
             return None
         if len(parts) == 2:  # inst.attr — override wins, else component attr
@@ -274,14 +278,14 @@ def fold_asserts(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                 diags.append(Diagnostic(
                     "error", "C004",
                     f"assert must be a comparison (<, <=, >, >=, ==, !=){where}: {A.to_src(a.expr)}",
-                    a.span, file=path))
+                    a.span or _NO_SPAN, file=path))
                 continue
             left, right = eval_expr(a.expr.left, env), eval_expr(a.expr.right, env)
             if left is None or right is None or left.dim != right.dim:
                 diags.append(Diagnostic(
                     "info", "C003",
                     f"assert not evaluable at build{where}: {A.to_src(a.expr)}",
-                    a.span, file=path,
+                    a.span or _NO_SPAN, file=path,
                     help="declare the referenced values (config default, component attr, or rating) to make this checkable"))
                 continue
             verdict = fold_compare(a.expr.op, left.iv, right.iv)
@@ -289,12 +293,12 @@ def fold_asserts(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                 diags.append(Diagnostic(
                     "error", "C001",
                     f"assert is false{where}: {A.to_src(a.expr)} — left is {_rng(left)}, right is {_rng(right)}",
-                    a.span, file=path))
+                    a.span or _NO_SPAN, file=path))
             elif verdict == "may":
                 diags.append(Diagnostic(
                     "error", "C002",
                     f"assert may fail over tolerances{where}: {A.to_src(a.expr)} — left is {_rng(left)}, right is {_rng(right)}",
-                    a.span, file=path,
+                    a.span or _NO_SPAN, file=path,
                     help="worst-case interval overlaps the bound; tighten tolerances or the bound"))
         for inst in module.instances:
             sub = mods.get(inst.def_ref)

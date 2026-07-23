@@ -51,6 +51,6 @@ docs are immutable; deviations live here per the session ritual):**
 - **.zen export pins keys**: keyed by pin *name*, which is Zener-spec-correct
   (consumers resolve pads via their own symbol data); audit finding cleared.
 - **Q005 thermal**: ambient fixed at 25 degC (ADR-004 addendum).
-- **mypy gate deferred**: ruff gates CI (clean); mypy reports 39 annotation-level
-  errors (no behavioral defects among them) — typecheck gate lands once
-  annotations are cleaned, tracked here so it doesn't rot.
+- **mypy gate**: ~~deferred~~ CLOSED 2026-07-23 — all annotation errors fixed
+  (65 at default strictness), `[tool.mypy]` pinned in pyproject, gated in CI
+  alongside ruff + pytest.

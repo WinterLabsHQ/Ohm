@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         from ohm.pkggen.packages import PkgError, build
         from ohm.pkggen.symbol import emit_symbol
 
-        kwargs = {}
+        kwargs: dict[str, ir.Value] = {}
         if args.pins:
             kwargs["pins"] = Decimal(args.pins)
         if args.pitch:
@@ -204,29 +204,32 @@ def main(argv: list[str] | None = None) -> int:
         if args.dump_ir:
             node = {"high": result.design_high, "typed": result.design,
                     "low": result.low}[args.dump_ir]
+            assert node is not None  # result.ok gated above; all stages populated
             print(ir.to_json(node))
             return 0
+        low = result.low
+        assert low is not None  # result.ok gated above; build path always lowers
         stem = Path(args.file).stem
         outdir = Path(args.out)
         try:
             outdir.mkdir(parents=True, exist_ok=True)
             if args.emit in ("netlist", "all"):
-                (outdir / f"{stem}.net").write_text(emit_netlist(result.low, args.file))
+                (outdir / f"{stem}.net").write_text(emit_netlist(low, args.file))
             if args.emit in ("kicad", "all"):
-                (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(result.low, args.file))
-                (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(result.low, args.file))
+                (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(low, args.file))
+                (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(low, args.file))
                 _emit_generated_packages(result, outdir)
             if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
                 _emit_generated_packages(result, outdir)
             if args.emit in ("zen", "all"):
                 from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 
-                (outdir / f"{stem}.zen").write_text(emit_zen(result.low, args.file))
+                (outdir / f"{stem}.zen").write_text(emit_zen(low, args.file))
             if args.emit in ("constraints", "all"):
                 from ohm.emit_constraints import emit_constraints
 
                 (outdir / f"{stem}.constraints.json").write_text(
-                    emit_constraints(result.low, args.file))
+                    emit_constraints(low, args.file))
         except OSError as exc:
             print(f"error: cannot write outputs to '{outdir}': {exc.strerror or exc}",
                   file=sys.stderr)

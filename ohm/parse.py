@@ -67,7 +67,7 @@ def _span(meta, children=None) -> Span:
 
 
 def _tok_span(tok: Token) -> Span:
-    return Span(tok.line, tok.column, tok.end_line, tok.end_column)
+    return Span(tok.line or 1, tok.column or 1, tok.end_line or 1, tok.end_column or 1)
 
 
 @v_args(meta=True)

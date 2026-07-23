@@ -130,6 +130,8 @@ def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = Non
     if density not in _FILLETS_GULLWING:
         raise PkgError(f"unknown density '{density}' (least, nominal, most)")
 
+    pads: tuple[PadSpec, ...]
+
     if package_type in _CHIP:
         body_l, body_w, term = _CHIP[package_type]
         toe, heel, side = _FILLETS_CHIP[density]
@@ -161,14 +163,14 @@ def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = Non
         if pins < 4 or pins % 2:
             raise PkgError(f"{package_type} needs an even pin count >= 4, got {pins}")
         half = pins // 2
-        pads = []
+        columns: list[PadSpec] = []
         for i in range(1, half + 1):  # left column, top -> bottom
             y = (_D(2 * i - half - 1) / 2) * pitch
-            pads.append(PadSpec(str(i), -center, y, length, width))
+            columns.append(PadSpec(str(i), -center, y, length, width))
         for j in range(1, half + 1):  # right column, bottom -> top (counterclockwise)
             y = (_D(half + 1 - 2 * j) / 2) * -pitch
-            pads.append(PadSpec(str(half + j), center, -y, length, width))
-        pads = tuple(pads)
+            columns.append(PadSpec(str(half + j), center, -y, length, width))
+        pads = tuple(columns)
 
     max_y = max(abs(p.y) for p in pads)
     cw = (2 * center + length + _D("0.5")).quantize(_GRID)

@@ -39,8 +39,17 @@ def _edit_distance(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _value(expr: A.Expr) -> ir.Value | None:
-    """AST literal/ref → IR value (attrs, overrides, defaults)."""
+def _dotted(expr: A.Expr | None, default: str = "") -> str:
+    """The dotted name of a Ref expression, or `default` for anything else."""
+    return expr.dotted() if isinstance(expr, A.Ref) else default
+
+
+def _value(expr: A.Expr) -> ir.Value:
+    """AST literal/ref → IR value (attrs, overrides, defaults).
+
+    Unrepresentable expressions degrade to their canonical source text (a str):
+    the name stays addressable and downstream evaluation treats it as opaque.
+    """
     match expr:
         case A.Str():
             return expr.value
@@ -52,11 +61,11 @@ def _value(expr: A.Expr) -> ir.Value | None:
         case A.Ref():
             return expr.dotted()
         case A.Call() if expr.callee.dotted() == "generate":
-            ptype = expr.args[0].dotted() if expr.args else ""
+            ptype = _dotted(expr.args[0]) if expr.args else ""
             kwargs = tuple((k, _value(v)) for k, v in expr.kwargs)
             return ir.GenerateSpec(ptype, kwargs)
         case _:
-            return None
+            return A.to_src(expr)
 
 
 class _Resolver:
@@ -156,7 +165,10 @@ class _Resolver:
 
             def qty(key: str) -> ir.Quantity | None:
                 v = amap.get(key)
-                return _value(v) if isinstance(v, A.QuantityLit) else None
+                if not isinstance(v, A.QuantityLit):
+                    return None
+                val = _value(v)
+                return val if isinstance(val, ir.Quantity) else None
 
             pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"),
                                qty("pmax"), qty("voltage"), qty("current"), p.span))
@@ -190,7 +202,7 @@ class _Resolver:
             if isinstance(item, A.Binding):
                 callee = item.call.callee.dotted()
                 if callee == "io":
-                    iface = item.call.args[0].dotted() if item.call.args else ""
+                    iface = _dotted(item.call.args[0]) if item.call.args else ""
                     if not isinstance(self.symbols.get(iface), A.InterfaceDecl):
                         self.diags.append(
                             _err("R005", f"io(...) needs an interface type, got '{iface}'", item.span,
@@ -203,7 +215,7 @@ class _Resolver:
                     if bind(item.name, iface, item.span):
                         ports.append(ir.Port(item.name, iface, item.span))
                 elif callee == "config":
-                    type_name = item.call.args[0].dotted() if item.call.args else ""
+                    type_name = _dotted(item.call.args[0]) if item.call.args else ""
                     default = None
                     for k, v in item.call.kwargs:
                         if k == "default":
@@ -364,7 +376,7 @@ class _Resolver:
             # inst.port.member: resolve the port's io(Interface) and validate the member
             sub = next(i for i in target.items if isinstance(i, A.Binding) and i.name == member)
             if sub.call.callee.dotted() == "io":
-                iface = self.symbols.get(sub.call.args[0].dotted() if sub.call.args else "")
+                iface = self.symbols.get(_dotted(sub.call.args[0]) if sub.call.args else "")
                 if isinstance(iface, A.InterfaceDecl):
                     mnames = {m.name for m in iface.members}
                     if ref.parts[2] not in mnames:
