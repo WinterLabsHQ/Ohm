@@ -13,6 +13,27 @@ from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.emit_netlist import emit_netlist
 
 
+def _emit_generated_packages(result, outdir: Path) -> None:
+    """P-GEN-PACKAGE: write .kicad_mod/.kicad_sym for every generate(...) component."""
+    from ohm.ir import GenerateSpec
+    from ohm.pkggen.footprint import emit_footprint
+    from ohm.pkggen.packages import build_from_spec
+    from ohm.pkggen.pindata_iface import DeclaredPinData
+    from ohm.pkggen.symbol import emit_symbol
+
+    comps = {c.name: c for c in result.design.components}
+    done = set()
+    for part in result.low.parts:
+        comp = comps[part.component]
+        if not isinstance(comp.package, GenerateSpec) or comp.name in done:
+            continue
+        done.add(comp.name)
+        model = build_from_spec(comp.package, comp.name)  # S006 already gated errors
+        (outdir / f"{comp.name}.kicad_mod").write_text(emit_footprint(model))
+        pins = DeclaredPinData().pin_table(comp)
+        (outdir / f"{comp.name}.kicad_sym").write_text(emit_symbol(comp.name, pins))
+
+
 def _report(result, source: str, as_json: bool) -> None:
     if as_json:
         print(json.dumps([{
@@ -50,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("lsp", help="LSP server over stdio (editor integration)")
 
+    p_gen = sub.add_parser("gen-package", help="generate .kicad_mod/.kicad_sym standalone")
+    p_gen.add_argument("type", help="package type, e.g. SOIC, TSSOP, SOT23, CHIP0603")
+    p_gen.add_argument("--pins", type=int, default=0)
+    p_gen.add_argument("--pitch", help="pitch in mm, e.g. 1.27")
+    p_gen.add_argument("--density", choices=["least", "nominal", "most"], default="nominal")
+    p_gen.add_argument("--name", help="output name (default <TYPE>-<pins>)")
+    p_gen.add_argument("--out", default=".")
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
@@ -69,6 +98,34 @@ def main(argv: list[str] | None = None) -> int:
         from ohm.lsp import serve
 
         return serve()
+
+    if args.command == "gen-package":
+        from decimal import Decimal
+
+        from ohm.pkggen.footprint import emit_footprint
+        from ohm.pkggen.packages import PkgError, build
+        from ohm.pkggen.symbol import emit_symbol
+
+        kwargs = {}
+        if args.pins:
+            kwargs["pins"] = Decimal(args.pins)
+        if args.pitch:
+            from ohm.ir import Quantity
+
+            kwargs["pitch"] = Quantity(Decimal(args.pitch), "mm")
+        kwargs["density"] = args.density
+        try:
+            model = build(args.type, kwargs, args.name)
+        except PkgError as exc:
+            print(f"error[S006]: {exc}", file=sys.stderr)
+            return 1
+        outdir = Path(args.out)
+        outdir.mkdir(parents=True, exist_ok=True)
+        (outdir / f"{model.name}.kicad_mod").write_text(emit_footprint(model))
+        pins = [(p.id, f"P{p.id}", "passive") for p in model.pads]
+        (outdir / f"{model.name}.kicad_sym").write_text(emit_symbol(model.name, pins))
+        print(f"generated {model.name}.kicad_mod + {model.name}.kicad_sym in {outdir}")
+        return 0
 
     source = Path(args.file).read_text()
 
@@ -103,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.emit in ("kicad", "all"):
             (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(result.low, args.file))
             (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(result.low, args.file))
+            _emit_generated_packages(result, outdir)
         if args.emit in ("zen", "all"):
             from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 

@@ -79,6 +79,7 @@ EXPLAIN: dict[str, str] = {
     "S003": "The pin↔pad loop on a generated package is incomplete: a pin has no pad, or a generated pad has no pin.",
     "S004": "Some pins map to pads and some do not, against an external footprint. Map all pins or none.",
     "S005": "A component must declare a package: a footprint id string or generate(...).",
+    "S006": "The generate(...) spec cannot be built: unknown package type (see the v1 catalog), bad pin count, or bad parameter.",
     "I001": "Connecting two different interface types. Connect same-type interfaces, or wire members explicitly to adapt.",
     "I002": "Connecting a whole interface to a single pin/member. Connect member-to-member or interface-to-interface.",
     "I003": "Multiple drivers (output/power_out) on one net. Exactly one driver may drive a net.",

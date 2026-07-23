@@ -41,6 +41,15 @@ def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnost
                 seen[pin.pad] = pin
 
         if isinstance(comp.package, ir.GenerateSpec):
+            # S006: the generate(...) spec itself must be buildable (family/params)
+            from ohm.pkggen.packages import PkgError, build_from_spec
+
+            try:
+                build_from_spec(comp.package)
+            except PkgError as exc:
+                diags.append(_d("error", "S006",
+                                f"invalid generate(...) on '{comp.name}': {exc}",
+                                comp.span, path))
             # generated package: pad set is declared ⇒ close the pin↔pad loop fully
             kwargs = dict(comp.package.kwargs)
             n = int(kwargs.get("pins", 0))
