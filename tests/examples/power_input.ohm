@@ -1,0 +1,37 @@
+# Example: a DC power-input front end.
+#   barrel jack -> resettable polyfuse -> TVS clamp + bulk cap -> Power out
+# plus a CR2032 coin cell as a backup source. Uses std.interfaces,
+# std.connectors, std.passives and std.protection.
+
+use std.interfaces
+use std.connectors
+use std.passives
+use std.protection
+
+module PowerInput:
+    out = io(PowerOut)                    # protected rail leaving this block
+    vin = config(Voltage, default=12.0V)  # nominal adapter voltage
+
+    dcin  = DCBarrelJack()
+    fuse  = PolyFuse(imax=2A)             # resettable inrush/fault limit
+    tvs   = ESDDiode(vmax=24V)            # standoff/clamp — from your TVS datasheet
+    cbulk = Capacitor(value=100uF)        # bulk hold-up
+    bak   = CoinCellHolder(voltage=3.0V)  # backup cell
+
+    # VBUS -> fuse -> protected node (tvs cathode / bulk cap / output)
+    dcin.VBUS ~ fuse.P1
+    fuse.P2   ~ tvs.K
+    tvs.A     ~ dcin.GND
+    fuse.P2   ~ cbulk.P1
+    cbulk.P2  ~ dcin.GND
+    fuse.P2   ~ out.v
+    dcin.GND  ~ out.gnd
+
+    # backup cell sits on the ground reference; its + would OR into the rail
+    # through a Schottky in a real design (diode omitted — topology sketch).
+    bak.MINUS ~ out.gnd
+
+    # adapter voltage must stay under the clamp's standoff
+    assert vin <= tvs.vmax                # 12V <= 24V
+
+    constraint netclass(out.v, "power")

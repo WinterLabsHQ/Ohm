@@ -1,0 +1,94 @@
+# Ohm standard library — RF front-end blocks (std.rf)
+#
+# Antennas, baluns, SAW filters and radio modules. RF parts are dominated by
+# part-specific pinouts and by layout rules the netlist cannot express, so this
+# domain is deliberately split:
+#   - ChipAntenna / Balun have a real verified footprint on disk -> declared.
+#   - SAWFilter / RFModule pinouts are wholly part-specific -> TEMPLATE comment
+#     blocks: copy, adapt to your datasheet, and the compiler checks the result.
+#
+# Honesty (N3):
+# - RF LAYOUT IS NOT ENCODED. Antenna keep-out/ground-clearance, 50-ohm feed
+#   geometry, balun/matching placement and via-fencing decide whether the radio
+#   works AT ALL, and none of it lives in the netlist. Ohm checks connectivity;
+#   you own the RF layout. Add `constraint impedance(net, 50ohm)` where you want
+#   the router to hold a controlled-impedance feed.
+# - NO invented ratings; string footprints verified against the .kicad_mod on
+#   disk (pad ids + XY grepped).
+
+# 2-pin chip antenna. Default footprint Johanson_2450AT18x100 (2.45 GHz) — pads
+# read off disk: pad 1 @ (-1.45,0) = RF feed, pad 2 @ (1.45,0) = ground/tuning.
+# Many chip antennas are single-feed: one RF pin plus a ground/tuning pad.
+# PLACEMENT IS LAYOUT-CRITICAL AND NOT ENCODED — board-edge location, ground
+# keep-out under/around the element, and the matching network are datasheet
+# rules the netlist cannot carry. Verify the feed/ground pad against your part.
+component ChipAntenna:
+    package = "RF_Antenna:Johanson_2450AT18x100"
+    designator_prefix = "AE"
+    pin FEED: role=passive, pad=1
+    pin GND:  role=ground,  pad=2
+
+# 6-pin unbalanced-to-balanced balun (+ often impedance match). Default
+# footprint Balun_Johanson_1.6x0.8mm — pads read off disk in two columns:
+#   pad 1,2,3 @ x=-0.41   pad 4,5,6 @ x=0.41
+# The roster below is the COMMON Johanson single-ended/differential arrangement,
+# but BALUN PIN ORDER VARIES BY PART (STMicro BALF, Murata LDB and each Johanson
+# series differ) — you MUST verify pads 1..6 against your datasheet before
+# layout. Only "there is one unbalanced port, one balanced pair, the rest ground"
+# is near-universal; which pad is which is not.
+component Balun:
+    package = "RF_Converter:Balun_Johanson_1.6x0.8mm"
+    designator_prefix = "FL"
+    pin UNBAL: role=passive, pad=1
+    pin GND1:  role=ground,  pad=2
+    pin BAL1:  role=passive, pad=3
+    pin BAL2:  role=passive, pad=4
+    pin GND2:  role=ground,  pad=5
+    pin GND3:  role=ground,  pad=6
+
+# ---------------------------------------------------------------------------
+# TEMPLATE — SAWFilter (SAW / BAW RF filter)
+# ---------------------------------------------------------------------------
+# SAW pinouts are WHOLLY PART-SPECIFIC: the number of grounds, whether the part
+# is single-ended or balanced in/out, and pad numbering all change per part.
+# There is no honest standard footprint or pinout to default. Copy this block,
+# set `package` to your datasheet footprint, and map every pad — the compiler
+# checks the pin<->pad loop for the effective package (S002/S003).
+#
+# Canonical 6-pin single-ended roster (adapt to your part):
+#     component SAWFilter:
+#         package = "..."                 # your SAW footprint (or generate(...))
+#         designator_prefix = "FL"
+#         pin IN:   role=input,  pad=1     # RF input
+#         pin GND1: role=ground, pad=2
+#         pin GND2: role=ground, pad=3
+#         pin OUT:  role=output, pad=4     # RF output
+#         pin GND3: role=ground, pad=5
+#         pin GND4: role=ground, pad=6
+# Balanced (differential) SAWs replace IN/OUT with IN+/IN-/OUT+/OUT- pairs —
+# take the exact roster and pad map from the datasheet.
+
+# ---------------------------------------------------------------------------
+# TEMPLATE — RFModule (BLE / WiFi / LoRa / cellular module)
+# ---------------------------------------------------------------------------
+# Radio modules are PART-SPECIFIC: pin counts run from ~20 to ~50+ and every
+# vendor differs. No standard footprint or pinout to default. Copy this block,
+# set `package` to the module's footprint (many live under RF_Module.pretty),
+# and map every pad. Bring the module's host interface up as typed ports in
+# YOUR module (io(UART)/io(SPI4)/io(Power)) and connect to these pins.
+#
+# Canonical minimal roster (adapt / extend to your module's datasheet):
+#     component RFModule:
+#         package = "RF_Module:..."       # e.g. Ai-Thinker-Ra-01-LoRa
+#         designator_prefix = "U"
+#         pin VDD:  role=power_in,     pad=1    # supply (check tolerance!)
+#         pin GND:  role=ground,       pad=2
+#         pin ANT:  role=passive,      pad=3    # RF feed to antenna/50-ohm line
+#         pin TX:   role=output,       pad=4    # host UART (module TX -> MCU RX)
+#         pin RX:   role=input,         pad=5    # host UART (MCU TX -> module RX)
+#         pin SCK:  role=input,         pad=6    # host SPI clock (module = slave)
+#         pin MOSI: role=input,         pad=7
+#         pin MISO: role=output,       pad=8
+#         pin NSS:  role=input,         pad=9    # SPI chip-select
+# The ANT pin's 50-ohm feed and antenna keep-out are LAYOUT, not netlist — see
+# the domain note above.

@@ -166,3 +166,94 @@ component Jumper:
     designator_prefix = "JP"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
+
+# ---------- appended: DIP switch, rotary encoder, buzzer, SSR/DPDT relays ----------
+
+# 4-position DIP switch = 4 independent SPST poles = 8 pads. Footprint: KiCad
+# SW_DIP_SPSTx04 (SMD, W8.61mm), pads 1..8 read from the .kicad_mod. Like a DIP
+# IC the pads wrap around: pole i closes pad i <-> pad (9-i). Verified against
+# the footprint geometry (pad i and pad 9-i share the same Y, opposite X):
+#   pole 1 = pad 1 <-> pad 8,  pole 2 = pad 2 <-> pad 7,
+#   pole 3 = pad 3 <-> pad 6,  pole 4 = pad 4 <-> pad 5.
+# A<n>/B<n> are the two ends of pole n (a switch has no polarity).
+component DIPSwitch_4:
+    package = "Button_Switch_SMD:SW_DIP_SPSTx04_Slide_9.78x12.34mm_W8.61mm_P2.54mm"
+    designator_prefix = "SW"
+    pin A1: role=passive, pad=1
+    pin B1: role=passive, pad=8
+    pin A2: role=passive, pad=2
+    pin B2: role=passive, pad=7
+    pin A3: role=passive, pad=3
+    pin B3: role=passive, pad=6
+    pin A4: role=passive, pad=4
+    pin B4: role=passive, pad=5
+
+# Incremental rotary encoder with integrated push switch (Alps EC11 standard —
+# the ubiquitous "EC11" panel encoder). Footprint:
+# RotaryEncoder_Alps_EC11E-Switch_Vertical_H20mm; pad ids A/B/C/S1/S2/MP read
+# from the .kicad_mod (non-numeric string pads). Quadrature: A and B are the two
+# phase outputs, C is their common; SW1/SW2 are the push-switch terminals; MNT is
+# the metal shell / mounting posts (the .kicad_mod has two pads both id "MP" —
+# usually tied to GND for shielding). Tie C to GND for the common EC11 wiring.
+component RotaryEncoder_EC11:
+    package = "Rotary_Encoder:RotaryEncoder_Alps_EC11E-Switch_Vertical_H20mm"
+    designator_prefix = "EC"
+    pin A:   role=output,  pad=A     # quadrature phase A
+    pin B:   role=output,  pad=B     # quadrature phase B
+    pin C:   role=passive, pad=C     # quadrature common (usually GND)
+    pin SW1: role=passive, pad=S1    # push switch
+    pin SW2: role=passive, pad=S2    # push switch
+    pin MNT: role=passive, pad=MP    # shell / mounting (shield, often GND)
+
+# 2-pin buzzer (magnetic or piezo). Footprint: CUI magnetic transducer, pads
+# 1..2 read from the .kicad_mod. N3 / VENDOR-VARIABLE polarity: DC magnetic /
+# electromagnetic buzzers ARE polarized — the marked terminal (commonly pad 1)
+# is "+"; piezo transducers are NON-polarized. Pins named P1/P2 (neutral);
+# confirm the +/- assignment against your buzzer's datasheet.
+component Buzzer:
+    package = "Buzzer_Beeper:MagneticBuzzer_CUI_CST-931RP-A"
+    designator_prefix = "BZ"
+    pin P1: role=passive, pad=1      # marked "+" on polarized DC types
+    pin P2: role=passive, pad=2
+
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): DPDT relay
+#
+# Unlike Relay_SPDT (KiCad ships a documented, geometry-paired SANYOU_SRD
+# symbol), the DPDT footprints in Relay_THT.pretty (Omron G6S-2, Schrack RT2,
+# Fujitsu FTR-F1C, ...) do NOT carry a per-pad function map on disk — KiCad's
+# DPDT symbols name every pin "~", so coil-vs-COM/NO/NC per pad is NOT
+# confidently decodable without the specific datasheet. So this is a TEMPLATE:
+# copy it, set package= to your DPDT footprint id, and map the 8 pads using the
+# canonical IEC roster below (A1/A2 = coil; pole 1 = 11/12/14, pole 2 = 21/22/24,
+# where x1 = COM, x2 = NC, x4 = NO). The compiler then checks your pin<->pad map.
+#
+#   component Relay_DPDT:
+#       package = <Relay_THT:YourDPDTFootprint>
+#       designator_prefix = "K"
+#       pin COIL_A: role=passive, pad=<A1 pad>
+#       pin COIL_B: role=passive, pad=<A2 pad>
+#       pin COM1:   role=passive, pad=<pole-1 common pad>
+#       pin NC1:    role=passive, pad=<pole-1 NC pad>
+#       pin NO1:    role=passive, pad=<pole-1 NO pad>
+#       pin COM2:   role=passive, pad=<pole-2 common pad>
+#       pin NC2:    role=passive, pad=<pole-2 NC pad>
+#       pin NO2:    role=passive, pad=<pole-2 NO pad>
+#
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): solid-state relay (SSR)
+#
+# SSR pinouts are family-specific: DC-input opto side + output side, in DIP-4/6,
+# SIP or discrete packages, with different pad orders (Panasonic AQH, IXYS
+# CPC1xxx, Omron G3VM, ...). No de-facto standard pad map -> TEMPLATE. Copy,
+# set package= to your SSR footprint, and map the input (LED) and output pads
+# from the datasheet. N3: input trigger current and output voltage/current
+# ratings are per-part datasheet facts — declare them per instance.
+#
+#   component RelaySSR:
+#       package = <Relay_SMD:YourSSRFootprint>   # or generate(SOIC, pins=8)
+#       designator_prefix = "K"
+#       pin IN_P:  role=input,   pad=<anode pad>     # opto-input LED "+"
+#       pin IN_N:  role=input,   pad=<cathode pad>   # opto-input LED "-"
+#       pin OUT1:  role=passive, pad=<load pad 1>    # output switch terminal
+#       pin OUT2:  role=passive, pad=<load pad 2>    # output switch terminal

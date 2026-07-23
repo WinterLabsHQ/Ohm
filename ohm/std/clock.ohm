@@ -1,0 +1,92 @@
+# Ohm standard library — clock / timing sources (std.clock)
+#
+# Active oscillators, ceramic resonators, and the 555 timer. These are the
+# blocks that generate or gate a clock/timing edge.
+#
+# Honesty (N3):
+# - Concrete pads are given ONLY where the pinout is a genuine industry
+#   standard (the 4-pin XO pinout, the 555). Where a vendor varies a function
+#   (XO pin 1 is EN on some parts, NC on others) the comment says so.
+# - No invented ratings: supply/drive/frequency limits are datasheet territory,
+#   declared per instance (see tests/examples/blinky_555.ohm for a vmax on the
+#   555 instance), never baked in here.
+# - Every string footprint "Lib:Name" is a real KiCad id verified on disk, and
+#   pad= matches the pad ids read from the .kicad_mod.
+
+# Active crystal oscillator / TCXO — 4-pad SMD. Near-universal 4-pin XO pinout,
+# assigned by PAD NUMBER regardless of package geometry:
+#   pad 1 = EN / Tri-state  (drives OUT to Hi-Z when low; NC on many fixed parts)
+#   pad 2 = GND
+#   pad 3 = OUT
+#   pad 4 = VDD
+# Pin 1 varies EN vs NC by part — check YOUR datasheet; role=input covers both
+# (an unused/NC pin 1 simply stays unconnected). Footprint pads 1..4 verified in
+# Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm.kicad_mod.
+component Oscillator_XO_4:
+    package = "Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm"
+    designator_prefix = "U"
+    freq = 0Hz
+    pin EN:  role=input,     pad=1
+    pin GND: role=ground,    pad=2
+    pin OUT: role=output,    pad=3
+    pin VDD: role=power_in,  pad=4
+
+# Ceramic resonator with built-in load caps — 3 pins. Standard 3-terminal
+# arrangement: the two outer terminals are the resonator element ends, the
+# centre terminal is GND (the integrated capacitors' common).
+#   pad 1 = element terminal   pad 2 = GND   pad 3 = element terminal
+# Footprint pads 1..3 verified in Resonator-3Pin_W7.0mm_H2.5mm.kicad_mod.
+component CeramicResonator3:
+    package = "Crystal:Resonator-3Pin_W7.0mm_H2.5mm"
+    designator_prefix = "Y"
+    freq = 0Hz
+    pin P1:  role=passive, pad=1
+    pin GND: role=ground,  pad=2
+    pin P2:  role=passive, pad=3
+
+# The 555 timer — genuine fixed industry-standard DIP/SOIC-8 pinout, identical
+# across NE555/TLC555/LMC555 and every second-source:
+#   1=GND  2=TRIG  3=OUT  4=RESET  5=CTRL  6=THRES  7=DISCH  8=VCC
+# DISCH is the open-collector discharge transistor (role=output). TRIG, THRES
+# and CTRL are high-impedance ANALOG comparator/reference pins: they sense a
+# voltage off the RC timing network and neither source nor sink a logic level,
+# so they are role=passive (an `input` role would falsely demand a logic driver
+# on every RC node — the 555's whole point). RESET is a real logic input.
+# Footprint via generate(SOIC).
+component Timer555:
+    package = generate(SOIC, pins=8)
+    designator_prefix = "U"
+    pin GND:   role=ground,    pad=1
+    pin TRIG:  role=passive,   pad=2
+    pin OUT:   role=output,    pad=3
+    pin RESET: role=input,     pad=4
+    pin CTRL:  role=passive,   pad=5
+    pin THRES: role=passive,   pad=6
+    pin DISCH: role=output,    pad=7
+    pin VCC:   role=power_in,  pad=8
+
+# TEMPLATE — PLL / clock generator (Si5351, ICS/IDT parts, etc.): no standard
+# pinout, every part differs. Copy, rename, and fill pads from the datasheet;
+# the compiler checks your adaptation (P12 flow).
+#
+# component ClockGenerator:
+#     package = generate(SSOP, pins=<N>)
+#     designator_prefix = "U"
+#     pin VDD:  role=power_in,  pad=<n>
+#     pin GND:  role=ground,    pad=<n>
+#     pin XA:   role=input,     pad=<n>     # reference xtal/clk in
+#     pin XB:   role=output,    pad=<n>
+#     pin CLK0: role=output,    pad=<n>     # ...CLK1, CLK2 per part
+#     pin SDA:  role=bidirectional, pad=<n> # I2C control (if any)
+#     pin SCL:  role=input,     pad=<n>
+
+# TEMPLATE — clock buffer / fan-out (one clock in, N matched copies out): pinout
+# is entirely part-specific. Adapt from the datasheet.
+#
+# component ClockBuffer:
+#     package = generate(TSSOP, pins=<N>)
+#     designator_prefix = "U"
+#     pin VDD:  role=power_in,  pad=<n>
+#     pin GND:  role=ground,    pad=<n>
+#     pin CLKIN: role=input,    pad=<n>
+#     pin Q0:   role=output,    pad=<n>     # ...Q1..Qn matched copies

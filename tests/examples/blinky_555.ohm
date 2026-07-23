@@ -1,0 +1,50 @@
+# Example: the classic 555 astable "blinky". VCC -> R_A -> R_B -> C timing
+# network sets the flash rate; OUT drives an indicator resistor. A mounting hole
+# and a test point on OUT round it out. Uses std.interfaces + std.clock +
+# std.passives only.
+
+use std.interfaces
+use std.clock
+use std.passives
+use std.pcb
+
+module Blinky555:
+    pwr  = io(Power)
+    vcc  = config(Voltage, default=5.0V)
+    vmax = config(Voltage, default=16.0V)   # 555 supply ceiling for THIS build
+
+    u1 = Timer555(vmax=vmax)                 # vmax declared on the 555 instance
+    r_a = Resistor(value=10kohm)             # charge path R_A
+    r_b = Resistor(value=47kohm)             # discharge path R_B
+    c_t = Capacitor(value=10uF)              # timing cap
+    c_ctrl = Capacitor(value=10nF)           # CTRL decoupling (standard 555 use)
+    r_led = Resistor(value=330ohm)           # off-board indicator series R
+
+    h1 = MountingHole()                      # 0-pin mechanical feature
+    tp_out = TestPoint()                     # probe the OUT net
+
+    # power
+    pwr.v   ~ u1.VCC
+    pwr.gnd ~ u1.GND
+    pwr.v   ~ u1.RESET                        # RESET tied high = run
+
+    # astable timing: VCC - R_A - (DISCH) - R_B - (THRES/TRIG) - C - GND
+    pwr.v   ~ r_a.P1
+    r_a.P2  ~ u1.DISCH
+    u1.DISCH ~ r_b.P1
+    r_b.P2  ~ u1.THRES
+    u1.THRES ~ u1.TRIG
+    u1.TRIG ~ c_t.P1
+    c_t.P2  ~ pwr.gnd
+
+    # CTRL decoupling cap to GND
+    u1.CTRL ~ c_ctrl.P1
+    c_ctrl.P2 ~ pwr.gnd
+
+    # output indicator + probe point
+    u1.OUT  ~ r_led.P1
+    r_led.P2 ~ pwr.gnd
+    u1.OUT  ~ tp_out.PAD
+
+    # VCC stays within the 555's declared supply ceiling
+    assert vcc <= vmax

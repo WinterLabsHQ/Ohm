@@ -20,6 +20,7 @@ ELECTROMECH_BLOCKS = [
     "Header_1x02", "Header_1x03", "Header_1x04", "Header_1x05", "Header_1x06",
     "Header_1x08", "Header_1x10", "Header_2x03", "Header_2x05",
     "TactSwitch4", "SlideSwitch", "Relay_SPDT", "Jumper",
+    "DIPSwitch_4", "RotaryEncoder_EC11", "Buzzer",  # expansion additions
 ]
 CONNECTIVITY_BLOCKS = [
     "CANTransceiver_SOIC8", "RS485Transceiver_SOIC8",

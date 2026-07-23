@@ -1,0 +1,63 @@
+# Example: AC-in front end + a small user-interface panel.
+#
+#   AC ── BridgeRectifier ── DC rail ── Buzzer driven low-side by a pre-biased
+#   (digital) NPN; a rotary encoder and a 4-way DIP switch form the UI, broken
+#   out to the host MCU on one header. Exercises std.discrete (BridgeRectifier,
+#   DigitalTransistor_NPN) and std.electromech (RotaryEncoder_EC11, DIPSwitch_4,
+#   Buzzer) together with typed std.interfaces ports.
+
+use std.interfaces
+use std.discrete
+use std.passives
+use std.electromech
+
+module AcAndUi:
+    ac   = io(Power)          # mains/AC input (v/gnd carry the two AC legs)
+    pwr  = io(Power)          # rectified DC rail
+    drive = io(AnalogIn)      # MCU GPIO that sounds the buzzer
+    ui   = io(Power)          # convenience gnd/rail reference for the UI header
+
+    vlogic = config(V, default=3.3V)
+    vrail  = config(V, default=5V)
+
+    br  = BridgeRectifier()
+    q1  = DigitalTransistor_NPN()   # internal base R: no external gate/base resistor
+    bz  = Buzzer()
+    enc = RotaryEncoder_EC11()
+    sw  = DIPSwitch_4()
+    j1  = Header_1x08()             # UI breakout to the host MCU
+
+    # rectifier: two AC legs in, DC pair out
+    ac.v   ~ br.AC1
+    ac.gnd ~ br.AC2
+    br.VP  ~ pwr.v
+    br.VN  ~ pwr.gnd
+
+    # low-side buzzer driver: rail -> buzzer -> collector; base from the GPIO
+    pwr.v ~ bz.P1
+    bz.P2 ~ q1.C
+    q1.E  ~ pwr.gnd
+    drive.sig ~ q1.B
+    drive.gnd ~ pwr.gnd
+
+    # rotary encoder: common + shell + one switch leg to GND, phases/button out
+    enc.C   ~ ui.gnd
+    enc.MNT ~ ui.gnd
+    enc.SW2 ~ ui.gnd
+    enc.A   ~ j1.P1
+    enc.B   ~ j1.P2
+    enc.SW1 ~ j1.P3
+
+    # DIP switch: one end of each pole to GND, the other read by the MCU
+    sw.B1 ~ ui.gnd
+    sw.B2 ~ ui.gnd
+    sw.B3 ~ ui.gnd
+    sw.B4 ~ ui.gnd
+    sw.A1 ~ j1.P4
+    sw.A2 ~ j1.P5
+    sw.A3 ~ j1.P6
+    sw.A4 ~ j1.P7
+
+    ui.gnd ~ pwr.gnd
+
+    assert vlogic <= vrail

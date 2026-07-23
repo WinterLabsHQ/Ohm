@@ -46,3 +46,149 @@ component PhotoTransistor:
     designator_prefix = "Q"
     pin C: role=passive, pad=1
     pin E: role=passive, pad=2
+
+# --- Displays / emitters / IR (N3 note) -------------------------------------
+# Addressable-LED, RGB-LED-common, and 7-segment pin FUNCTION-to-pad maps are
+# part/vendor-specific (WS2812B vs SK6812 vs APA102; which RGB pad is common;
+# every 7-seg part numbers its pins differently). The footprint ids below are
+# verified on disk (pad ids read from the .kicad_mod), but the function map is
+# the datasheet-family default — VERIFY against YOUR part before layout.
+
+# WS2812B-class addressable RGB LED, 4-pad PLCC4 5050 body.
+# Footprint verified: LED_SMD:LED_WS2812B_PLCC4_5.0x5.0mm_P3.2mm.kicad_mod
+# (descr: "Addressable RGB LED NeoPixel") — pad ids 1,2,3,4 present on disk.
+# Genuine WS2812B / SK6812 5050 datasheet pinout:
+#   pad1 = VDD, pad2 = DOUT, pad3 = GND, pad4 = DIN.
+# Chain DOUT -> next DIN. HONESTY: SK6812 shares this exact 5050 map, but
+# APA102/SK9822 are a DIFFERENT part (clocked 2-wire: CI/DI + CO/DO, not this
+# single-wire DIN/DOUT) — do NOT reuse this block for APA102. Smaller WS2812B
+# variants (-2020, -Mini PLCC4) keep the function map but different geometry;
+# override package= to match. VDD/data ratings from datasheet at instantiation.
+component AddressableLED:
+    package = "LED_SMD:LED_WS2812B_PLCC4_5.0x5.0mm_P3.2mm"
+    designator_prefix = "D"
+    pin VDD:  role=power_in, pad=1
+    pin DOUT: role=output, pad=2
+    pin GND:  role=ground, pad=3
+    pin DIN:  role=input, pad=4
+
+# 4-pad PLCC4 RGB LED, common-ANODE. Footprint verified:
+# LED_SMD:LED_RGB_Wuerth-PLCC4_3.2x2.8mm_150141M173100.kicad_mod — pads 1..4.
+# COM is the shared anode (tie to V+); R/G/B are the per-colour cathodes (sink
+# through a resistor each). HONESTY: which physical pad is the common, and the
+# R/G/B pad order, VARY BY VENDOR — this maps common=pad1, R=2, G=3, B=4 as a
+# default; VERIFY pad order against your datasheet and override if needed.
+component RGBLED_CommonAnode:
+    package = "LED_SMD:LED_RGB_Wuerth-PLCC4_3.2x2.8mm_150141M173100"
+    designator_prefix = "D"
+    pin COM: role=power_in, pad=1
+    pin R:   role=passive, pad=2
+    pin G:   role=passive, pad=3
+    pin B:   role=passive, pad=4
+
+# 4-pad PLCC4 RGB LED, common-CATHODE. Same verified footprint / pad ids as the
+# common-anode block. COM is the shared cathode (tie to GND); R/G/B are the
+# per-colour anodes (source through a resistor each). Same vendor pad-order
+# caveat as above — VERIFY.
+component RGBLED_CommonCathode:
+    package = "LED_SMD:LED_RGB_Wuerth-PLCC4_3.2x2.8mm_150141M173100"
+    designator_prefix = "D"
+    pin COM: role=ground, pad=1
+    pin R:   role=passive, pad=2
+    pin G:   role=passive, pad=3
+    pin B:   role=passive, pad=4
+
+# Single-digit 7-segment display, common-CATHODE. Footprint verified:
+# Display_7Segment:CC56-12GWA.kicad_mod (Kingbright 0.56" class) — pad ids
+# 1..12 present on disk. Function map below is the very common 5161/5611-class
+# 10-active-pin arrangement (two shared common pins), pads 11/12 mechanical/NC:
+#   a=7 b=6 c=4 d=2 e=1 f=9 g=10 dp=5, common cathodes = pads 3 and 8.
+# HONESTY: 7-seg pin numbering is ENTIRELY part-specific — this is the
+# datasheet-family default; VERIFY every segment against YOUR part's datasheet.
+component SevenSegment:
+    package = "Display_7Segment:CC56-12GWA"
+    designator_prefix = "DS"
+    pin A:   role=passive, pad=7
+    pin B:   role=passive, pad=6
+    pin C:   role=passive, pad=4
+    pin D:   role=passive, pad=2
+    pin E:   role=passive, pad=1
+    pin F:   role=passive, pad=9
+    pin G:   role=passive, pad=10
+    pin DP:  role=passive, pad=5
+    pin CC1: role=ground, pad=3
+    pin CC2: role=ground, pad=8
+    pin NC1: role=nc, pad=11
+    pin NC2: role=nc, pad=12
+
+# Single-digit 7-segment display, common-ANODE. Footprint verified:
+# Display_7Segment:CA56-12EWA.kicad_mod — pads 1..12 present on disk. Same
+# 5161/5611-class segment map as the common-cathode block; the two shared
+# common pins are the ANODES here (tie to V+, sink each segment through a
+# resistor). Same part-specific caveat — VERIFY against your datasheet.
+component SevenSegment_CA:
+    package = "Display_7Segment:CA56-12EWA"
+    designator_prefix = "DS"
+    pin A:   role=passive, pad=7
+    pin B:   role=passive, pad=6
+    pin C:   role=passive, pad=4
+    pin D:   role=passive, pad=2
+    pin E:   role=passive, pad=1
+    pin F:   role=passive, pad=9
+    pin G:   role=passive, pad=10
+    pin DP:  role=passive, pad=5
+    pin CA1: role=power_in, pad=3
+    pin CA2: role=power_in, pad=8
+    pin NC1: role=nc, pad=11
+    pin NC2: role=nc, pad=12
+
+# 2-pin IR emitter LED (e.g. 940nm), A/K in an SMD LED body. Footprint reused
+# from the verified LED_SMD:LED_0805_2012Metric (pads 1,2). Per KiCad LED
+# convention pad 1 = cathode. IR emitters are also commonly THT (3mm/5mm) —
+# override package= for those. Forward current/voltage from datasheet.
+component IREmitter:
+    package = "LED_SMD:LED_0805_2012Metric"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+# 3-pin IR receiver / demodulator module (TSOP-class, e.g. TSOP382x / TSOP48xx
+# / VS1838B). Footprint verified: OptoDevice:Vishay_MINIMOLD-3Pin.kicad_mod
+# (descr: "IR Receiver Vishay TSOP-xxxx, MINIMOLD package") — pad ids 1,2,3.
+# Vishay/most TSOP modules number the leads (front view, dome facing you)
+# 1 = OUT, 2 = GND, 3 = VS(Vcc) — the near-universal pinout mapped below.
+# HONESTY: a few vendors/older TSOP17xx differ (some swap OUT/VS) — VERIFY on
+# your datasheet. Supply/OUT ratings from datasheet at instantiation.
+component IRReceiver:
+    package = "OptoDevice:Vishay_MINIMOLD-3Pin"
+    designator_prefix = "U"
+    pin OUT: role=output, pad=1
+    pin GND: role=ground, pad=2
+    pin VS:  role=power_in, pad=3
+
+# TEMPLATE — LCD / OLED display module (character or graphic, e.g. HD44780
+# 16x2, SSD1306 128x64). NOT declared: pin count and function map are entirely
+# part-specific (parallel 4/8-bit vs I2C vs SPI; backlight/reset/CS/DC pins
+# differ per module). Copy, set package= to the real module footprint, and
+# declare pins/pads/roles from the datasheet — the compiler checks your map.
+# component MyOLED_SSD1306:
+#     package = "Display:Adafruit_SSD1306"
+#     designator_prefix = "U"
+#     pin VCC: role=power_in, pad=...
+#     pin GND: role=ground,  pad=...
+#     pin SCL: role=bidirectional, pad=...
+#     pin SDA: role=bidirectional, pad=...
+
+# TEMPLATE — opto-isolated gate driver (e.g. isolated MOSFET/IGBT driver in a
+# wide-body SOIC, ACPL/HCPL/Si823x class). NOT declared: input side, output
+# side, and supply rails differ per part (single vs split output, DESAT/FAULT
+# pins, active-Miller-clamp). Copy and declare from the datasheet.
+# component MyGateDriver_ISO:
+#     package = generate(SOIC, pins=8)
+#     designator_prefix = "U"
+#     pin ANODE:  role=input, pad=...
+#     pin CATHODE:role=input, pad=...
+#     pin VCC:    role=power_in, pad=...
+#     pin VOUT:   role=output, pad=...
+#     pin VEE:    role=power_in, pad=...
+#     pin GND:    role=ground, pad=...

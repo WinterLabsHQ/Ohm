@@ -1,0 +1,55 @@
+# Small addressable LED panel: 3 chained WS2812B-class pixels (DOUT->DIN),
+# per-pixel decoupling caps, a series resistor on the data line, one RGB LED,
+# and power ports. Demonstrates std.opto against real verified footprints.
+use std.interfaces
+use std.opto
+use std.passives
+
+module LEDPanel:
+    pwr = io(Power)
+
+    # WS2812B-class pixel supply rail: nominal, and datasheet ceiling.
+    vsupply = config(Quantity, default=5.0V)
+    vmax = config(Quantity, default=5.5V)
+
+    px1 = AddressableLED()
+    px2 = AddressableLED()
+    px3 = AddressableLED()
+
+    # ~330R series resistor on the incoming data line (common WS2812 practice).
+    rdata = Resistor(value=330ohm +/- 5%)
+
+    # One 100nF decoupling cap per pixel.
+    c1 = Capacitor(value=100nF)
+    c2 = Capacitor(value=100nF)
+    c3 = Capacitor(value=100nF)
+
+    # A discrete common-anode RGB indicator, driven from the same rail.
+    rgb = RGBLED_CommonAnode()
+
+    # Power + ground to every pixel.
+    pwr.v ~ px1.VDD
+    pwr.v ~ px2.VDD
+    pwr.v ~ px3.VDD
+    pwr.gnd ~ px1.GND
+    pwr.gnd ~ px2.GND
+    pwr.gnd ~ px3.GND
+
+    # Decoupling across each pixel's rail.
+    px1.VDD ~ c1.P1
+    c1.P2 ~ px1.GND
+    px2.VDD ~ c2.P1
+    c2.P2 ~ px2.GND
+    px3.VDD ~ c3.P1
+    c3.P2 ~ px3.GND
+
+    # Data chain: panel input -> series R -> px1 -> px2 -> px3.
+    rdata.P2 ~ px1.DIN
+    px1.DOUT ~ px2.DIN
+    px2.DOUT ~ px3.DIN
+
+    # RGB common anode to the rail.
+    pwr.v ~ rgb.COM
+
+    # The pixel VDD rail must stay within the pixel's datasheet ceiling.
+    assert vsupply <= vmax

@@ -1,0 +1,188 @@
+# Ohm standard library — connectors (std.connectors)
+#
+# Power inlets, wire-to-board, comms, card, RF and battery connectors. These
+# are CATEGORIES with real, verified KiCad footprints; swap `package=` per
+# instance for your actual part's footprint.
+#
+# Honesty (N3):
+# - NO invented ratings: a jack's current rating or a coin cell's voltage is
+#   YOUR datasheet's fact — declare it per instance (e.g.
+#   j = DCBarrelJack(imax=2A), bt = CoinCellHolder(voltage=3.0V)).
+# - Every "Lib:Name" is a KiCad footprint id verified to exist on disk; every
+#   pad id below was read from the actual .kicad_mod file. Where a footprint
+#   repeats a pad id across several physical pads (RF flange, connector shell,
+#   coin-cell clips) they are ONE net — one pin maps to that id.
+# - Where a pad->function mapping is vendor-variable (card-detect switches,
+#   Ethernet pinout under PoE, coin-cell polarity) the comment says so —
+#   verify against your datasheet before layout.
+
+# ---------- screw terminal blocks ----------
+# Generic 5.08 mm rising-clamp screw terminals (bornier). Pads 1..N read from
+# the .kicad_mod. Terminals carry whatever you wire through them: role=passive.
+
+component TerminalBlock_2:
+    package = "TerminalBlock:TerminalBlock_bornier-2_P5.08mm"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+component TerminalBlock_3:
+    package = "TerminalBlock:TerminalBlock_bornier-3_P5.08mm"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+
+# ---------- DC barrel jack ----------
+# Generic horizontal DC power jack. Pads 1..3 read from the .kicad_mod. Per
+# KiCad's generic BarrelJack convention and the pad geometry: pad 1 (center
+# through-pin) = tip/center = VBUS; pad 2 (sleeve tab) = ring/sleeve = GND;
+# pad 3 = the normally-closed switch contact (shorts to VBUS with no plug
+# inserted, opens when a plug is present). CENTER-POSITIVE is the common
+# convention but IS vendor/part-specific — verify plug polarity for your jack.
+component DCBarrelJack:
+    package = "Connector_BarrelJack:BarrelJack_Horizontal"
+    designator_prefix = "J"
+    pin VBUS: role=power_out, pad=1
+    pin GND:  role=ground,   pad=2
+    pin SW:   role=passive,  pad=3
+
+# ---------- JST XH wire-to-board ----------
+# JST XH series, 2.50 mm pitch, vertical THT. Pads 1..N read from the
+# .kicad_mod. Wire-to-board headers carry whatever you wire: role=passive.
+component JST_XH_2:
+    package = "Connector_JST:JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+component JST_XH_3:
+    package = "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+
+# ---------- RJ45 (8P8C) ----------
+# Connfly DS1128, shielded through-hole 8P8C with 2 status LEDs. Pads read
+# from the .kicad_mod: signal 1..8, LED pads 9..12, and TWO shell pads both
+# id "SH" (one net — one SHIELD pin maps to it). Signal pins are the MDI
+# contacts, role=passive.
+# 10/100BASE-T MDI convention: 1,2 = TX pair, 3,6 = RX pair, 4,5,7,8 unused
+# (used for the spare pairs / PoE) — but pair assignment and PoE polarity are
+# vendor/application-specific: VERIFY against your magnetics/PHY.
+# MagJack NOTE: magnetics-integrated RJ45s (Hanrun HR911105A, Amphenol
+# RJHSE5380 …) add 30-60+ pads (transformer center-taps, LED pads on the
+# isolated side) and DO NOT share this pin map — swap package= and remap.
+component RJ45:
+    package = "Connector_RJ:RJ45_Connfly_DS1128-09-S8xx-S_Horizontal"
+    designator_prefix = "J"
+    pin P1:     role=passive, pad=1
+    pin P2:     role=passive, pad=2
+    pin P3:     role=passive, pad=3
+    pin P4:     role=passive, pad=4
+    pin P5:     role=passive, pad=5
+    pin P6:     role=passive, pad=6
+    pin P7:     role=passive, pad=7
+    pin P8:     role=passive, pad=8
+    pin LED1:   role=passive, pad=9
+    pin LED2:   role=passive, pad=10
+    pin LED3:   role=passive, pad=11
+    pin LED4:   role=passive, pad=12
+    pin SHIELD: role=ground,  pad=SH
+
+# ---------- microSD card socket ----------
+# Hirose DM3AT-SF-PEJM5, push-push microSD. Pads read from the .kicad_mod:
+# contacts 1..9 in a row, card-detect return pad 10, and shell pad "11"
+# (FOUR physical shell pads share id "11" — one SHIELD pin, one net).
+# Pins 1..8 follow the SD Physical Layer spec contact numbering (4-bit SD
+# mode). Pads 9/10 form the mechanical card-detect switch — its
+# normally-open/closed sense is vendor-variable, verify before use.
+# NOTE: SD-mode vs SPI-mode reuse the same pins (CMD=DI, DAT0=DO, DAT3=CS,
+# CLK=SCLK) — the electrical map is identical; only the protocol differs.
+component MicroSD:
+    package = "Connector_Card:microSD_HC_Hirose_DM3AT-SF-PEJM5"
+    designator_prefix = "J"
+    pin DAT2:    role=bidirectional, pad=1
+    pin CD_DAT3: role=bidirectional, pad=2
+    pin CMD:     role=bidirectional, pad=3
+    pin VDD:     role=power_in,      pad=4
+    pin CLK:     role=input,         pad=5
+    pin VSS:     role=ground,        pad=6
+    pin DAT0:    role=bidirectional, pad=7
+    pin DAT1:    role=bidirectional, pad=8
+    pin CD:      role=passive,       pad=9
+    pin CD_COM:  role=passive,       pad=10
+    pin SHIELD:  role=ground,        pad=11
+
+# ---------- 3.5 mm audio jack (switched TRS) ----------
+# CUI SJ1-3525N, horizontal THT, switched TRS. Named pads read from the
+# .kicad_mod: T=tip, R=ring, S=sleeve, TN=tip-normal switch, RN=ring-normal
+# switch. The N contacts are the internal normalling switches (closed to
+# T/R when no plug is inserted, opened by an inserted plug) — the classic
+# jack-detect / signal-interrupt contacts. Sleeve is ground in the common
+# headphone convention but that is an application choice: role=passive.
+component AudioJack_3p5:
+    package = "Connector_Audio:Jack_3.5mm_CUI_SJ1-3525N_Horizontal"
+    designator_prefix = "J"
+    pin TIP:    role=passive, pad=T
+    pin RING:   role=passive, pad=R
+    pin SLEEVE: role=passive, pad=S
+    pin TIP_SW: role=passive, pad=TN
+    pin RNG_SW: role=passive, pad=RN
+
+# ---------- RF coaxial ----------
+# SMA edge/vertical jack (Amphenol 132134). Pads read from the .kicad_mod:
+# center pin id "1" = signal; the FOUR flange/ground posts all share id "2"
+# (one GND net). Keep the signal net at 50 ohm — set the constraint yourself.
+component SMAConnector:
+    package = "Connector_Coaxial:SMA_Amphenol_132134_Vertical"
+    designator_prefix = "J"
+    pin SIG: role=passive, pad=1
+    pin GND: role=ground,  pad=2
+
+# U.FL / IPEX micro-coax (Hirose U.FL-R-SMT-1). Pads read from the
+# .kicad_mod: center pad id "1" = signal; the two ground pads share id "2".
+component UFL:
+    package = "Connector_Coaxial:U.FL_Hirose_U.FL-R-SMT-1_Vertical"
+    designator_prefix = "J"
+    pin SIG: role=passive, pad=1
+    pin GND: role=ground,  pad=2
+
+# ---------- coin cell / battery holders ----------
+# Keystone 3002 SMD CR2032 holder. Pads read from the .kicad_mod: the two
+# side retention clips share id "1"; the center base plate = id "2".
+# POLARITY IS HOLDER-SPECIFIC: this follows KiCad's battery symbol pairing
+# (pad 1 = +, pad 2 = -). VERIFY which face of your holder is positive
+# before layout. Declare cell voltage per instance (e.g. voltage=3.0V).
+component CoinCellHolder:
+    package = "Battery:BatteryHolder_Keystone_3002_1x2032"
+    designator_prefix = "BT"
+    pin PLUS:  role=power_out, pad=1
+    pin MINUS: role=ground,    pad=2
+
+# Generic 2-terminal battery / source (Keystone 1058 CR2032 holder, pads 1/2
+# read from the .kicad_mod). + = power_out, - = ground; same KiCad pad
+# polarity convention (pad 1 = +, pad 2 = -) — VERIFY on your holder.
+component Battery2:
+    package = "Battery:BatteryHolder_Keystone_1058_1x2032"
+    designator_prefix = "BT"
+    pin PLUS:  role=power_out, pad=1
+    pin MINUS: role=ground,    pad=2
+
+# ---------- IC socket ----------
+# DIP-8 THT socket (Package_DIP DIP-8-16_W7.62mm_Socket footprint — a
+# socketed 8-lead DIP land pattern). Pads 1..8 read from the .kicad_mod;
+# this is a SOCKET land, so the DIP part drops into it — pin==pad straight
+# through, role=passive (the socketed IC owns the real pin functions).
+component ICSocket_DIP8:
+    package = "Package_DIP:DIP-8-16_W7.62mm_Socket"
+    designator_prefix = "XU"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+    pin P7: role=passive, pad=7
+    pin P8: role=passive, pad=8

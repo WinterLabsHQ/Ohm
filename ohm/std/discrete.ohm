@@ -80,3 +80,85 @@ component TVS_Bi:
     designator_prefix = "D"
     pin T1: role=passive, pad=1
     pin T2: role=passive, pad=2
+
+# ---------- appended: bridge rectifier, pre-biased & JFET, thyristors ----------
+# Same N3 discipline: concrete pads only where a paired KiCad symbol or the
+# package datasheet fixes them; genuinely vendor-variable pinouts are TEMPLATEs.
+
+# Full-wave bridge rectifier — 4 terminals: two AC inputs, a DC pair.
+# Footprint: Diotec ABS (SMD); pads 1..4 read from the .kicad_mod. The
+# pad->terminal map is taken from KiCad's paired symbol Diode_Bridge:ABS2
+# (verified: pad 1 = "+", pad 2 = "-", pad 3 = "~", pad 4 = "~"). Marking
+# convention: the two "~" leads are AC in, "+"/"-" are the rectified DC out.
+# VENDOR-VARIABLE: the +/-/~/~ package marking is universal, but WHICH pad
+# number carries each terminal changes by package (e.g. Vishay KBU is
+# 1=+ 2=~ 3=~ 4=-). Verify the pad->terminal map against YOUR bridge datasheet.
+component BridgeRectifier:
+    package = "Diode_SMD:Diode_Bridge_Diotec_ABS"
+    designator_prefix = "D"
+    pin VP:  role=passive, pad=1    # V+  DC output ("+")
+    pin VN:  role=passive, pad=2    # V-  DC return ("-")
+    pin AC1: role=passive, pad=3    # AC input ("~")
+    pin AC2: role=passive, pad=4    # AC input ("~")
+
+# Pre-biased ("digital") BJT: an NPN/PNP with integrated base (and often
+# base-emitter) resistors inside the SOT-23. SAME SOT-23-3 pinout as BJT_NPN:
+# pin 1 = Base (through the internal R), pin 2 = Emitter, pin 3 = Collector
+# (DTC/DTA, PDTC/PDTA, RN12xx families).
+# N3: internal bias R (R1/R2) and current gain set the input threshold and are
+# per-part datasheet facts (RR/gain per datasheet) — declare them per instance.
+component DigitalTransistor_NPN:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin B: role=input,   pad=1      # base via internal bias R
+    pin E: role=passive, pad=2
+    pin C: role=passive, pad=3
+
+component DigitalTransistor_PNP:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin B: role=input,   pad=1      # base via internal bias R
+    pin E: role=passive, pad=2
+    pin C: role=passive, pad=3
+
+# N-channel JFET, SOT-23-3. VENDOR-VARIABLE pinout — this follows the common
+# Fairchild MMBFJ11x / J11x family, verified against KiCad symbol
+# Transistor_FET:MMBFJ113 (-> BSR56): pin 1 = Drain, pin 2 = Source, pin 3 = Gate.
+# WARNING: other SOT-23 JFETs differ (e.g. BF545 is 1=Source 2=Drain 3=Gate).
+# ALWAYS verify the D/S/G-to-pad order against YOUR JFET datasheet before layout.
+component JFET_N:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin D: role=passive, pad=1
+    pin S: role=passive, pad=2
+    pin G: role=input,   pad=3
+
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): thyristor / SCR (gate, anode, cathode)
+#
+# No confidently-standard SMD SCR pinout exists: small-signal SCRs ship in
+# SOT-23, SOT-89, TO-92 and TO-252 with DIFFERENT G/A/K orders per family
+# (MCR100 TO-92 is 1=K 2=G 3=A; a SOT-23 X0202 differs again). So this is a
+# TEMPLATE (P12 flow) — copy it, set package= to your part's footprint id, and
+# map the three pads from its datasheet. The compiler then checks your map.
+#
+#   component Thyristor_SCR:
+#       package = generate(SOT23, pins=3)     # or the real Lib:Name footprint
+#       designator_prefix = "Q"
+#       pin G: role=input,   pad=1            # gate  — pads: DATASHEET, not this
+#       pin A: role=passive, pad=2            # anode
+#       pin K: role=passive, pad=3            # cathode
+#
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): TRIAC (MT1, MT2, gate)
+#
+# Same story as the SCR: MT1/MT2/gate ordering is package- and family-specific
+# (TO-220/TO-252/SOT-223 all differ; the tab is usually MT2). TEMPLATE — copy,
+# set package= to your footprint, and map MT1 / MT2 / G from the datasheet.
+#
+#   component TRIAC:
+#       package = generate(SOT23, pins=3)     # or the real Lib:Name footprint
+#       designator_prefix = "Q"
+#       pin MT1: role=passive, pad=1          # pads: DATASHEET, not these
+#       pin MT2: role=passive, pad=2          # tab terminal on most packages
+#       pin G:   role=input,   pad=3          # gate

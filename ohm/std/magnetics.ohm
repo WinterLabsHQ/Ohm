@@ -1,0 +1,62 @@
+# Ohm standard library — coupled magnetics (std.magnetics)
+#
+# Coupled-winding parts: common-mode chokes, signal/isolation transformers,
+# and coupled inductors. These are CATEGORIES, not parts — package, turns
+# ratio, impedance and ratings all come from YOUR datasheet at instantiation.
+#
+# Honesty (N3):
+# - Pads are concrete only where the winding-to-pad geometry is genuinely
+#   standard for the class; the physical pad layout was read off the .kicad_mod
+#   on disk (pad ids + XY grepped), noted per block.
+# - DOT POLARITY IS NOT ENCODED. Which winding end is the dot (the phasing that
+#   decides common-mode vs differential behaviour, and transformer polarity)
+#   VARIES BY SERIES and is invisible to the compiler. You MUST take it from the
+#   datasheet — Ohm checks connectivity, not phase.
+# - NO invented ratings: no default value/vmax/imax. Declare per instance.
+
+# 4-pad common-mode choke: two coupled windings sharing one core.
+# Default footprint L_CommonModeChoke_Coilcraft_0805USB — pads read off disk:
+#   pad 1 @ (-0.435,-0.835)  pad 4 @ (0.435,-0.835)   <- winding 1 (top row)
+#   pad 2 @ (-0.435, 0.835)  pad 3 @ (0.435, 0.835)   <- winding 2 (bottom row)
+# So the standard 4-pad arrangement is 1&4 = one winding, 2&3 = the other,
+# with the two IN ends on the left (1,2) and the two OUT ends on the right (4,3).
+# PIN ORDER AND DOT POLARITY VARY BY SERIES — verify pads 1/2/3/4 against your
+# part before layout (a Murata DLW or TDK ACM may number the far ends differently).
+component CommonModeChoke:
+    package = "Inductor_SMD:L_CommonModeChoke_Coilcraft_0805USB"
+    designator_prefix = "L"
+    pin IN1:  role=passive, pad=1
+    pin OUT1: role=passive, pad=4
+    pin IN2:  role=passive, pad=2
+    pin OUT2: role=passive, pad=3
+
+# Basic 4-pin signal/isolation transformer: primary P1/P2, secondary S1/S2.
+# Default footprint Transformer_Toroid_Horizontal_D10.5mm_Amidon-T37 — pads
+# read off disk: pad 1 @ (0,0), pad 2 @ (13,0) on one row (primary); pad 3 @
+# (0,-6), pad 4 @ (13,-6) on the other (secondary). A hand-wound toroid: the
+# primary/secondary split across the two rows is the convention, nothing more.
+# TURNS RATIO is yours to declare (record it via mpn/value at instantiation);
+# DOT POLARITY varies by winding direction and is NOT encoded.
+component Transformer4:
+    package = "Transformer_THT:Transformer_Toroid_Horizontal_D10.5mm_Amidon-T37"
+    designator_prefix = "T"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin S1: role=passive, pad=3
+    pin S2: role=passive, pad=4
+
+# 4-pin coupled inductor (two magnetically coupled windings on one core) for
+# SEPIC / Cuk / multi-output flyback / coupled buck. Default footprint
+# L_Bourns_SRF1260 — pads read off disk in two columns:
+#   pad 1 @ (-1.715,-4.25)  pad 4 @ (-1.715,4.25)   <- winding 1 (left column)
+#   pad 2 @ ( 1.715,-4.25)  pad 3 @ ( 1.715,4.25)   <- winding 2 (right column)
+# WINDING-TO-PAD ASSIGNMENT AND DOT POLARITY VARY BY SERIES (a Wurth WE-DD or
+# Coilcraft MSD numbers its ends differently) — verify before layout. For SEPIC
+# the two windings must be wound in phase; that phasing is on YOU, not the tool.
+component CoupledInductor4:
+    package = "Inductor_SMD:L_Bourns_SRF1260"
+    designator_prefix = "L"
+    pin W1A: role=passive, pad=1
+    pin W1B: role=passive, pad=4
+    pin W2A: role=passive, pad=2
+    pin W2B: role=passive, pad=3

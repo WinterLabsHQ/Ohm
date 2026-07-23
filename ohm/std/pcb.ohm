@@ -1,0 +1,68 @@
+# Ohm standard library — mechanical / PCB features (std.pcb)
+#
+# The things that appear on nearly every real board but are not "circuit":
+# mounting holes, fiducials, test points, net-ties, a 0-ohm link. Several have
+# NO electrical function at all.
+#
+# 0-pin components are LEGAL in Ohm and emit fine: a plain mounting hole or a
+# copper-free fiducial has no numbered pad to connect, so it declares no `pin`
+# lines. The footprint still carries the real drill/pad geometry — these blocks
+# just say "this mechanical feature exists on the board" without a net.
+#
+# Honesty (N3):
+# - No invented ratings anywhere (nothing here has a datasheet vmax/imax/pmax).
+# - Every string footprint "Lib:Name" is a real KiCad id verified on disk, and
+#   for the parts that DO have a numbered pad the pad= below matches the pad id
+#   read out of the .kicad_mod.
+# - Package size (M3, 1mm fiducial, 0603 link...) is a sensible default —
+#   override per instance with the hole/pad you actually use.
+
+# Unplated mounting hole — 0 pins. The footprint's only pad is a NON-PLATED
+# thru-hole with an empty pad id (verified: MountingHole_3.2mm_M3.kicad_mod has
+# one `np_thru_hole` pad named ""), so there is nothing electrical to connect.
+component MountingHole:
+    package = "MountingHole:MountingHole_3.2mm_M3"
+    designator_prefix = "H"
+
+# Plated mounting hole — HAS one plated pad (pad id "1", verified in
+# MountingHole_3.2mm_M3_Pad.kicad_mod), so it exposes a single passive pin you
+# can tie to GND/chassis for shielding or ESD bleed.
+component MountingHolePlated:
+    package = "MountingHole:MountingHole_3.2mm_M3_Pad"
+    designator_prefix = "H"
+    pin PAD: role=passive, pad=1
+
+# Fiducial — a bare copper+mask registration mark for pick-and-place optics.
+# 0 pins: the footprint's pad has an empty id (verified: Fiducial_1mm_Mask2mm
+# .kicad_mod, `pad ""`), so it carries no net.
+component Fiducial:
+    package = "Fiducial:Fiducial_1mm_Mask2mm"
+    designator_prefix = "FID"
+
+# Test point — 1 passive pad (pad id "1", verified in TestPoint_Pad_1.0x1.0mm
+# .kicad_mod). Tie it to whatever net you want to probe/bring-up.
+component TestPoint:
+    package = "TestPoint:TestPoint_Pad_1.0x1.0mm"
+    designator_prefix = "TP"
+    pin PAD: role=passive, pad=1
+
+# Net-tie — a single copper strap that DELIBERATELY joins two nets at one point
+# (star-ground / analog-digital ground stitch / shield-to-signal). The DRC would
+# normally flag two nets touching; the net-tie footprint is the sanctioned way to
+# do it. 2 passive pads A/B (pad ids "1"/"2", verified in NetTie-2_SMD_Pad0.5mm
+# .kicad_mod).
+component NetTie2:
+    package = "NetTie:NetTie-2_SMD_Pad0.5mm"
+    designator_prefix = "NT"
+    pin A: role=passive, pad=1
+    pin B: role=passive, pad=2
+
+# 0-ohm link — a chip resistor used as a jumper: cross a net over a gap, offer a
+# DNP option, or split analog/digital ground at one point. It is a real 0603
+# passive, so it uses generate(CHIP0603) like Resistor. value defaults to 0ohm.
+component ZeroOhm:
+    package = generate(CHIP0603)
+    designator_prefix = "R"
+    value = 0ohm
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2

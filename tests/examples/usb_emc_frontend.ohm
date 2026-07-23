@@ -1,0 +1,41 @@
+# USB 2.0 EMC / ESD front-end: a host-facing USB2 data pair passes through a
+# common-mode choke (EMI suppression) and then a TVS array (ESD clamp) before
+# reaching the downstream transceiver. VBUS is carried across with its own
+# single-line ESD clamp.
+#
+# Honesty: the choke DOT POLARITY and the TVS channel order are NOT encoded
+# (see std.magnetics / std.protection). Verify pad assignments against the
+# actual parts. RF/EMC layout (choke placement, short clamp returns, the
+# matched D+/D- routing) is the router's job, requested below via a constraint.
+
+use std.interfaces
+use std.magnetics
+use std.protection
+
+module UsbEmcFrontend:
+    host = io(USB2)          # upstream: from the USB connector
+    dev  = io(USB2)          # downstream: to the transceiver
+    pwr  = io(Power)         # VBUS + GND carried across the front-end
+
+    cmc   = CommonModeChoke()  # EMI on the differential pair
+    tvs   = TVSArray4()        # ESD clamp on D+/D-
+    dvbus = ESDDiode()         # ESD clamp on VBUS
+
+    # data pair through the choke: host -> choke -> dev
+    host.dp  ~ cmc.IN1
+    cmc.OUT1 ~ dev.dp
+    host.dm  ~ cmc.IN2
+    cmc.OUT2 ~ dev.dm
+
+    # ESD array clamps the downstream data lines; GND/VCC to the rail
+    dev.dp  ~ tvs.CH1
+    dev.dm  ~ tvs.CH2
+    tvs.GND ~ pwr.gnd
+    tvs.VCC ~ pwr.v
+
+    # VBUS passes through with a clamp diode (K=cathode to VBUS, A=anode to GND)
+    dvbus.K ~ pwr.v
+    dvbus.A ~ pwr.gnd
+
+    # route the incoming data lines as a matched differential pair
+    constraint diffpair(host.dp, host.dm)
