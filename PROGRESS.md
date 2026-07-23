@@ -71,3 +71,41 @@ vendor-variance comments; non-standard pinouts kept as `# TEMPLATE` blocks.
 **L2** (verification): adversarial pinout audit vs KiCad symbol libs — 44/45
 CONFIRMED, 1 comment fix (LMV331), VRef demoted; live-LLM sensor-node built
 from STYLE.md + stdlib in one diagnostic round. 353 tests green, ruff+mypy clean.
+
+## Spectrum expansion (2026-07-24, commit 52a8c9a)
+
++41 declared blocks closing the coverage gaps found in the "does it cover the
+whole spectrum?" audit. New/extended domains: **pcb** (MountingHole/TestPoint/
+Fiducial/NetTie/ZeroOhm — 0-pin & 1-pin parts verified to build+emit), **clock**
+(Oscillator_XO_4/CeramicResonator3/Timer555), **magnetics** (CommonModeChoke/
+Transformer4/CoupledInductor4), **rf** (ChipAntenna/Balun + SAW/RFModule
+templates), **connectors** (TerminalBlock/DCBarrelJack/JST_XH/RJ45/MicroSD/
+AudioJack/SMA/UFL/CoinCellHolder/ICSocket/Battery2 — every pad id read off the
+.kicad_mod), **discrete** (BridgeRectifier/DigitalTransistor/JFET + SCR/TRIAC
+templates), **electromech** (DIPSwitch_4/RotaryEncoder_EC11/Buzzer + DPDT/SSR
+templates), **opto** (WS2812 AddressableLED/RGBLED/7-segment/IR). Non-standard
+pinouts kept as honest `# TEMPLATE` blocks. 7 example designs. Library now ~106
+declared blocks + templates. Adversarial pinout re-verification of the new blocks
+run 2026-07-24 (see below).
+
+## Coverage after expansion (vs the 20-family taxonomy)
+
+Closed to concrete blocks: passives, diodes, transistors (BJT/MOSFET/JFET/bridge/
+digital), magnetics, clock, protection, connectors, electromech, optoelectronics,
+PCB mechanical features, power sources (coin-cell). Template-by-design (part-
+specific, honest): MCU/memory, most application ICs, SCR/TRIAC, switching
+converters, RF modules, sensors. The taxonomy is now navigable end-to-end — every
+family has either concrete blocks or a documented adaptation template.
+
+## Component `kind` system — Milestone K0 (2026-07-24, commit 956845c, ADR-008)
+
+Checked component-type taxonomy — the Zener differentiator. `kind` = a contract
+(pins-by-role + params); `component X(OpAmp):` declares conformance, `is=` binds
+pins, `check_kinds.py` verifies (K001 conflict / K002 unsatisfied / K003 role /
+K004 param / K005 stray). Nominal claim + structural check; multiple kinds =
+union; conflict→error (no linearize); shallow IS-A + orthogonal capabilities;
+open-world base (no kind = unchecked). New roles open_collector/free; std/kinds.ohm
+(~30 research-minimal contracts); exemplar retrofits (R/C/L/OpAmp). Author-time
+only (no emit change). 418 tests green. **Remaining: K1** bulk-retrofit the ~100
+std blocks to declare kinds; **K2** adversarial contract audit + live-LLM
+custom-part-via-kind test.
