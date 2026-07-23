@@ -127,6 +127,11 @@ class _Resolver:
                     )
                 else:
                     args.append(name)
+            for k, _ in req.relation.kwargs:
+                self.diags.append(Diagnostic(
+                    "warning", "R013",
+                    f"argument ignored: keyword '{k}' in require relation", req.span,
+                    file=self.path))
             requires.append(ir.Relation(req.relation.callee.dotted(), tuple(args)))
         return ir.InterfaceDef(decl.name, members, tuple(requires), decl.span)
 
@@ -253,6 +258,12 @@ class _Resolver:
                     if isinstance(arg, A.Ref):
                         self._check_ref(arg, scope, poisoned, decl.name)
                         args.append(arg.parts)
+                    else:
+                        self.diags.append(Diagnostic(
+                            "warning", "R013",
+                            f"argument ignored: '{A.to_src(arg)}' in obligation "
+                            f"'{item.call.callee.dotted()}' is not a reference",
+                            item.span, file=path))
                 obligations.append(
                     ir.ObligationRec(item.call.callee.dotted(), tuple(args), item.op, item.bound, item.span)
                 )
@@ -335,6 +346,11 @@ class _Resolver:
             self.diags.append(
                 _err("R003", f"unknown {kind}: '{member}'", ref.span, self.path, _suggest(member, names))
             )
+            return False
+        if connect and isinstance(target, A.ComponentDecl) and len(ref.parts) > 2:
+            self.diags.append(_err(
+                "R003", f"component pins have no sub-members: '{ref.dotted()}'",
+                ref.span, self.path))
             return False
         if isinstance(target, A.ModuleDecl) and len(ref.parts) >= 3:
             # inst.port.member: resolve the port's io(Interface) and validate the member

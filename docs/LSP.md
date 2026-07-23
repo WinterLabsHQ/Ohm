@@ -7,16 +7,28 @@ squiggle before any build.
 
 ## VS Code
 
-With any generic LSP client extension (e.g. "LSP Client" / `vscode-languageclient`
-based), configure:
+VS Code has no built-in generic LSP client, so either:
 
-```jsonc
-{
-  "languageServerExample.command": "ohm",
-  "languageServerExample.args": ["lsp"],
-  "files.associations": { "*.ohm": "ohm" }
-}
-```
+1. **Generic LSP client extension** — install any marketplace extension that
+   launches an arbitrary language server, and point it at command `ohm` with
+   args `["lsp"]` over stdio for files matching `*.ohm`. Each such extension
+   names its settings differently — consult its README for the exact keys.
+
+2. **Minimal own extension** — a skeleton using the official
+   `vscode-languageclient` library; in `activate()`:
+
+   ```js
+   const { LanguageClient } = require("vscode-languageclient/node");
+   const client = new LanguageClient(
+     "ohm", "Ohm LSP",
+     { command: "ohm", args: ["lsp"] },  // stdio is the default transport
+     { documentSelector: [{ scheme: "file", pattern: "**/*.ohm" }] },
+   );
+   client.start();
+   ```
+
+   plus a `package.json` that contributes a language id `ohm` for the `.ohm`
+   file extension and activates on it.
 
 ## Neovim (built-in LSP)
 

@@ -72,7 +72,7 @@ TOLOP: "+/-"
 QUANTITY: /\d+(\.\d+)?[A-Za-z]+/
 NUMBER: /\d+(\.\d+)?/
 NAME: /[A-Za-z_][A-Za-z0-9_]*/
-STRING: /"[^"\n]*"/
+STRING: /"[^"\n\r\x00-\x08\x0b-\x1f]*"/
 
 COMMENT: /#[^\n]*/
 _NL: ( /\r?\n[\t ]*/ | COMMENT )+

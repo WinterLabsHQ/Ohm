@@ -17,11 +17,21 @@ from ohm.diagnostics import Diagnostic, Span
 _PIN, _PORT = "pin", "port"
 
 
+def first_by_name(items) -> dict:
+    """name -> item, first occurrence wins (matches `next(... if x.name == n)`)."""
+    d: dict = {}
+    for it in items:
+        d.setdefault(it.name, it)
+    return d
+
+
 def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Diagnostic]]:
     diags: list[Diagnostic] = []
     comps = {c.name: c for c in design.components}
     mods = {m.name: m for m in design.modules}
     ifaces = {i.name: i for i in design.interfaces}
+    inst_of = {m.name: first_by_name(m.instances) for m in design.modules}
+    pins_of = {c.name: first_by_name(c.pins) for c in design.components}
 
     parts: list[tuple[str, ir.ComponentDef]] = []  # (ref, def) in walk order
     slots: dict[str, tuple] = {}  # label -> (_PIN, part_ref, pin_name, pad) | (_PORT,)
@@ -65,13 +75,13 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             return None
 
         base = refparts[0]
-        inst = next((i for i in module.instances if i.name == base), None)
+        inst = inst_of[module.name].get(base)
         if inst is not None and len(refparts) < 2:
             return []  # depth-1 instance ref (`a ~ b`): resolver's to reject; never crash
         if inst is not None and inst.def_ref in comps:
             comp = comps[inst.def_ref]
             pin_name = refparts[1]
-            pin = next((p for p in comp.pins if p.name == pin_name), None)
+            pin = pins_of[comp.name].get(pin_name)
             pad = pin.pad if pin else None
             lbl = mk(f"{prefix}{base}.{pin_name}", (_PIN, f"{prefix}{base}", pin_name, pad))
             return [lbl] if lbl is not None else []
@@ -82,12 +92,12 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
                 return []
             members = [refparts[2]] if len(refparts) > 2 else iface_members(port.interface)
             got = (mk(f"{prefix}{base}.{port.name}.{m}", (_PORT,)) for m in members)
-            return [l for l in got if l is not None]
+            return [lbl for lbl in got if lbl is not None]
         port = next((p for p in module.ports if p.name == base), None)
         if port is not None:
             members = [refparts[1]] if len(refparts) > 1 else iface_members(port.interface)
             got = (mk(f"{prefix}{base}.{m}", (_PORT,)) for m in members)
-            return [l for l in got if l is not None]
+            return [lbl for lbl in got if lbl is not None]
         return []  # config or unresolvable (already diagnosed by resolver)
 
     def walk(module: ir.Module, prefix: str, stack: frozenset[str]) -> None:
@@ -150,16 +160,16 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     net_of_label: dict[str, str] = {}
     for members in groups.values():
         members.sort()
-        port_labels = tuple(l for l in members if slots[l][0] == _PORT)
+        port_labels = tuple(lbl for lbl in members if slots[lbl][0] == _PORT)
         nodes = tuple(
             sorted(
                 (ir.NetNode(info[1], des_of[info[1]], info[2], info[3])
-                 for l in members if (info := slots[l])[0] == _PIN),
+                 for lbl in members if (info := slots[lbl])[0] == _PIN),
                 key=lambda n: (n.part_ref, n.pin),
             )
         )
         # shallowest label wins: a top-level `vin.v` must beat a deep `a.pwr.v`
-        name = min(port_labels or members, key=lambda l: (l.count("."), l))
+        name = min(port_labels or members, key=lambda lbl: (lbl.count("."), lbl))
         root = find(members[0])
         spans = {s for lbl, s in edges if find(lbl) == root}
         conn_spans = tuple(sorted(spans, key=lambda s: (s.line, s.col, s.end_line, s.end_col)))

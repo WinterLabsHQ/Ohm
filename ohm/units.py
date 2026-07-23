@@ -94,6 +94,7 @@ def normalize(q: Quantity) -> tuple[Quantity, str | None]:
         if converted is None:
             return q, f"tolerance unit '{tunit}' incompatible with '{q.unit}'"
         delta = converted
+    delta = abs(delta)  # negative value * percent must not invert the interval
     return Quantity(q.value, q.unit, q.value - delta, q.value + delta, q.tol_raw), None
 
 

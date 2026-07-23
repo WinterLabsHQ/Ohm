@@ -44,7 +44,7 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]]) -> str:
         " (effects (font (size 1.27 1.27))))",
         f'    (property "Value" "{name}" (at 0 -{prop_y} 0)'
         " (effects (font (size 1.27 1.27))))",
-        f'    (property "Footprint" "" (at 0 0 0)'
+        '    (property "Footprint" "" (at 0 0 0)'
         " (effects (font (size 1.27 1.27)) hide))",
         f'    (symbol "{name}_0_1"',
         f"      (rectangle (start -7.62 {box_h}) (end 7.62 -{box_h})"

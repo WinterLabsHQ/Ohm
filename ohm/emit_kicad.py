@@ -23,6 +23,11 @@ def _uid(*parts: str) -> str:
     return str(uuid.uuid5(_NS, "/".join(parts)))
 
 
+def _q(s: str) -> str:
+    """Escape for interpolation inside a double-quoted s-expression string."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def emit_kicad_sch(low: ir.IRLow, source: str = "<string>") -> str:
     out = [
         "(kicad_sch",
@@ -41,14 +46,14 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>") -> str:
         else:
             fp = ""
         out.append(
-            f'  (text "{p.designator}: {p.component} ({fp}) [{p.ref}]"'
+            f'  (text "{_q(p.designator)}: {_q(p.component)} ({_q(fp)}) [{_q(p.ref)}]"'
             f' (at 20 {y} 0) (effects (font (size 2 2)))'
             f' (uuid "{_uid(source, "part", p.ref)}"))'
         )
         y += 10
     for net in low.nets:
         out.append(
-            f'  (global_label "{net.name}" (shape passive) (at 150 {y} 0)'
+            f'  (global_label "{_q(net.name)}" (shape passive) (at 150 {y} 0)'
             f' (effects (font (size 1.27 1.27)))'
             f' (uuid "{_uid(source, "net", net.name)}"))'
         )
@@ -75,6 +80,6 @@ def emit_kicad_pcb(low: ir.IRLow, source: str = "<string>") -> str:
         '  (net 0 "")',
     ]
     for code, net in enumerate(low.nets, start=1):
-        out.append(f'  (net {code} "{net.name}")')
+        out.append(f'  (net {code} "{_q(net.name)}")')
     out.append(")")
     return "\n".join(out) + "\n"

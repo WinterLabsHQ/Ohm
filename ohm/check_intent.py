@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
-from ohm.lower import lower
+from ohm.lower import first_by_name, lower
 
 _NO_SPAN = Span(1, 1, 1, 1)
 _DRIVERS = {"output", "power_out"}
@@ -27,10 +27,10 @@ def _d(sev, code, msg, span, path, help_=None):
     return Diagnostic(sev, code, msg, span or _NO_SPAN, file=path, help=help_)
 
 
-def _classify(refparts, module, comps, mods):
+def _classify(refparts, module, comps, mods, insts):
     """Endpoint → ("pin", comp, pin) | ("iface", iface) | ("member", iface, member) | None."""
     base = refparts[0]
-    inst = next((i for i in module.instances if i.name == base), None)
+    inst = insts.get(base)
     if inst is not None:
         if inst.def_ref in comps:
             return ("pin", comps[inst.def_ref], refparts[1]) if len(refparts) > 1 else None
@@ -46,7 +46,8 @@ def _classify(refparts, module, comps, mods):
     return None
 
 
-def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
+def check_intent(design: ir.Design, path: str = "<string>",
+                 low: ir.IRLow | None = None) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     comps = {c.name: c for c in design.components}
     mods = {m.name: m for m in design.modules}
@@ -62,9 +63,10 @@ def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
         # lets a require-pair crossed onto one instance's like-named pins be caught
         member_pin_wiring: dict[tuple, dict[str, tuple]] = {}
         group_iface: dict[tuple, str] = {}
+        insts = first_by_name(module.instances)
         for conn in module.connections:
-            left = _classify(conn.left, module, comps, mods)
-            right = _classify(conn.right, module, comps, mods)
+            left = _classify(conn.left, module, comps, mods, insts)
+            right = _classify(conn.right, module, comps, mods, insts)
             if left is None or right is None:
                 continue  # resolver already diagnosed unknowns
             lk, rk = left[0], right[0]
@@ -122,13 +124,14 @@ def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                                     f"connect '{m}' to the pin named like '{m}'"))
 
     # ---- net-level role rules (flat view — every wiring path lands here) ----
-    # ponytail: lower() recomputed here; pure + cheap, keeps one net algorithm
-    low, _ = lower(design, path)
-    part_comp = {p.ref: comps[p.component] for p in low.parts}
+    if low is None:  # standalone use; the driver passes its single lower() result
+        low, _ = lower(design, path)
+    pins_of = {c.name: first_by_name(c.pins) for c in design.components}
+    part_pins = {p.ref: pins_of[p.component] for p in low.parts}
     for net in low.nets:
         noderoles = []
         for node in net.nodes:
-            pin = next((p for p in part_comp[node.part_ref].pins if p.name == node.pin), None)
+            pin = part_pins[node.part_ref].get(node.pin)
             if pin is not None:
                 noderoles.append((node, pin))
         net_span = net.conn_spans[0] if net.conn_spans else None

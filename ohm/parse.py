@@ -245,17 +245,45 @@ def _blocks(source: str) -> list[tuple[int, str]]:
     return [(start, "".join(lines)) for start, lines in blocks]
 
 
+def _skip_top_indent(source: str, path: str) -> tuple[str, Diagnostic | None]:
+    """If the first code line is indented: P001 + blank out that leading run."""
+    lines = source.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if line[:1] not in (" ", "\t"):
+            return source, None
+        indent = len(line) - len(line.lstrip(" \t"))
+        diag = Diagnostic("error", "P001", "unexpected indentation at top level",
+                          Span(i + 1, 1, i + 1, indent + 1), file=path)
+        # blank the indented run (line count preserved) up to the next top-level line
+        j = i
+        while j < len(lines):
+            s = lines[j].strip()
+            if s and not s.startswith("#") and lines[j][:1] not in (" ", "\t"):
+                break
+            lines[j] = "\n"
+            j += 1
+        return "".join(lines), diag
+    return source, None
+
+
 def parse(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnostic]]:
     """Parse source → (Program, diagnostics). Partial Program on syntax errors."""
+    source = source.lstrip("﻿")  # UTF-8 BOM would otherwise be a P001 at 1:1
     if not source.endswith("\n"):
         source += "\n"
+    diags: list[Diagnostic] = []
+    source, indent_diag = _skip_top_indent(source, path)
+    if indent_diag is not None:
+        diags.append(indent_diag)
     try:
-        return _ToAst().transform(_parser().parse(source)), []
+        return _ToAst().transform(_parser().parse(source)), diags
     except LarkError:  # incl. DedentError, which is not UnexpectedInput
         pass
     # recovery: parse each top-level block on its own, newline-padded for true spans
     decls: list[A.Decl] = []
-    diags: list[Diagnostic] = []
     for start_line, text in _blocks(source):
         padded = "\n" * start_line + text
         try:

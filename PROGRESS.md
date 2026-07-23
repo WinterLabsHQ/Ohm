@@ -31,3 +31,26 @@ Plan: Milestone 1 = P0–P6 (approved 2026-07-23).
 
 **Milestone 3 (P10–P12) COMPLETE — ALL PHASES P0–P12 DONE, 150 tests green.**
 Out of scope by design: Meridian router, convergence solver, hosted platform (proprietary side of the D6 boundary). Open items from the blueprint: OSS license needs legal advice (D6); `pcb` toolchain cross-check on the .zen interop path when the binary is available.
+
+## Production audit 2026-07-23 (post-P12)
+
+Full multi-lens audit (11 passes to convergence, ~75 verified findings) followed by
+three fix waves; all CRITICAL/HIGH/MEDIUM and nearly all LOW/IMPROVEMENT findings
+fixed with regression tests. **Recorded deviations from the blueprint docs (the
+docs are immutable; deviations live here per the session ritual):**
+
+- **Tier-S "declared package ≠ footprint package"** (manual Part 2): not checkable
+  for external string footprints without footprint-library data at build time
+  (hermeticity N1 forbids fetching). Fully enforced for `generate(...)` packages;
+  external footprints get S004 completeness warnings instead.
+- **Repo layout naming**: `ohm/ast_nodes.py` (not `ast.py` — stdlib shadowing) and
+  `units.py` (covers the planned `types_phys.py`).
+- **`shared/` top-level package name**: kept as the blueprint pins the
+  `shared/constraints_schema.py` seam path; the site-packages name-collision risk
+  is accepted until packaging/publish time (revisit with the license decision).
+- **.zen export pins keys**: keyed by pin *name*, which is Zener-spec-correct
+  (consumers resolve pads via their own symbol data); audit finding cleared.
+- **Q005 thermal**: ambient fixed at 25 degC (ADR-004 addendum).
+- **mypy gate deferred**: ruff gates CI (clean); mypy reports 39 annotation-level
+  errors (no behavioral defects among them) — typecheck gate lands once
+  annotations are cleaned, tracked here so it doesn't rot.

@@ -49,13 +49,16 @@ def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
     design, udiags = annotate_units(design, path)
     result.diagnostics += udiags
     result.design = design
+    # lower ONCE (pure; safe on poisoned/partial designs) and share the result
+    # with check_intent/check_quant and the emit path.
+    low, ldiags = lower(design, path)
     snapshot = ir.to_json(design) if debug_passes else None
     for checker in CHECKERS:
-        result.diagnostics += checker(design, path)
+        extra = {"low": low} if checker in (check_intent, check_quant) else {}
+        result.diagnostics += checker(design, path, **extra)
         if debug_passes and ir.to_json(design) != snapshot:
             raise AssertionError(f"checker '{checker.__name__}' mutated the design")
+    result.diagnostics += ldiags  # lower's I007 warnings, collected exactly once
     if emit and result.ok:
-        low, ldiags = lower(design, path)
         result.low = dataclasses.replace(low, holes=collect_holes(design))
-        result.diagnostics += ldiags
     return result

@@ -23,7 +23,7 @@ from decimal import Decimal
 from ohm import ir
 from ohm.closedform import quantity_qty
 from ohm.diagnostics import Diagnostic, Span
-from ohm.lower import lower
+from ohm.lower import first_by_name, lower
 from ohm.ratings_iface import DeclaredRatings, RatingsProvider
 from ohm.units import Interval
 
@@ -40,11 +40,14 @@ def _iv(q: ir.Quantity | None) -> Interval | None:
 
 
 def check_quant(design: ir.Design, path: str = "<string>",
-                provider: RatingsProvider = DeclaredRatings()) -> list[Diagnostic]:
+                provider: RatingsProvider = DeclaredRatings(),
+                low: ir.IRLow | None = None) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     comps = {c.name: c for c in design.components}
-    low, _ = lower(design, path)  # ponytail: recomputed like check_intent; pure + cheap
+    if low is None:  # standalone use; the driver passes its single lower() result
+        low, _ = lower(design, path)
     part_comp = {p.ref: comps[p.component] for p in low.parts}
+    pins_of = {c.name: first_by_name(c.pins) for c in design.components}
     net_voltage: dict[tuple[str, str], tuple[str, Interval]] = {}  # (part_ref, pin) -> (net, V)
 
     for net in low.nets:
@@ -52,7 +55,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
         pins = []
         for node in net.nodes:
             comp = part_comp[node.part_ref]
-            pin = next((p for p in comp.pins if p.name == node.pin), None)
+            pin = pins_of[comp.name].get(node.pin)
             if pin is not None:
                 pins.append((node, comp, pin))
 

@@ -25,6 +25,21 @@ def emit_footprint(model: PackageModel) -> str:
         f"  (fp_rect (start -{half_w} -{half_h}) (end {half_w} {half_h})"
         ' (stroke (width 0.05) (type solid)) (fill none) (layer "F.CrtYd"))',
     ]
+    # silkscreen body outline: courtyard minus 0.25mm margin
+    silk_w, silk_h = half_w - Decimal("0.25"), half_h - Decimal("0.25")
+    out.append(
+        f"  (fp_rect (start -{silk_w} -{silk_h}) (end {silk_w} {silk_h})"
+        ' (stroke (width 0.12) (type solid)) (fill none) (layer "F.SilkS"))'
+    )
+    # pin-1 marker: small circle at the courtyard corner in pad 1's quadrant
+    if model.pads:
+        p1 = model.pads[0]
+        cx = -half_w if p1.x < 0 else half_w
+        cy = -half_h if p1.y < 0 else half_h
+        out.append(
+            f"  (fp_circle (center {cx} {cy}) (end {cx + Decimal('0.1')} {cy})"
+            ' (stroke (width 0.12) (type solid)) (fill none) (layer "F.SilkS"))'
+        )
     for pad in model.pads:
         out.append(
             f'  (pad "{pad.id}" smd roundrect (at {pad.x} {pad.y}) (size {pad.w} {pad.h})'

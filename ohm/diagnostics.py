@@ -27,6 +27,7 @@ class Diagnostic:
     file: str = "<string>"
     help: str | None = None
     related: tuple[Span, ...] = field(default=())
+    endpoints: tuple[str, ...] = field(default=())  # net endpoints (I003/I006), rendered in json/LSP
 
     def machine(self) -> str:
         return f"{self.file}:{self.span.line}:{self.span.col}: {self.severity}[{self.code}]: {self.message}"
@@ -40,6 +41,8 @@ class Diagnostic:
                 lines.append(f"    {excerpt}")
                 width = max(1, (self.end_col - self.col) if self.span.end_line == self.span.line else 1)
                 lines.append("    " + " " * (self.span.col - 1) + "^" * width)
+        for r in self.related:
+            lines.append(f"  related: line {r.line}")
         if self.help:
             lines.append(f"    help: {self.help}")
         return "\n".join(lines)
@@ -73,6 +76,7 @@ EXPLAIN: dict[str, str] = {
     "R010": "A module binding may not reuse the name of a global interface, component, or module (no shadowing in v1) — rename the binding.",
     "R011": "Connect endpoints must be a pin, a whole io() port, or an interface member — a bare component/module instance or a config value cannot carry a net.",
     "R012": "An instance override names a config/attr the target does not declare — modules accept only declared configs; components accept new attrs unless the name is a near-miss of a declared attr or pin.",
+    "R013": "An argument in a require relation or obligation is not usable (keyword args and literal obligation args are ignored).",
     "U001": "Adding/subtracting quantities of different dimensions (e.g. volts + ohms). Convert or fix the expression.",
     "U002": "Comparing quantities of different dimensions. Both sides of a comparison must share a dimension.",
     "U003": "Unknown unit. See the v1 unit table in the language spec.",

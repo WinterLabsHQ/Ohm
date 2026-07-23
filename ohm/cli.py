@@ -38,7 +38,11 @@ def _report(result, source: str, as_json: bool) -> None:
     if as_json:
         print(json.dumps([{
             "severity": d.severity, "code": d.code, "message": d.message,
-            "file": d.file, "line": d.span.line, "col": d.span.col, "help": d.help,
+            "file": d.file, "line": d.span.line, "col": d.span.col,
+            "end_line": d.span.end_line, "end_col": d.span.end_col,
+            "endpoints": list(d.endpoints),
+            "related": [{"line": r.line, "col": r.col} for r in d.related],
+            "help": d.help,
         } for d in result.diagnostics]))
     else:
         for d in result.diagnostics:
@@ -58,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
                          default="all")
     p_build.add_argument("--dump-ir", choices=["high", "typed", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
+    p_build.add_argument("--strict", action="store_true",
+                         help="exit 1 (and emit nothing) on any warning or worse")
     p_build.add_argument("--debug-passes", action="store_true",
                          help="print per-pass debug info while compiling")
     p_build.add_argument("--target-kicad", default="7",
@@ -71,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     p_check = sub.add_parser("check", help="run all checks, no emit (fast inner loop)")
     p_check.add_argument("file", nargs="?")
     p_check.add_argument("--json-diagnostics", action="store_true")
+    p_check.add_argument("--strict", action="store_true",
+                         help="exit 1 on any warning or worse")
     p_check.add_argument("--debug-passes", action="store_true",
                          help="print per-pass debug info while compiling")
     p_check.add_argument("--explain", metavar="CODE",
@@ -193,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         result = compile_source(source, args.file, emit=emit)
     _report(result, source, args.json_diagnostics)
     if not result.ok:
+        return 1
+    # --strict: fail (before any emit) on warnings too
+    if getattr(args, "strict", False) and any(
+            d.severity in ("error", "warning") for d in result.diagnostics):
         return 1
 
     if args.command == "build":

@@ -28,7 +28,7 @@ def _lsp_diagnostics(text: str, uri: str) -> list[dict]:
     result = compile_source(text, _uri_path(uri), emit=False)
     out = []
     for d in result.diagnostics:
-        out.append({
+        entry = {
             "range": {
                 "start": {"line": d.span.line - 1, "character": d.span.col - 1},
                 "end": {"line": d.span.end_line - 1, "character": max(d.span.end_col - 1, d.span.col)},
@@ -37,7 +37,18 @@ def _lsp_diagnostics(text: str, uri: str) -> list[dict]:
             "code": d.code,
             "source": "ohm",
             "message": d.message + (f"\nhelp: {d.help}" if d.help else ""),
-        })
+        }
+        if d.related:
+            entry["relatedInformation"] = [{
+                "location": {"uri": uri, "range": {
+                    "start": {"line": r.line - 1, "character": r.col - 1},
+                    "end": {"line": r.end_line - 1, "character": max(r.end_col - 1, r.col)},
+                }},
+                "message": "related",
+            } for r in d.related]
+        if d.endpoints:
+            entry["data"] = {"endpoints": list(d.endpoints)}
+        out.append(entry)
     return out
 
 
@@ -109,6 +120,14 @@ def serve(stdin=None, stdout=None) -> int:
             uri = params["textDocument"]["uri"]
             docs[uri] = params["contentChanges"][-1]["text"]
             publish(uri)
+        elif method == "textDocument/didClose":
+            uri = params["textDocument"]["uri"]
+            docs.pop(uri, None)
+            _write_message(stdout, {
+                "jsonrpc": "2.0",
+                "method": "textDocument/publishDiagnostics",
+                "params": {"uri": uri, "diagnostics": []},
+            })
         elif method == "textDocument/didSave":
             uri = params["textDocument"]["uri"]
             if uri in docs:

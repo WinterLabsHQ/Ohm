@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 
 from ohm import ast_nodes as A
