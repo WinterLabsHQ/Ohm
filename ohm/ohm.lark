@@ -1,0 +1,81 @@
+// ohm.lark — THE grammar (build manual Part 3, v1 syntax)
+// Indentation-based (Python-shaped), newline-significant, `#` comments.
+
+start: (_NL | top_decl)*
+
+top_decl: interface_decl
+        | component_decl
+        | module_decl
+
+// ---------- interface (R5) ----------
+interface_decl: "interface" NAME ":" _NL _INDENT interface_item+ _DEDENT
+
+interface_item: NAME ":" NAME ("," attr)* _NL     -> member_decl
+              | "require" call _NL                -> require_decl
+
+// ---------- component (R1) ----------
+component_decl: "component" NAME ":" _NL _INDENT component_item+ _DEDENT
+
+component_item: "pin" NAME ":" attr ("," attr)* _NL   -> pin_decl
+              | NAME "=" value _NL                    -> attr_decl
+
+// ---------- module (R6) ----------
+module_decl: "module" NAME ":" _NL _INDENT module_item+ _DEDENT
+
+module_item: NAME "=" call _NL                    -> binding
+           | ref "~" ref _NL                      -> connect
+           | "assert" expr _NL                    -> assert_stmt
+           | "obligation" call cmp_op expr _NL    -> obligation_stmt
+
+// ---------- shared pieces ----------
+attr: NAME "=" value
+
+?value: STRING      -> string
+      | quantity
+      | NUMBER      -> number
+      | call
+      | ref
+
+call: ref "(" [arguments] ")"
+arguments: argument ("," argument)*
+argument: NAME "=" value   -> kwarg
+        | value            -> posarg
+
+ref: NAME ("." NAME)*
+
+// ---------- expressions (R7 assert / obligation bounds) ----------
+?expr: comparison
+     | sum
+comparison: sum cmp_op sum
+!cmp_op: "<=" | ">=" | "<" | ">" | "==" | "!="
+?sum: product
+    | sum "+" product      -> add
+    | sum "-" product      -> sub
+?product: atom
+        | product "*" atom -> mul
+        | product "/" atom -> div
+?atom: quantity
+     | NUMBER              -> number
+     | STRING              -> string
+     | call
+     | ref
+     | "(" expr ")"
+
+// ---------- quantities (R3) ----------
+quantity: QUANTITY tolerance?
+tolerance: TOLOP QUANTITY        -> tol_abs
+         | TOLOP NUMBER "%"     -> tol_pct
+
+// ---------- terminals ----------
+TOLOP: "+/-"
+QUANTITY: /\d+(\.\d+)?[A-Za-z]+/
+NUMBER: /\d+(\.\d+)?/
+NAME: /[A-Za-z_][A-Za-z0-9_]*/
+STRING: /"[^"\n]*"/
+
+COMMENT: /#[^\n]*/
+_NL: ( /\r?\n[\t ]*/ | COMMENT )+
+
+%declare _INDENT _DEDENT
+%ignore /[\t ]+/
+%ignore COMMENT
