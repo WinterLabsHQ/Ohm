@@ -173,6 +173,9 @@ class _ToAst(Transformer):
         call, op, bound = children
         return A.ObligationStmt(call, op, bound, _span(meta))
 
+    def constraint_stmt(self, meta, children):
+        return A.ConstraintStmt(children[0], _span(meta))
+
     def module_decl(self, meta, children):
         name, *items = children
         return A.ModuleDecl(str(name), tuple(items), _span(meta))

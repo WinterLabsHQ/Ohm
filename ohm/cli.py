@@ -32,7 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="compile and emit outputs")
     p_build.add_argument("file")
     p_build.add_argument("-o", "--out", default=".", help="output directory")
-    p_build.add_argument("--emit", choices=["netlist", "kicad", "zen", "all"], default="all")
+    p_build.add_argument("--emit", choices=["netlist", "kicad", "zen", "constraints", "all"],
+                         default="all")
     p_build.add_argument("--dump-ir", choices=["high", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
 
@@ -40,12 +41,50 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("file")
     p_check.add_argument("--json-diagnostics", action="store_true")
 
+    p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
+    p_fmt.add_argument("file")
+    p_fmt.add_argument("-w", "--write", action="store_true", help="rewrite the file in place")
+
+    p_explain = sub.add_parser("explain", help="explain a diagnostic code")
+    p_explain.add_argument("code")
+
+    sub.add_parser("lsp", help="LSP server over stdio (editor integration)")
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
         return 0
 
+    if args.command == "explain":
+        from ohm.diagnostics import EXPLAIN
+
+        text = EXPLAIN.get(args.code.upper())
+        if text is None:
+            print(f"unknown diagnostic code '{args.code}'", file=sys.stderr)
+            return 1
+        print(f"{args.code.upper()}: {text}")
+        return 0
+
+    if args.command == "lsp":
+        from ohm.lsp import serve
+
+        return serve()
+
     source = Path(args.file).read_text()
+
+    if args.command == "fmt":
+        from ohm.fmt import format_source
+
+        formatted, diags = format_source(source, args.file)
+        for d in diags:
+            print(d.human(source), file=sys.stderr)
+        if diags:
+            return 1
+        if args.write:
+            Path(args.file).write_text(formatted)
+        else:
+            print(formatted, end="")
+        return 0
     result = compile_source(source, args.file, emit=(args.command == "build"))
     _report(result, source, args.json_diagnostics)
     if not result.ok:
@@ -68,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 
             (outdir / f"{stem}.zen").write_text(emit_zen(result.low, args.file))
+        if args.emit in ("constraints", "all"):
+            from ohm.emit_constraints import emit_constraints
+
+            (outdir / f"{stem}.constraints.json").write_text(
+                emit_constraints(result.low, args.file))
     return 0
 
 

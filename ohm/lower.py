@@ -27,6 +27,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     slots: dict[str, tuple] = {}  # label -> (_PIN, part_ref, pin_name, pad) | (_PORT,)
     parent: dict[str, str] = {}  # union-find
     edges: list[tuple[str, object]] = []  # (label, connection Span) for diagnostics
+    raw_constraints: list[tuple[str, list[str], tuple[str, ...]]] = []  # (kind, labels, params)
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -91,6 +92,9 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
                     member = lbl.rsplit(".", 1)[1]
                     if member in rmap:
                         union(lbl, rmap[member])
+        for con in module.constraints:
+            labels = [lbl for parts_ in con.ref_args for lbl in expand(parts_, module, prefix)]
+            raw_constraints.append((con.kind, labels, con.params))
 
     top = mods.get(design.top) if design.top else None
     if top is None:
@@ -116,6 +120,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     for label in slots:
         groups.setdefault(find(label), []).append(label)
     nets = []
+    net_of_label: dict[str, str] = {}
     for members in groups.values():
         members.sort()
         port_labels = tuple(l for l in members if slots[l][0] == _PORT)
@@ -131,5 +136,11 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         spans = {s for lbl, s in edges if find(lbl) == root}
         conn_spans = tuple(sorted(spans, key=lambda s: (s.line, s.col, s.end_line, s.end_col)))
         nets.append(ir.NetLow(name, nodes, port_labels, conn_spans))
+        for lbl in members:
+            net_of_label[lbl] = name
     nets.sort(key=lambda n: n.name)
-    return ir.IRLow(tuple(parts_low), tuple(nets)), diags
+    constraints = tuple(
+        ir.ConstraintLow(kind, tuple(net_of_label[lbl] for lbl in labels if lbl in net_of_label), params)
+        for kind, labels, params in raw_constraints
+    )
+    return ir.IRLow(tuple(parts_low), tuple(nets), constraints), diags

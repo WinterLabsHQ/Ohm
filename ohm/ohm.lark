@@ -26,6 +26,7 @@ module_item: NAME "=" call _NL                    -> binding
            | ref "~" ref _NL                      -> connect
            | "assert" expr _NL                    -> assert_stmt
            | "obligation" call cmp_op expr _NL    -> obligation_stmt
+           | "constraint" call _NL                -> constraint_stmt
 
 // ---------- shared pieces ----------
 attr: NAME "=" value

@@ -119,6 +119,16 @@ class ObligationRec:
 
 
 @dataclass(frozen=True)
+class Constraint:
+    """R7 constraint (ADR-005): recorded for the Meridian/solver seam, never solved."""
+
+    kind: str
+    ref_args: tuple[tuple[str, ...], ...]  # dotted refs (net endpoints)
+    params: tuple[str, ...]  # canonical source strings of value args
+    span: Span | None = None
+
+
+@dataclass(frozen=True)
 class Module:
     name: str
     configs: tuple[Config, ...]
@@ -127,6 +137,7 @@ class Module:
     connections: tuple[Connection, ...]
     asserts: tuple[AssertRec, ...]
     obligations: tuple[ObligationRec, ...]
+    constraints: tuple[Constraint, ...] = ()
     span: Span | None = None
 
 
@@ -173,10 +184,17 @@ class Hole:
 
 
 @dataclass(frozen=True)
+class ConstraintLow:
+    kind: str
+    nets: tuple[str, ...]  # flat net names
+    params: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class IRLow:
     parts: tuple[PartLow, ...]
     nets: tuple[NetLow, ...]
-    constraints: tuple = ()  # R7 constraint entries (P10)
+    constraints: tuple[ConstraintLow, ...] = ()  # R7 entries (P10)
     holes: tuple[Hole, ...] = ()  # obligations → solver seam (P8)
 
 

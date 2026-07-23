@@ -136,7 +136,13 @@ class ObligationStmt:
     span: Span
 
 
-ModuleItem = Binding | Connect | AssertStmt | ObligationStmt
+@dataclass(frozen=True)
+class ConstraintStmt:
+    call: Call  # e.g. impedance(mcu.bus.scl, 50ohm) — recorded, never solved
+    span: Span
+
+
+ModuleItem = Binding | Connect | AssertStmt | ObligationStmt | ConstraintStmt
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ import difflib
 from ohm import ast_nodes as A
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
+from shared.constraints_schema import CONSTRAINT_KINDS
 
 VALID_ROLES = {"power_in", "power_out", "input", "output", "bidirectional", "passive", "ground", "nc"}
 _BUILTIN_CTORS = {"io", "config"}
@@ -145,7 +146,8 @@ class _Resolver:
 
     def _module(self, decl: A.ModuleDecl) -> ir.Module:
         path = self.path
-        configs, ports, instances, connections, asserts, obligations = [], [], [], [], [], []
+        configs, ports, instances, connections, asserts, obligations, constraints = \
+            [], [], [], [], [], [], []
         scope: dict[str, str] = {}  # binding name -> def name ("" = poisoned/config)
         poisoned: set[str] = set()
         self._current_overrides = {}
@@ -203,6 +205,20 @@ class _Resolver:
             elif isinstance(item, A.AssertStmt):
                 self._check_expr_refs(item.expr, scope, poisoned, decl.name)
                 asserts.append(ir.AssertRec(item.expr, item.span))
+            elif isinstance(item, A.ConstraintStmt):
+                kind = item.call.callee.dotted()
+                if kind not in CONSTRAINT_KINDS:
+                    self.diags.append(Diagnostic(
+                        "warning", "R009", f"unknown constraint kind '{kind}'", item.span,
+                        file=path, help=f"known kinds: {', '.join(sorted(CONSTRAINT_KINDS))}"))
+                ref_args, params = [], []
+                for arg in item.call.args:
+                    if isinstance(arg, A.Ref):
+                        if self._check_ref(arg, scope, poisoned, decl.name):
+                            ref_args.append(arg.parts)
+                    else:
+                        params.append(A.to_src(arg))
+                constraints.append(ir.Constraint(kind, tuple(ref_args), tuple(params), item.span))
             elif isinstance(item, A.ObligationStmt):
                 args = []
                 for arg in item.call.args:
@@ -213,7 +229,8 @@ class _Resolver:
                     ir.ObligationRec(item.call.callee.dotted(), tuple(args), item.op, item.bound, item.span)
                 )
         return ir.Module(decl.name, tuple(configs), tuple(ports), tuple(instances),
-                         tuple(connections), tuple(asserts), tuple(obligations), decl.span)
+                         tuple(connections), tuple(asserts), tuple(obligations),
+                         tuple(constraints), decl.span)
 
     def _check_ref(self, ref: A.Ref, scope: dict, poisoned: set, module: str) -> bool:
         """Validate base binding and (when depth>=2) the pin/member name."""
