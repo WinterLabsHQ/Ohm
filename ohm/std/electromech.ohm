@@ -1,0 +1,168 @@
+# Ohm standard library — electromechanical blocks (std.electromech)
+#
+# Headers, switches, a relay, and a solder jumper. These are CATEGORIES with
+# real, verified KiCad footprints; swap `package=` per instance for your
+# actual part's footprint.
+#
+# Honesty (N3):
+# - NO invented ratings: no vmax/imax/pmax defaults. A relay coil voltage or
+#   a switch contact rating is YOUR datasheet's fact — declare it per
+#   instance (e.g. k1 = Relay_SPDT(mpn="SRD-05VDC-SL-C")).
+# - Every string footprint is a "Lib:Name" KiCad id verified to exist on
+#   disk; every pad id below was read from the actual .kicad_mod file.
+# - Where a pad->function mapping is vendor-variable it is flagged in a
+#   comment — verify against your datasheet before fabbing.
+
+# ---------- pin headers (2.54 mm, vertical THT) ----------
+# Pads 1..N read from the .kicad_mod files; pin 1 is the marked end.
+# Headers carry whatever you wire through them: role=passive throughout.
+
+component Header_1x02:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+component Header_1x03:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+
+component Header_1x04:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+
+component Header_1x05:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+
+component Header_1x06:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+
+component Header_1x08:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+    pin P7: role=passive, pad=7
+    pin P8: role=passive, pad=8
+
+component Header_1x10:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1:  role=passive, pad=1
+    pin P2:  role=passive, pad=2
+    pin P3:  role=passive, pad=3
+    pin P4:  role=passive, pad=4
+    pin P5:  role=passive, pad=5
+    pin P6:  role=passive, pad=6
+    pin P7:  role=passive, pad=7
+    pin P8:  role=passive, pad=8
+    pin P9:  role=passive, pad=9
+    pin P10: role=passive, pad=10
+
+# 2-row headers: KiCad numbers pads 1..2N (odd row / even row zig-zag,
+# matching ribbon-cable IDC numbering). Pads 1..6 / 1..10 read from disk.
+component Header_2x03:
+    package = "Connector_PinHeader_2.54mm:PinHeader_2x03_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+
+component Header_2x05:
+    package = "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin P1:  role=passive, pad=1
+    pin P2:  role=passive, pad=2
+    pin P3:  role=passive, pad=3
+    pin P4:  role=passive, pad=4
+    pin P5:  role=passive, pad=5
+    pin P6:  role=passive, pad=6
+    pin P7:  role=passive, pad=7
+    pin P8:  role=passive, pad=8
+    pin P9:  role=passive, pad=9
+    pin P10: role=passive, pad=10
+
+# ---------- switches ----------
+
+# 4-pin SMD tactile switch. Footprint: MEC Multimec 5G series (5GSH9),
+# pads 1..4 read from the .kicad_mod (two per side: 1,2 left / 3,4 right).
+# 4-pin tact switches have TWO internally-connected pairs — per KiCad's
+# paired SW_MEC_5G symbol (and the common 6 mm B3F-class convention) pads
+# 1-2 are one pole and 3-4 the other; the switch closes 1/2 <-> 3/4.
+# VENDOR-VARIABLE: some tact families pair across the diagonal — verify the
+# internal pairing against your datasheet before relying on it.
+component TactSwitch4:
+    package = "Button_Switch_SMD:SW_MEC_5GSH9"
+    designator_prefix = "SW"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+
+# SPDT slide switch. Footprint: C&K JS102011SAQN (JS series, SMD), pads
+# 1..3 read from the .kicad_mod. Per the C&K JS-series datasheet the CENTER
+# terminal (pad 2) is the common; position 1 closes 1-2, position 2 closes
+# 2-3. Center-common is near-universal for 3-pin slide switches, but verify
+# against your datasheet.
+component SlideSwitch:
+    package = "Button_Switch_SMD:SW_SPDT_CK_JS102011SAQN"
+    designator_prefix = "SW"
+    pin A:   role=passive, pad=1
+    pin COM: role=passive, pad=2
+    pin B:   role=passive, pad=3
+
+# ---------- relay ----------
+
+# SPDT power relay. Footprint: Sanyou SRD series, Form C (the ubiquitous
+# Songle/Sanyou SRD "relay module" relay). Pads 1..5 read from the
+# .kicad_mod; the function map below is taken from KiCad's officially
+# paired Relay:SANYOU_SRD_Form_C symbol (coil = pads 2/5, COM = 1, NO = 3,
+# NC = 4) and matches the footprint geometry (COM sits at the coil end,
+# NO/NC 12 mm apart at the contact end). SRD coils are non-polarized.
+# N3: coil voltage/contact ratings are per-part — declare them at
+# instantiation from your datasheet (e.g. SRD-05VDC-SL-C = 5 V coil).
+component Relay_SPDT:
+    package = "Relay_THT:Relay_SPDT_SANYOU_SRD_Series_Form_C"
+    designator_prefix = "K"
+    pin COIL_A: role=passive, pad=2
+    pin COIL_B: role=passive, pad=5
+    pin COM:    role=passive, pad=1
+    pin NO:     role=passive, pad=3
+    pin NC:     role=passive, pad=4
+
+# ---------- jumper ----------
+
+# 2-pad solder jumper, open by default (bridge with solder to close).
+# Pads 1..2 read from the .kicad_mod.
+component Jumper:
+    package = "Jumper:SolderJumper-2_P1.3mm_Open_Pad1.0x1.5mm"
+    designator_prefix = "JP"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2

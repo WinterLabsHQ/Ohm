@@ -1,0 +1,35 @@
+# Ohm standard library — circuit protection (std.protection)
+#
+# Honesty (N3): pad assignments are made only where genuinely industry-
+# standard; where vendors vary (TVS arrays!) the comment says so and you MUST
+# verify against your part's datasheet. String footprints verified against
+# the .kicad_mod on disk (pad ids grepped). NO invented ratings — declare
+# vmax/imax/pmax at instantiation from your datasheet.
+
+# KiCad D_SOD-523 pads verified (1, 2); pad 1 = cathode (KiCad convention).
+component ESDDiode:
+    package = "Diode_SMD:D_SOD-523"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+# 4-channel ESD/TVS array, SOT-23-6. Pad map below is the COMMON array
+# convention (ch on 1,3,4,6; GND=2; VCC=5) — but channel ORDER VARIES BY
+# VENDOR. You MUST check pads 1/3/4/6 against your part's datasheet before
+# layout; only GND=2 / VCC=5 are near-universal for this class.
+component TVSArray4:
+    package = generate(SOT23, pins=6)
+    designator_prefix = "D"
+    pin CH1: role=bidirectional, pad=1
+    pin GND: role=ground, pad=2
+    pin CH2: role=bidirectional, pad=3
+    pin CH3: role=bidirectional, pad=4
+    pin VCC: role=power_in, pad=5
+    pin CH4: role=bidirectional, pad=6
+
+# Resettable PTC fuse, 1206 chip — non-polar two-terminal.
+component PolyFuse:
+    package = generate(CHIP1206)
+    designator_prefix = "F"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2

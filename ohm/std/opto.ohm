@@ -1,0 +1,48 @@
+# Ohm standard library — optoelectronics (std.opto)
+#
+# Honesty (N3): pad assignments only where genuinely industry-standard;
+# vendor-variable cases are flagged in comments — verify those against the
+# datasheet. String footprints verified against the .kicad_mod on disk.
+# NO invented ratings — declare CTR-side limits (vmax/imax/pmax) at
+# instantiation from your datasheet.
+
+# 4-pin optocoupler, industry-standard DIP/SOP-4 pinout (PC817-class single
+# channel in 4-pin body): 1 = LED anode, 2 = LED cathode, 3 = emitter,
+# 4 = collector.
+component Optocoupler_4:
+    package = generate(SOIC, pins=4)
+    designator_prefix = "U"
+    pin A: role=input, pad=1
+    pin K: role=input, pad=2
+    pin E: role=output, pad=3
+    pin C: role=output, pad=4
+
+# 6-pin optocoupler, industry-standard pinout (4N25/4N35/CNY17 class):
+# 1 = anode, 2 = cathode, 3 = NC, 4 = emitter, 5 = collector, 6 = base.
+component Optocoupler_6:
+    package = generate(SOIC, pins=6)
+    designator_prefix = "U"
+    pin A:  role=input, pad=1
+    pin K:  role=input, pad=2
+    pin NC: role=nc, pad=3
+    pin E:  role=output, pad=4
+    pin C:  role=output, pad=5
+    pin B:  role=input, pad=6
+
+# 2-pin SMD photodiode in LED-style 0805 body; KiCad LED footprint pads
+# verified (1, 2), pad 1 = cathode per KiCad LED convention.
+component PhotoDiode:
+    package = "LED_SMD:LED_0805_2012Metric"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+# 2-pin SMD phototransistor in LED-style 0805 body (PT19/PT26 class).
+# The collector usually sits at the marked (pad 1) end, but 2-pin
+# phototransistor marking VARIES BY VENDOR — verify C/E orientation
+# against your part's datasheet before layout.
+component PhotoTransistor:
+    package = "LED_SMD:LED_0805_2012Metric"
+    designator_prefix = "Q"
+    pin C: role=passive, pad=1
+    pin E: role=passive, pad=2

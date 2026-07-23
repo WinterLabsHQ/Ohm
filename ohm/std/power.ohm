@@ -1,0 +1,95 @@
+# Ohm standard library — power building blocks (std.power)
+#
+# Generic LDO regulators in the two pinouts with real cross-vendor currency.
+# Honesty (N3):
+#   - concrete pads ONLY for genuinely common arrangements; switching parts
+#     (buck/boost/charger) have NO cross-vendor pad standard, so they are
+#     TEMPLATE comment blocks below — copy and adapt to your datasheet.
+#   - NO ratings invented. Declare your part's datasheet limits at
+#     instantiation (part-level attrs join the Tier-Q fallback chain):
+#         reg = LDO_SOT23_5(vmax=6.0V)
+
+# Single-output LDO, SOT-23-5. The extremely common arrangement used by e.g.
+# AP2112K, TLV757P, MIC5219, RT9013, SGM2019:
+#   1=IN  2=GND  3=EN  4=NC  5=OUT
+# VENDOR-CHECK: pad 4 is genuinely variable — some parts route BYP (noise
+# bypass cap, MIC5219), ADJ/FB (adjustable variants), or a second function
+# there. It is declared NC here; if your part uses pad 4, copy this block and
+# give the pin its real name/role. Fixed-output voltage is also NOT declared
+# (it is part-specific); declare it on your instance's net via your source
+# of truth, and declare vmax= at instantiation.
+component LDO_SOT23_5:
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin IN:  role=power_in, pad=1
+    pin GND: role=ground, pad=2
+    pin EN:  role=input, pad=3
+    pin NC:  role=nc, pad=4
+    pin OUT: role=power_out, pad=5
+
+# Single-output LDO, SOT-223 (3 leads + tab). Footprint VERIFIED on disk:
+# /usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/SOT-223-3_TabPin2.kicad_mod
+# has pads "1", "2", "3" with the thermal tab as a REPEATED pad "2" — so the
+# tab is electrically GND in this arrangement and needs no fourth pin here.
+# Pinout: 1=IN  2=GND(tab)  3=OUT (Microchip MCP1825S / TC1262 style).
+# WARNING — vendor variance: the equally common AMS1117 / LD1117 / AZ1117
+# family is DIFFERENT: 1=GND(or ADJ)  2=OUT(tab)  3=IN. Verify YOUR
+# datasheet; for AMS1117-style parts copy this block and remap the pads
+# (the tab-pad-2 footprint then makes the tab OUT, matching those parts).
+component LDO_SOT223:
+    package = "Package_TO_SOT_SMD:SOT-223-3_TabPin2"
+    designator_prefix = "U"
+    pin IN:  role=power_in, pad=1
+    pin GND: role=ground, pad=2
+    pin OUT: role=power_out, pad=3
+
+# TEMPLATE (adapt to your datasheet): buck (step-down) converter.
+# No cross-vendor pad standard exists for switchers — pin count, BOOT/BST,
+# PG, SS and mode pins all move between parts. Canonical pin roster:
+#   VIN (power_in), SW (power_out, switch node), GND (ground),
+#   FB (input, feedback), EN (input), BOOT/BST (passive, bootstrap cap),
+#   optional: PG (output), SS (passive), MODE/SYNC (input)
+#
+# component Buck_MYPART:
+#     package = generate(SOT23, pins=6)      # or TSSOP/SOIC per datasheet
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin VIN:  role=power_in, vmax=?, pad=?
+#     pin SW:   role=power_out, pad=?
+#     pin GND:  role=ground, pad=?
+#     pin FB:   role=input, pad=?
+#     pin EN:   role=input, pad=?
+#     pin BST:  role=passive, pad=?
+
+# TEMPLATE (adapt to your datasheet): boost (step-up) converter.
+# Canonical pin roster:
+#   VIN (power_in), SW (power_in at the inductor node!), GND (ground),
+#   FB (input), EN (input), optional VOUT sense (input)
+# Note SW on a boost sinks the inductor current — check your datasheet's
+# node naming before assigning roles.
+#
+# component Boost_MYPART:
+#     package = generate(SOT23, pins=6)
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin VIN: role=power_in, pad=?
+#     pin SW:  role=power_in, pad=?
+#     pin GND: role=ground, pad=?
+#     pin FB:  role=input, pad=?
+#     pin EN:  role=input, pad=?
+
+# TEMPLATE (adapt to your datasheet): single-cell Li-ion linear charger.
+# Widely copied MCP73831 SOT-23-5 arrangement, but NOT universal (TP4056 is
+# SOIC-8 with a different roster; BQ2107x differs again):
+#   1=STAT (output, open-drain status)  2=VSS (ground)  3=VBAT (power_out)
+#   4=VDD (power_in)  5=PROG (passive, current-set resistor)
+#
+# component Charger_MYPART:
+#     package = generate(SOT23, pins=5)
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin STAT: role=output, pad=1
+#     pin VSS:  role=ground, pad=2
+#     pin VBAT: role=power_out, pad=3
+#     pin VDD:  role=power_in, vmax=?, pad=4
+#     pin PROG: role=passive, pad=5

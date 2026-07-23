@@ -93,6 +93,37 @@ compiler verifies the pin↔pad loop both ways (errors S002/S003).
 0.65mm, 100ns`. Optional tolerance: `10kohm +/- 1%` or `+/- 500ohm`.
 Dimensions are checked; `3.3V + 10kohm` is a compile error.
 
+## The standard library
+
+`use std.<domain>` imports generic building blocks; `use "./mylib.ohm"` imports
+your own. Domains: `interfaces` (I2C/SPI4/UART/USB2/CAN/RS485/SWD/JTAG/Power…),
+`passives`, `discrete`, `protection`, `analog`, `power`, `logic`, `electromech`,
+`connectivity`, `opto`, `sensors` (adaptation patterns).
+
+Blocks are **categories, not parts**. A real part is an instantiation with
+overrides — value, ratings, package, mpn all come from *your* datasheet:
+
+```ohm
+use std.interfaces
+use std.passives
+
+module Divider:
+    vin  = io(Power)
+    r1 = Resistor(value=10kohm +/- 1%, pmax=100mW)
+    r2 = Resistor(value=10kohm +/- 1%, package=generate(CHIP0805))
+    vin.v ~ r1.P1
+    r1.P2 ~ r2.P1
+    r2.P2 ~ vin.gnd
+```
+
+- `package=` is overridable per instance (string footprint or `generate(...)`);
+  the compiler re-checks the pin↔pad loop for the effective package.
+- Part-level rating overrides (`vmax=`, `imax=`, `pmax=`) are checked by Tier-Q.
+- Blocks with concrete pads follow genuine industry-standard pinouts and say so
+  in comments; where vendors vary, the comment tells you to verify. Blocks that
+  have no standard pinout are `# TEMPLATE` comment blocks — copy, adapt to the
+  datasheet, and the compiler checks your adaptation (the P12 flow).
+
 ## Workflow
 
 `ohm check file.ohm` — all diagnostics at once, none hidden. Machine format:

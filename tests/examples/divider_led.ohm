@@ -1,0 +1,32 @@
+# Example: 5V rail feeding a sense divider + an indicator series resistor,
+# with rail decoupling. Uses only std.interfaces + std.passives.
+
+use std.interfaces
+use std.passives
+
+module DividerLed:
+    pwr = io(Power)
+    vcc = config(Voltage, default=5.0V)
+
+    # sense divider: vcc -> r_top -> mid -> r_bot -> gnd
+    r_top = Resistor(value=10kohm +/- 1%)
+    r_bot = Resistor(value=10kohm +/- 1%)
+    # series resistor for an off-board indicator (LED lives in another domain)
+    r_led = Resistor(value=330ohm)
+    # rail decoupling
+    c_dec = Capacitor(value=100nF)
+
+    pwr.v   ~ r_top.P1
+    r_top.P2 ~ r_bot.P1
+    r_bot.P2 ~ pwr.gnd
+
+    pwr.v   ~ r_led.P1
+    r_led.P2 ~ pwr.gnd
+
+    pwr.v   ~ c_dec.P1
+    pwr.gnd ~ c_dec.P2
+
+    # mid node stays inside ADC range even at worst-case tolerance
+    assert divider(vcc, r_top.value, r_bot.value) <= 2.6V
+
+    constraint netclass(pwr.v, "power")

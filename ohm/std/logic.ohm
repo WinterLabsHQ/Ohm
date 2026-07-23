@@ -1,0 +1,54 @@
+# Ohm standard library — single-gate logic (std.logic)
+#
+# "Little logic" single-gate parts in the SOT-23-5 pinouts standardized
+# across the 74xx1G families (TI, Nexperia, Diodes, onsemi second-source the
+# same pad order). Honesty (N3): concrete pads only for that shared family
+# convention; level shifters have no cross-vendor standard and stay a
+# TEMPLATE comment block. NO ratings invented — declare your part's limits
+# at instantiation, e.g. SingleGate_SOT23_5(vmax=5.5V).
+
+# Single 2-input gate, SOT-23-5. The 74xx1G two-input convention shared by
+# 74LVC1G00 / 1G08 / 1G32 / 1G86 (and AHC1G/AUP1G/AUC1G equivalents):
+#   1=A  2=B  3=GND  4=Y  5=VCC
+# The gate FUNCTION (NAND/AND/OR/XOR) is part-specific — set mpn= on your
+# instance; the pad order is what this block standardizes.
+component SingleGate_SOT23_5:
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin A:   role=input, pad=1
+    pin B:   role=input, pad=2
+    pin GND: role=ground, pad=3
+    pin Y:   role=output, pad=4
+    pin VCC: role=power_in, pad=5
+
+# Single inverter, SOT-23-5. The 74xx1G one-input convention used by
+# 74LVC1G04 (inverter) and 74LVC1G14 (Schmitt inverter), 1G17 buffer etc.:
+#   1=NC  2=A  3=GND  4=Y  5=VCC
+# Convention chosen: TI/Nexperia 1G04 SOT-23-5 (DBV) pin order, in which
+# pad 1 is not connected. VERIFY against your exact datasheet before layout
+# — a few single-input parts repurpose pad 1.
+component Inverter_SOT23_5:
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin NC:  role=nc, pad=1
+    pin A:   role=input, pad=2
+    pin GND: role=ground, pad=3
+    pin Y:   role=output, pad=4
+    pin VCC: role=power_in, pad=5
+
+# TEMPLATE (adapt to your datasheet): single-bit level shifter.
+# No cross-vendor pad standard: 74LVC1T45 (directed, DIR pin) and TXB0101
+# (auto-direction, OE pin) differ, multi-bit parts differ again. Canonical
+# 74LVC1T45 SOT-23-6 roster for reference:
+#   1=VCCA  2=GND  3=A  4=B  5=DIR  6=VCCB
+#
+# component LevelShifter_MYPART:
+#     package = generate(SOT23, pins=6)
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin VCCA: role=power_in, pad=1
+#     pin GND:  role=ground, pad=2
+#     pin A:    role=bidirectional, pad=3
+#     pin B:    role=bidirectional, pad=4
+#     pin DIR:  role=input, pad=5
+#     pin VCCB: role=power_in, pad=6

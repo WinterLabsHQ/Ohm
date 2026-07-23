@@ -1,0 +1,99 @@
+# Ohm standard library — sensor adaptation patterns (std.sensors)
+#
+# This file deliberately declares NO components. Sensors have no de-facto
+# standard pinout: an MCP9808, a BME280 and an LIS3DH share a bus, not a
+# pad map. Shipping a "GenericI2CSensor" with concrete pads would invent
+# facts (N3) and silently miswire your board.
+#
+# Instead this file documents the P12 flow — datasheet in, component decl
+# out — as copy-adapt TEMPLATE blocks. The flow:
+#
+#   1. Open the datasheet's pin table. Note package, pin names, pad
+#      numbers, absolute-maximum ratings, supply draw.
+#   2. Copy the matching TEMPLATE below into YOUR design file (or a local
+#      lib imported with `use "./my_sensors.ohm"`).
+#   3. Replace every placeholder with the datasheet's facts: real pads,
+#      real vmax/imax, pin names exactly as the datasheet spells them.
+#   4. `ohm check` — the pin<->pad loop, roles and ratings are verified;
+#      fix diagnostics until clean.
+#
+# All templates pair with `use std.interfaces` (I2C, SPI4, AnalogIn,
+# Power) so swapped SDA/SCL or MOSI/MISO are caught (I005).
+#
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): I2C sensor (VDD/GND/SDA/SCL + INT)
+#
+#   use std.interfaces
+#
+#   component MyI2CSensor:
+#       package = generate(TSSOP, pins=8)      # or the real "Lib:Name" id
+#       mpn = "MCP9808T-E/MS"                  # the exact orderable part
+#       pin SDA:   role=bidirectional, pad=1   # pads: DATASHEET pin table,
+#       pin SCL:   role=bidirectional, pad=2   #       not these examples
+#       pin Alert: role=output, pad=3          # INT/ALERT, often open-drain
+#       pin GND:   role=ground, pad=4
+#       pin VDD:   role=power_in, vmax=6.0V, current=200uA, pad=8
+#
+#   module SensorBlock:
+#       pwr = io(Power)
+#       bus = io(I2C)
+#       s = MyI2CSensor()
+#       pwr.v   ~ s.VDD
+#       pwr.gnd ~ s.GND
+#       bus.sda ~ s.SDA
+#       bus.scl ~ s.SCL
+#       assert pwr.v.voltage <= s.VDD.vmax
+#
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): SPI sensor (4-wire, active-low CS)
+#
+#   use std.interfaces
+#
+#   component MySPISensor:
+#       package = generate(SOIC, pins=8)
+#       mpn = "..."
+#       pin CS:   role=input, pad=1            # chip select, usually /CS
+#       pin SCK:  role=input, pad=2
+#       pin MOSI: role=input, pad=3            # datasheet may say SDI/DIN
+#       pin MISO: role=output, pad=4           # datasheet may say SDO/DOUT
+#       pin INT:  role=output, pad=5           # drop if the part has none
+#       pin GND:  role=ground, pad=6
+#       pin VDD:  role=power_in, vmax=3.6V, pad=8
+#
+#   module SensorBlock:
+#       pwr = io(Power)
+#       spi = io(SPI4)
+#       s = MySPISensor()
+#       pwr.v    ~ s.VDD
+#       pwr.gnd  ~ s.GND
+#       spi.sck  ~ s.SCK
+#       spi.mosi ~ s.MOSI
+#       spi.miso ~ s.MISO
+#       spi.cs   ~ s.CS
+#       assert pwr.v.voltage <= s.VDD.vmax
+#
+# ---------------------------------------------------------------------------
+# TEMPLATE (adapt to your datasheet): analog-output sensor
+#
+#   use std.interfaces
+#
+#   component MyAnalogSensor:
+#       package = generate(SOT23, pins=3)      # e.g. an analog temp sensor
+#       mpn = "..."
+#       pin VDD: role=power_in, vmax=5.5V, pad=1
+#       pin OUT: role=output, pad=2            # the analog output
+#       pin GND: role=ground, pad=3
+#
+#   module SensorBlock:
+#       pwr = io(Power)
+#       out = io(AnalogIn)                     # feed this to your ADC block
+#       s = MyAnalogSensor()
+#       pwr.v   ~ s.VDD
+#       pwr.gnd ~ s.GND
+#       s.OUT   ~ out.sig
+#       pwr.gnd ~ out.gnd
+#       assert pwr.v.voltage <= s.VDD.vmax
+#
+# ---------------------------------------------------------------------------
+# This file parses to an empty program on purpose: `use std.sensors` adds
+# nothing to your design — the datasheet, not the stdlib, owns sensor pads.

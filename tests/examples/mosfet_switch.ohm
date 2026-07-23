@@ -1,0 +1,36 @@
+# Example: low-side NMOS switch driving an LED.
+#
+#   pwr.v ── LED A>K ── NMOS D..S ── pwr.gnd; ctl drives the gate, with
+#   RGate as a gate pulldown so the switch stays off while ctl floats.
+#
+# Examples may declare local parts: RGate is a plain chip resistor declared
+# here so the example depends only on std.discrete + std.interfaces.
+
+use std.interfaces
+use std.discrete
+
+component RGate:
+    package = generate(CHIP0603)
+    designator_prefix = "R"
+    value = 100kohm
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+module MosfetSwitch:
+    pwr  = io(Power)
+    ctl  = io(AnalogIn)
+    vgate = config(V, default=3.3V)
+
+    led = LED()
+    q   = NMOS(vmax=20V)     # rating from the chosen part's datasheet (2N7002-class Vgs max)
+    rg  = RGate()
+
+    pwr.v ~ led.A
+    led.K ~ q.D
+    q.S ~ pwr.gnd
+    ctl.sig ~ q.G
+    q.G ~ rg.P1          # gate pulldown
+    rg.P2 ~ pwr.gnd
+    ctl.gnd ~ pwr.gnd
+
+    assert vgate <= q.vmax

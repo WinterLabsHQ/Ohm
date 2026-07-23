@@ -1,0 +1,33 @@
+# Example: 5 V-in / 3.3 V-out LDO supply using std.power's LDO_SOT23_5.
+# Ratings are declared HERE (instance/pin level), so Tier-Q genuinely checks
+# the 5 V input net against the regulator's declared 6.0 V abs-max.
+
+use std.interfaces
+use std.power
+
+# Example-local idealized 5 V input (a 2-pin header driving VBUS at 5.0 V).
+# Footprint is a stock KiCad library part, verified on disk.
+component Vbus5V:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    designator_prefix = "J"
+    pin VBUS: role=power_out, voltage=5.0V, pad=1
+    pin GND:  role=ground, pad=2
+
+module LdoSupply:
+    vin  = io(Power)
+    vout = io(PowerOut)
+    src  = Vbus5V()
+    # vmax declared per instance (e.g. AP2112K-3.3 abs-max 6.0 V) — joins the
+    # Tier-Q ratings fallback chain, so Q001 checks the 5 V net against it.
+    reg  = LDO_SOT23_5(vmax=6.0V)
+
+    src.VBUS ~ reg.IN
+    src.VBUS ~ reg.EN            # enable tied to the input rail
+    src.GND  ~ reg.GND
+    vin.v    ~ reg.IN
+    vin.gnd  ~ reg.GND
+    vout.v   ~ reg.OUT
+    vout.gnd ~ reg.GND
+
+    assert src.VBUS.voltage <= reg.vmax       # 5.0V <= 6.0V, folded at build
+    obligation ripple(vout.v) < 50mV          # convergence check for the solver

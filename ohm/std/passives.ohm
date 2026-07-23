@@ -1,0 +1,113 @@
+# Ohm standard library — passive component blocks (std.passives)
+#
+# These blocks are CATEGORIES, not parts. Each gives the pin/pad shape and a
+# sensible default footprint; everything electrical is yours to declare per
+# instance from the real datasheet:
+#     r1 = Resistor(value=10kohm +/- 1%, pmax=100mW, mpn="RC0603FR-0710KL")
+#     r2 = Resistor(package=generate(CHIP0805))          # footprint override
+#     c1 = Capacitor(value=100nF, package="Capacitor_SMD:C_0402_1005Metric")
+#
+# Honesty (N3):
+# - NO invented default ratings: no vmax/imax/pmax here. Ratings you declare
+#   (per instance or via your own derived blocks) feed the Tier-Q checks;
+#   undeclared means unchecked, never silently assumed.
+# - Default `value` quantities are 0 (dimension carriers only) — override them.
+# - String footprints are "Lib:Name" KiCad ids, verified to exist in the
+#   system KiCad library; generate(...) footprints are built by the compiler.
+
+component Resistor:
+    package = generate(CHIP0603)
+    designator_prefix = "R"
+    value = 0ohm
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+component Capacitor:
+    package = generate(CHIP0603)
+    designator_prefix = "C"
+    value = 0F
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# A = anode = POSITIVE terminal (pad 1, the marked end on tantalum bodies),
+# K = cathode = negative. Default footprint: EIA-3216-18 / Kemet size A tantalum.
+component CapacitorPolarized:
+    package = "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
+    designator_prefix = "C"
+    value = 0F
+    pin A: role=passive, pad=1
+    pin K: role=passive, pad=2
+
+component Inductor:
+    package = generate(CHIP0805)
+    designator_prefix = "L"
+    value = 0H
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# value-less on purpose: bead impedance is spec'd at a frequency (e.g.
+# 600ohm @ 100MHz) — record the part via mpn=, not a single scalar.
+component FerriteBead:
+    package = generate(CHIP0603)
+    designator_prefix = "FB"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# 2-pad SMD crystal (5032 = 5.0x3.2mm body). Override freq per instance.
+component Crystal2:
+    package = "Crystal:Crystal_SMD_5032-2Pin_5.0x3.2mm"
+    designator_prefix = "Y"
+    freq = 0Hz
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# 4-pad SMD crystal, 3225 series convention: crystal on pads 1/3, GND on 2/4.
+component Crystal4:
+    package = "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
+    designator_prefix = "Y"
+    freq = 0Hz
+    pin P1:   role=passive, pad=1
+    pin GND1: role=ground,  pad=2
+    pin P2:   role=passive, pad=3
+    pin GND2: role=ground,  pad=4
+
+# value = resistance at 25degC; B-constant/curve is datasheet territory.
+component Thermistor:
+    package = generate(CHIP0603)
+    designator_prefix = "RT"
+    value = 0ohm
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# Multilayer chip varistor (MOV disc users: override package with a
+# Varistor.pretty footprint). Clamping/energy specs are per-part — declare them.
+component Varistor:
+    package = generate(CHIP1206)
+    designator_prefix = "RV"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# Chip fuse. Declare the current rating per part (imax=) — not defaulted here.
+component Fuse:
+    package = "Fuse:Fuse_1206_3216Metric"
+    designator_prefix = "F"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# Resettable PTC fuse (polyfuse). Hold/trip currents are datasheet attrs.
+component PTCResettable:
+    package = generate(CHIP1206)
+    designator_prefix = "F"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+# SMD trimmer (Bourns 3314G). Per the 3314 datasheet: terminal 1 and 3 are the
+# element ends, terminal 2 is the wiper — matches this footprint's pads 1/2/3.
+# value = end-to-end resistance.
+component Potentiometer:
+    package = "Potentiometer_SMD:Potentiometer_Bourns_3314G_Vertical"
+    designator_prefix = "RV"
+    value = 0ohm
+    pin P1:    role=passive, pad=1
+    pin WIPER: role=passive, pad=2
+    pin P2:    role=passive, pad=3

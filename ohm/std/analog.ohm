@@ -1,0 +1,92 @@
+# Ohm standard library — analog building blocks (std.analog)
+#
+# Generic op-amps and comparators in the pinouts that are genuine cross-vendor
+# industry standards. Honesty (N3):
+#   - concrete pads appear ONLY for arrangements shared by many vendors;
+#     anything vendor-variable lives in a TEMPLATE comment block below
+#     (copy into your design and adapt to your datasheet).
+#   - NO electrical ratings are invented here. Declare what YOUR part's
+#     datasheet states at instantiation — part-level attrs join the Tier-Q
+#     ratings fallback chain, e.g.:
+#         amp = OpAmp_SOT23_5(vmax=6.0V)
+
+# Single op-amp, SOT-23-5. Industry-standard single-op-amp pinout shared by
+# e.g. MCP6001, LMV321, TLV9061, OPA333, TLV333 (still check your datasheet):
+#   1=OUT  2=V- (VSS)  3=IN+  4=IN-  5=V+ (VDD)
+# VSS is role=power_in, not ground: dual-supply designs tie it below 0 V;
+# single-supply designs connect it to the ground net.
+component OpAmp_SOT23_5:
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin OUT: role=output, pad=1
+    pin VSS: role=power_in, pad=2
+    pin INP: role=input, pad=3       # IN+ (non-inverting)
+    pin INN: role=input, pad=4       # IN- (inverting)
+    pin VDD: role=power_in, pad=5
+
+# Dual op-amp, SOIC-8. Industry-standard dual pinout shared by e.g. LM358,
+# LM2904, MCP6002, TL072, OPA2340:
+#   1=OUT_A  2=IN_A-  3=IN_A+  4=V-  5=IN_B+  6=IN_B-  7=OUT_B  8=V+
+component OpAmp_Dual_SOIC8:
+    package = generate(SOIC, pins=8)
+    designator_prefix = "U"
+    pin OUTA: role=output, pad=1
+    pin INAN: role=input, pad=2      # IN_A- (inverting, channel A)
+    pin INAP: role=input, pad=3      # IN_A+ (non-inverting, channel A)
+    pin VSS:  role=power_in, pad=4   # V-
+    pin INBP: role=input, pad=5      # IN_B+ (non-inverting, channel B)
+    pin INBN: role=input, pad=6      # IN_B- (inverting, channel B)
+    pin OUTB: role=output, pad=7
+    pin VDD:  role=power_in, pad=8   # V+
+
+# Single comparator, SOT-23-5. Same pad arrangement as the single op-amp
+# above (e.g. TLV7011, TLV3011, MCP6561R-check!, LMV331 use this order):
+#   1=OUT  2=V- (VSS)  3=IN+  4=IN-  5=V+ (VDD)
+# NOTE: many single comparators have OPEN-DRAIN outputs (TLV7031, LMV331 ...)
+# and need an external pull-up; push-pull variants also exist. Check YOUR
+# datasheet — the output structure is not encoded here.
+component Comparator_SOT23_5:
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin OUT: role=output, pad=1
+    pin VSS: role=power_in, pad=2
+    pin INP: role=input, pad=3       # IN+
+    pin INN: role=input, pad=4       # IN-
+    pin VDD: role=power_in, pad=5
+
+# TEMPLATE (adapt to your datasheet): series voltage reference, SOT-23-3.
+# DEMOTED to a template (N3): SOT-23-3 reference pinouts are NOT a
+# cross-vendor standard — series parts disagree pad-to-pad between vendors
+# (TI REF33xx vs ADI vs Microchip order VIN/GND/VOUT differently), and shunt
+# references (LM4040 style) are 2-terminal cathode/anode devices in the very
+# same package. Declaring one concrete pad map would silently mis-wire a
+# large share of real parts. Copy, rename, and set pads from YOUR datasheet:
+#
+# component VRef_MYPART:
+#     package = generate(SOT23, pins=3)
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin VIN:  role=power_in, pad=1              # series ref: supply input
+#     pin GND:  role=ground, pad=2
+#     pin VOUT: role=power_out, voltage=2.5V, pad=3   # your ref voltage
+#
+# Shunt (2-terminal) references instead want a CHIP/SOT23 body with
+# cathode/anode pins, role=passive, wired through a bias resistor.
+
+# TEMPLATE (adapt to your datasheet): instrumentation amplifier, 8-pin.
+# Canonical INA-style SOIC-8 arrangement (INA128/INA333 family — but gain-set
+# and REF pins move between vendors, so this stays a template):
+#   1=RG  2=IN-  3=IN+  4=V-  5=REF  6=OUT  7=V+  8=RG
+#
+# component InstAmp_MYPART:
+#     package = generate(SOIC, pins=8)
+#     designator_prefix = "U"
+#     mpn = "..."
+#     pin RG1: role=passive, pad=1     # gain-set resistor
+#     pin INN: role=input, pad=2
+#     pin INP: role=input, pad=3
+#     pin VSS: role=power_in, pad=4
+#     pin REF: role=input, pad=5       # output reference
+#     pin OUT: role=output, pad=6
+#     pin VDD: role=power_in, pad=7
+#     pin RG2: role=passive, pad=8     # gain-set resistor

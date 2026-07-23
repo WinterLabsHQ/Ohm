@@ -1,0 +1,82 @@
+# Ohm standard library — discrete semiconductors (std.discrete)
+#
+# Honesty (N3): pad assignments below are made ONLY where the convention is
+# genuinely industry-standard, and each string footprint was verified against
+# the .kicad_mod on disk (pad ids grepped to match the pad= numbers here).
+# NO ratings are declared — generic blocks carry no datasheet; declare
+# vmax/imax/pmax at instantiation from YOUR part's datasheet.
+#
+# KiCad two-pad diode footprints (Diode_SMD.pretty, LED_SMD.pretty):
+# pad 1 = cathode (K), pad 2 = anode (A). Verified in
+# D_SOD-123 / D_SMA / D_SOD-323 / LED_0603_1608Metric .kicad_mod (pads 1, 2).
+
+component Diode:
+    package = "Diode_SMD:D_SOD-123"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1    # cathode = pad 1 (KiCad diode convention)
+    pin A: role=passive, pad=2
+
+component Schottky:
+    package = "Diode_SMD:D_SOD-123"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+component Zener:
+    package = "Diode_SMD:D_SOD-123"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+component LED:
+    package = "LED_SMD:LED_0603_1608Metric"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1    # cathode = pad 1 (KiCad LED convention)
+    pin A: role=passive, pad=2
+
+# SOT-23-3 BJT industry convention: pin 1 = Base, pin 2 = Emitter,
+# pin 3 = Collector (e.g. BC846/BC856, MMBT3904/3906 families).
+component BJT_NPN:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin B: role=input, pad=1
+    pin E: role=passive, pad=2
+    pin C: role=passive, pad=3
+
+component BJT_PNP:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin B: role=input, pad=1
+    pin E: role=passive, pad=2
+    pin C: role=passive, pad=3
+
+# SOT-23-3 MOSFET industry convention: pin 1 = Gate, pin 2 = Source,
+# pin 3 = Drain (e.g. 2N7002, BSS138, AO3400 families).
+component NMOS:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin G: role=input, pad=1
+    pin S: role=passive, pad=2
+    pin D: role=passive, pad=3
+
+component PMOS:
+    package = generate(SOT23, pins=3)
+    designator_prefix = "Q"
+    pin G: role=input, pad=1
+    pin S: role=passive, pad=2
+    pin D: role=passive, pad=3
+
+# TVS in SMA (DO-214AC): KiCad D_SMA pads verified (1, 2); unidirectional
+# follows the diode convention pad 1 = cathode.
+component TVS_Uni:
+    package = "Diode_SMD:D_SMA"
+    designator_prefix = "D"
+    pin K: role=passive, pad=1
+    pin A: role=passive, pad=2
+
+# Bidirectional TVS has no cathode/anode polarity — pins named T1/T2.
+component TVS_Bi:
+    package = "Diode_SMD:D_SMA"
+    designator_prefix = "D"
+    pin T1: role=passive, pad=1
+    pin T2: role=passive, pad=2
