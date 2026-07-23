@@ -116,11 +116,11 @@ kind Oscillator:
     requires gnd: ground
 
 kind Optocoupler:
-    requires led_anode: input
-    requires led_cathode: passive
+    requires led_anode: input      # the isolated LED (input) side
+    requires led_cathode: input
 
 kind Relay:
-    requires coil_a: input
+    requires coil_a: passive       # coil is a passive inductive load
     requires coil_b: passive
     requires com: passive
 
@@ -136,6 +136,59 @@ kind Connector:
 # (thermocouples, photodiodes, piezo are self-powered).
 kind Sensor:
     requires signal: output
+
+# ---------- more two-terminal passives (refine TwoTerminal, no new members) ----------
+kind FerriteBead(TwoTerminal)
+kind Thermistor(TwoTerminal)
+kind Varistor(TwoTerminal)
+kind Buzzer(TwoTerminal)         # a driven 2-terminal sounder
+
+kind Potentiometer:              # 3-terminal: two element ends + a wiper
+    requires t1: passive
+    requires wiper: passive
+    requires t2: passive
+
+kind Switch:                     # minimal SPST: two contacts (poles/throws vary)
+    requires a: passive
+    requires b: passive
+
+# ---------- magnetics ----------
+kind Transformer:                # 2-winding minimum; multi-winding parts add pins
+    requires p1: passive
+    requires p2: passive
+    requires s1: passive
+    requires s2: passive
+
+kind CommonModeChoke:            # two coupled windings
+    requires in1: passive
+    requires out1: passive
+    requires in2: passive
+    requires out2: passive
+
+# ---------- discretes / power ----------
+kind BridgeRectifier:            # 2 AC in, 2 DC out
+    requires ac1: passive
+    requires ac2: passive
+    requires dcp: passive
+    requires dcn: passive
+
+kind Battery:                    # a source: + rail out, - return
+    requires pos: power_out
+    requires neg: ground
+
+# ---------- rf / clock ----------
+kind Antenna:
+    requires feed: passive
+    optional gnd: ground
+
+kind Resonator:                  # ceramic resonator: 2 terminals + optional gnd
+    requires a: passive
+    requires b: passive
+    optional gnd: ground
+
+# A display's pinouts are entirely part-specific (segment/common count varies);
+# this is a nominal marker (declares intent, no structural contract to enforce).
+kind Display
 
 # ---------- orthogonal capabilities (compose with any kind) ----------
 kind ThermalPad:

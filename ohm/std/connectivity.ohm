@@ -17,6 +17,9 @@
 # - String footprints are "Lib:Name" KiCad ids verified on disk; every pad
 #   id was read from the actual .kicad_mod file.
 
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
 # CAN transceiver in the industry-standard SOIC-8 pinout (TJA1050 lineage:
 # TJA1042/1051, MCP2551/2561, SN65HVD23x, SIT1042...):
 #   1 = TXD, 2 = GND, 3 = VCC, 4 = RXD, 6 = CANL, 7 = CANH.
@@ -24,12 +27,13 @@
 # VENDOR-VARIABLE: pin 5 (VREF on TJA1050, VIO on TJA1042/3, SPLIT or NC
 # elsewhere) and pin 8 (RS slope control on TJA1050/MCP2551, STB standby on
 # TJA1042/51, S on others) differ by part — verify both on your datasheet.
-component CANTransceiver_SOIC8:
+# kind Transceiver requires vcc(power_in) + gnd(ground); bus pins are extra.
+component CANTransceiver_SOIC8(Transceiver):
     package = generate(SOIC, pins=8)
     designator_prefix = "U"
     pin TXD:  role=input, pad=1
-    pin GND:  role=ground, pad=2
-    pin VCC:  role=power_in, pad=3
+    pin GND:  role=ground, pad=2, is=gnd
+    pin VCC:  role=power_in, pad=3, is=vcc
     pin RXD:  role=output, pad=4
     pin VREF: role=passive, pad=5
     pin CANL: role=bidirectional, pad=6
@@ -42,17 +46,18 @@ component CANTransceiver_SOIC8:
 #   1 = RO (receiver out), 2 = /RE (receiver enable, active low),
 #   3 = DE (driver enable), 4 = DI (driver in), 5 = GND,
 #   6 = A (non-inverting), 7 = B (inverting), 8 = VCC.
-component RS485Transceiver_SOIC8:
+# kind Transceiver requires vcc(power_in) + gnd(ground); bus pins are extra.
+component RS485Transceiver_SOIC8(Transceiver):
     package = generate(SOIC, pins=8)
     designator_prefix = "U"
     pin RO:  role=output, pad=1
     pin RE:  role=input, pad=2
     pin DE:  role=input, pad=3
     pin DI:  role=input, pad=4
-    pin GND: role=ground, pad=5
+    pin GND: role=ground, pad=5, is=gnd
     pin A:   role=bidirectional, pad=6
     pin B:   role=bidirectional, pad=7
-    pin VCC: role=power_in, pad=8
+    pin VCC: role=power_in, pad=8, is=vcc
 
 # USB Micro-B receptacle. Footprint: Amphenol 10118193-0001LF (the
 # ubiquitous cheap SMD micro-B). Pads read from the .kicad_mod: signal pads
@@ -60,7 +65,9 @@ component RS485Transceiver_SOIC8:
 # fixed by the USB Micro-B spec: 1 = VBUS, 2 = D-, 3 = D+, 4 = ID,
 # 5 = GND. VBUS is power_out here: device-side receptacle sourcing the
 # board from the host.
-component USBConnector_MicroB:
+# Connector requires nothing; SHIELD here is role=passive (not the ground
+# shield member), so no is=shield binding — just the nominal kind tag.
+component USBConnector_MicroB(Connector):
     package = "Connector_USB:USB_Micro-B_Amphenol_10118193-0001LF_Horizontal"
     designator_prefix = "J"
     pin VBUS:   role=power_out, pad=1
@@ -81,7 +88,7 @@ component USBConnector_MicroB:
 # Roles: only VBUS_A4 is power_out; the other three VBUS pads are passive
 # so tying all four to one VBUS net (as you must) does not trip the
 # single-driver-per-net check (I003) — electrically they are one rail.
-component USBConnector_C16:
+component USBConnector_C16(Connector):
     package = "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal"
     designator_prefix = "J"
     pin GND_A1:  role=ground, pad=A1

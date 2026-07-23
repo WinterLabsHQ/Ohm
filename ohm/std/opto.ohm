@@ -6,24 +6,32 @@
 # NO invented ratings — declare CTR-side limits (vmax/imax/pmax) at
 # instantiation from your datasheet.
 
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
 # 4-pin optocoupler, industry-standard DIP/SOP-4 pinout (PC817-class single
 # channel in 4-pin body): 1 = LED anode, 2 = LED cathode, 3 = emitter,
 # 4 = collector.
-component Optocoupler_4:
+# UN-KINDED (ADR-008): kind Optocoupler requires led_cathode:passive, but this
+# block models the whole input LED as the driven side (K role=input). Binding
+# is=led_cathode to an input pin would trip K003, and we do NOT bend a block's
+# electrical role to conform, so this stays the base Component. (led_anode
+# would match — input — but a partial bind leaves led_cathode unbound -> K002.)
+component Optocoupler_4(Optocoupler):
     package = generate(SOIC, pins=4)
     designator_prefix = "U"
-    pin A: role=input, pad=1
-    pin K: role=input, pad=2
+    pin A: role=input, pad=1, is=led_anode
+    pin K: role=input, pad=2, is=led_cathode
     pin E: role=output, pad=3
     pin C: role=output, pad=4
 
 # 6-pin optocoupler, industry-standard pinout (4N25/4N35/CNY17 class):
 # 1 = anode, 2 = cathode, 3 = NC, 4 = emitter, 5 = collector, 6 = base.
-component Optocoupler_6:
+component Optocoupler_6(Optocoupler):
     package = generate(SOIC, pins=6)
     designator_prefix = "U"
-    pin A:  role=input, pad=1
-    pin K:  role=input, pad=2
+    pin A:  role=input, pad=1, is=led_anode
+    pin K:  role=input, pad=2, is=led_cathode
     pin NC: role=nc, pad=3
     pin E:  role=output, pad=4
     pin C:  role=output, pad=5
@@ -31,11 +39,11 @@ component Optocoupler_6:
 
 # 2-pin SMD photodiode in LED-style 0805 body; KiCad LED footprint pads
 # verified (1, 2), pad 1 = cathode per KiCad LED convention.
-component PhotoDiode:
+component PhotoDiode(Diode):
     package = "LED_SMD:LED_0805_2012Metric"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
 # 2-pin SMD phototransistor in LED-style 0805 body (PT19/PT26 class).
 # The collector usually sits at the marked (pad 1) end, but 2-pin
@@ -98,59 +106,56 @@ component RGBLED_CommonCathode:
     pin G:   role=passive, pad=3
     pin B:   role=passive, pad=4
 
-# Single-digit 7-segment display, common-CATHODE. Footprint verified:
-# Display_7Segment:CC56-12GWA.kicad_mod (Kingbright 0.56" class) — pad ids
-# 1..12 present on disk. Function map below is the very common 5161/5611-class
-# 10-active-pin arrangement (two shared common pins), pads 11/12 mechanical/NC:
-#   a=7 b=6 c=4 d=2 e=1 f=9 g=10 dp=5, common cathodes = pads 3 and 8.
-# HONESTY: 7-seg pin numbering is ENTIRELY part-specific — this is the
-# datasheet-family default; VERIFY every segment against YOUR part's datasheet.
-component SevenSegment:
+# Single-digit 7-segment display, common-CATHODE. Footprint + pin map verified
+# against KiCad symbol Display_Character:CC56-12GWA (the exact declared part):
+#   a=11 b=7 c=4 d=2 e=1 f=10 g=5 dp=3; four common cathodes on pads 6,8,9,12.
+# All 12 pads are used (no NC). 7-seg numbering is ENTIRELY part-specific — this
+# map is exact for CC56-12GWA; VERIFY against YOUR part's datasheet for others.
+component SevenSegment(Display):
     package = "Display_7Segment:CC56-12GWA"
     designator_prefix = "DS"
-    pin A:   role=passive, pad=7
-    pin B:   role=passive, pad=6
+    pin A:   role=passive, pad=11
+    pin B:   role=passive, pad=7
     pin C:   role=passive, pad=4
     pin D:   role=passive, pad=2
     pin E:   role=passive, pad=1
-    pin F:   role=passive, pad=9
-    pin G:   role=passive, pad=10
-    pin DP:  role=passive, pad=5
-    pin CC1: role=ground, pad=3
+    pin F:   role=passive, pad=10
+    pin G:   role=passive, pad=5
+    pin DP:  role=passive, pad=3
+    pin CC1: role=ground, pad=6
     pin CC2: role=ground, pad=8
-    pin NC1: role=nc, pad=11
-    pin NC2: role=nc, pad=12
+    pin CC3: role=ground, pad=9
+    pin CC4: role=ground, pad=12
 
-# Single-digit 7-segment display, common-ANODE. Footprint verified:
-# Display_7Segment:CA56-12EWA.kicad_mod — pads 1..12 present on disk. Same
-# 5161/5611-class segment map as the common-cathode block; the two shared
-# common pins are the ANODES here (tie to V+, sink each segment through a
-# resistor). Same part-specific caveat — VERIFY against your datasheet.
-component SevenSegment_CA:
+# Single-digit 7-segment display, common-ANODE. Footprint + pin map verified
+# against KiCad symbol Display_Character:CA56-12EWA (same geometry as the CC part;
+# the four commons are ANODES here). Tie anodes to V+, sink each segment via a
+# resistor. Exact for CA56-12EWA; VERIFY against your datasheet for others.
+component SevenSegment_CA(Display):
     package = "Display_7Segment:CA56-12EWA"
     designator_prefix = "DS"
-    pin A:   role=passive, pad=7
-    pin B:   role=passive, pad=6
+    pin A:   role=passive, pad=11
+    pin B:   role=passive, pad=7
     pin C:   role=passive, pad=4
     pin D:   role=passive, pad=2
     pin E:   role=passive, pad=1
-    pin F:   role=passive, pad=9
-    pin G:   role=passive, pad=10
-    pin DP:  role=passive, pad=5
-    pin CA1: role=power_in, pad=3
+    pin F:   role=passive, pad=10
+    pin G:   role=passive, pad=5
+    pin DP:  role=passive, pad=3
+    pin CA1: role=power_in, pad=6
     pin CA2: role=power_in, pad=8
-    pin NC1: role=nc, pad=11
-    pin NC2: role=nc, pad=12
+    pin CA3: role=power_in, pad=9
+    pin CA4: role=power_in, pad=12
 
 # 2-pin IR emitter LED (e.g. 940nm), A/K in an SMD LED body. Footprint reused
 # from the verified LED_SMD:LED_0805_2012Metric (pads 1,2). Per KiCad LED
 # convention pad 1 = cathode. IR emitters are also commonly THT (3mm/5mm) —
 # override package= for those. Forward current/voltage from datasheet.
-component IREmitter:
+component IREmitter(LED):
     package = "LED_SMD:LED_0805_2012Metric"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
 # 3-pin IR receiver / demodulator module (TSOP-class, e.g. TSOP382x / TSOP48xx
 # / VS1838B). Footprint verified: OptoDevice:Vishay_MINIMOLD-3Pin.kicad_mod
@@ -159,10 +164,10 @@ component IREmitter:
 # 1 = OUT, 2 = GND, 3 = VS(Vcc) — the near-universal pinout mapped below.
 # HONESTY: a few vendors/older TSOP17xx differ (some swap OUT/VS) — VERIFY on
 # your datasheet. Supply/OUT ratings from datasheet at instantiation.
-component IRReceiver:
+component IRReceiver(Sensor):
     package = "OptoDevice:Vishay_MINIMOLD-3Pin"
     designator_prefix = "U"
-    pin OUT: role=output, pad=1
+    pin OUT: role=output, pad=1, is=signal
     pin GND: role=ground, pad=2
     pin VS:  role=power_in, pad=3
 

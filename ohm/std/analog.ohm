@@ -49,14 +49,14 @@ component OpAmp_Dual_SOIC8:
 # datasheet, or override package/pads.
 # NOTE: many single comparators have OPEN-DRAIN outputs (TLV7031 ...) and need
 # an external pull-up; push-pull variants also exist — not encoded here.
-component Comparator_SOT23_5:
+component Comparator_SOT23_5(Comparator):   # kind-checked: inp/inn/out/vpos present, vneg optional
     package = generate(SOT23, pins=5)
     designator_prefix = "U"
-    pin OUT: role=output, pad=1
-    pin VSS: role=power_in, pad=2
-    pin INP: role=input, pad=3       # IN+
-    pin INN: role=input, pad=4       # IN-
-    pin VDD: role=power_in, pad=5
+    pin OUT: role=output, pad=1, is=out
+    pin VSS: role=power_in, pad=2, is=vneg
+    pin INP: role=input, pad=3, is=inp       # IN+
+    pin INN: role=input, pad=4, is=inn       # IN-
+    pin VDD: role=power_in, pad=5, is=vpos
 
 # TEMPLATE (adapt to your datasheet): series voltage reference, SOT-23-3.
 # DEMOTED to a template (N3): SOT-23-3 reference pinouts are NOT a

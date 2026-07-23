@@ -18,14 +18,16 @@
 # give the pin its real name/role. Fixed-output voltage is also NOT declared
 # (it is part-specific); declare it on your instance's net via your source
 # of truth, and declare vmax= at instantiation.
-component LDO_SOT23_5:
+use std.kinds
+
+component LDO_SOT23_5(LDO):   # kind-checked: vin/vout/gnd present, en optional (NC unbound)
     package = generate(SOT23, pins=5)
     designator_prefix = "U"
-    pin IN:  role=power_in, pad=1
-    pin GND: role=ground, pad=2
-    pin EN:  role=input, pad=3
+    pin IN:  role=power_in, pad=1, is=vin
+    pin GND: role=ground, pad=2, is=gnd
+    pin EN:  role=input, pad=3, is=en
     pin NC:  role=nc, pad=4
-    pin OUT: role=power_out, pad=5
+    pin OUT: role=power_out, pad=5, is=vout
 
 # Single-output LDO, SOT-223 (3 leads + tab). Footprint VERIFIED on disk:
 # /usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/SOT-223-3_TabPin2.kicad_mod
@@ -36,12 +38,12 @@ component LDO_SOT23_5:
 # family is DIFFERENT: 1=GND(or ADJ)  2=OUT(tab)  3=IN. Verify YOUR
 # datasheet; for AMS1117-style parts copy this block and remap the pads
 # (the tab-pad-2 footprint then makes the tab OUT, matching those parts).
-component LDO_SOT223:
+component LDO_SOT223(LDO):   # kind-checked: vin/vout/gnd present (fixed 3-pin, no en)
     package = "Package_TO_SOT_SMD:SOT-223-3_TabPin2"
     designator_prefix = "U"
-    pin IN:  role=power_in, pad=1
-    pin GND: role=ground, pad=2
-    pin OUT: role=power_out, pad=3
+    pin IN:  role=power_in, pad=1, is=vin
+    pin GND: role=ground, pad=2, is=gnd
+    pin OUT: role=power_out, pad=3, is=vout
 
 # TEMPLATE (adapt to your datasheet): buck (step-down) converter.
 # No cross-vendor pad standard exists for switchers — pin count, BOOT/BST,

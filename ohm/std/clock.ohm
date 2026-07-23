@@ -22,27 +22,29 @@
 # Pin 1 varies EN vs NC by part — check YOUR datasheet; role=input covers both
 # (an unused/NC pin 1 simply stays unconnected). Footprint pads 1..4 verified in
 # Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm.kicad_mod.
-component Oscillator_XO_4:
+use std.kinds
+
+component Oscillator_XO_4(Oscillator):   # kind-checked: out/vcc/gnd present (EN/tri-state extra)
     package = "Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm"
     designator_prefix = "U"
     freq = 0Hz
     pin EN:  role=input,     pad=1
-    pin GND: role=ground,    pad=2
-    pin OUT: role=output,    pad=3
-    pin VDD: role=power_in,  pad=4
+    pin GND: role=ground,    pad=2, is=gnd
+    pin OUT: role=output,    pad=3, is=out
+    pin VDD: role=power_in,  pad=4, is=vcc
 
 # Ceramic resonator with built-in load caps — 3 pins. Standard 3-terminal
 # arrangement: the two outer terminals are the resonator element ends, the
 # centre terminal is GND (the integrated capacitors' common).
 #   pad 1 = element terminal   pad 2 = GND   pad 3 = element terminal
 # Footprint pads 1..3 verified in Resonator-3Pin_W7.0mm_H2.5mm.kicad_mod.
-component CeramicResonator3:
+component CeramicResonator3(Resonator):   # kind-checked: a/b terminals present, gnd optional
     package = "Crystal:Resonator-3Pin_W7.0mm_H2.5mm"
     designator_prefix = "Y"
     freq = 0Hz
-    pin P1:  role=passive, pad=1
-    pin GND: role=ground,  pad=2
-    pin P2:  role=passive, pad=3
+    pin P1:  role=passive, pad=1, is=a
+    pin GND: role=ground,  pad=2, is=gnd
+    pin P2:  role=passive, pad=3, is=b
 
 # The 555 timer — genuine fixed industry-standard DIP/SOIC-8 pinout, identical
 # across NE555/TLC555/LMC555 and every second-source:

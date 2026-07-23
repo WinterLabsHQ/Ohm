@@ -34,12 +34,12 @@ component Capacitor(Capacitor):
 
 # A = anode = POSITIVE terminal (pad 1, the marked end on tantalum bodies),
 # K = cathode = negative. Default footprint: EIA-3216-18 / Kemet size A tantalum.
-component CapacitorPolarized:
+component CapacitorPolarized(Capacitor):
     package = "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
     designator_prefix = "C"
     value = 0F
-    pin A: role=passive, pad=1
-    pin K: role=passive, pad=2
+    pin A: role=passive, pad=1, is=a
+    pin K: role=passive, pad=2, is=b
 
 component Inductor(Inductor):
     package = generate(CHIP0805)
@@ -50,67 +50,67 @@ component Inductor(Inductor):
 
 # value-less on purpose: bead impedance is spec'd at a frequency (e.g.
 # 600ohm @ 100MHz) — record the part via mpn=, not a single scalar.
-component FerriteBead:
+component FerriteBead(FerriteBead):
     package = generate(CHIP0603)
     designator_prefix = "FB"
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # 2-pad SMD crystal (5032 = 5.0x3.2mm body). Override freq per instance.
-component Crystal2:
+component Crystal2(Crystal):
     package = "Crystal:Crystal_SMD_5032-2Pin_5.0x3.2mm"
     designator_prefix = "Y"
     freq = 0Hz
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # 4-pad SMD crystal, 3225 series convention: crystal on pads 1/3, GND on 2/4.
-component Crystal4:
+component Crystal4(Crystal):
     package = "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
     designator_prefix = "Y"
     freq = 0Hz
-    pin P1:   role=passive, pad=1
+    pin P1:   role=passive, pad=1, is=a
     pin GND1: role=ground,  pad=2
-    pin P2:   role=passive, pad=3
+    pin P2:   role=passive, pad=3, is=b
     pin GND2: role=ground,  pad=4
 
 # value = resistance at 25degC; B-constant/curve is datasheet territory.
-component Thermistor:
+component Thermistor(Thermistor):
     package = generate(CHIP0603)
     designator_prefix = "RT"
     value = 0ohm
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # Multilayer chip varistor (MOV disc users: override package with a
 # Varistor.pretty footprint). Clamping/energy specs are per-part — declare them.
-component Varistor:
+component Varistor(Varistor):
     package = generate(CHIP1206)
     designator_prefix = "RV"
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # Chip fuse. Declare the current rating per part (imax=) — not defaulted here.
-component Fuse:
+component Fuse(Fuse):
     package = "Fuse:Fuse_1206_3216Metric"
     designator_prefix = "F"
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # Resettable PTC fuse (polyfuse). Hold/trip currents are datasheet attrs.
-component PTCResettable:
+component PTCResettable(Fuse):
     package = generate(CHIP1206)
     designator_prefix = "F"
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # SMD trimmer (Bourns 3314G). Per the 3314 datasheet: terminal 1 and 3 are the
 # element ends, terminal 2 is the wiper — matches this footprint's pads 1/2/3.
 # value = end-to-end resistance.
-component Potentiometer:
+component Potentiometer(Potentiometer):
     package = "Potentiometer_SMD:Potentiometer_Bourns_3314G_Vertical"
     designator_prefix = "RV"
     value = 0ohm
-    pin P1:    role=passive, pad=1
-    pin WIPER: role=passive, pad=2
-    pin P2:    role=passive, pad=3
+    pin P1:    role=passive, pad=1, is=t1
+    pin WIPER: role=passive, pad=2, is=wiper
+    pin P2:    role=passive, pad=3, is=t2

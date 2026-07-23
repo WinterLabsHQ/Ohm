@@ -16,17 +16,20 @@
 #   Ethernet pinout under PoE, coin-cell polarity) the comment says so —
 #   verify against your datasheet before layout.
 
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
 # ---------- screw terminal blocks ----------
 # Generic 5.08 mm rising-clamp screw terminals (bornier). Pads 1..N read from
 # the .kicad_mod. Terminals carry whatever you wire through them: role=passive.
 
-component TerminalBlock_2:
+component TerminalBlock_2(Connector):
     package = "TerminalBlock:TerminalBlock_bornier-2_P5.08mm"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
 
-component TerminalBlock_3:
+component TerminalBlock_3(Connector):
     package = "TerminalBlock:TerminalBlock_bornier-3_P5.08mm"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -40,7 +43,7 @@ component TerminalBlock_3:
 # pad 3 = the normally-closed switch contact (shorts to VBUS with no plug
 # inserted, opens when a plug is present). CENTER-POSITIVE is the common
 # convention but IS vendor/part-specific — verify plug polarity for your jack.
-component DCBarrelJack:
+component DCBarrelJack(Connector):
     package = "Connector_BarrelJack:BarrelJack_Horizontal"
     designator_prefix = "J"
     pin VBUS: role=power_out, pad=1
@@ -50,13 +53,13 @@ component DCBarrelJack:
 # ---------- JST XH wire-to-board ----------
 # JST XH series, 2.50 mm pitch, vertical THT. Pads 1..N read from the
 # .kicad_mod. Wire-to-board headers carry whatever you wire: role=passive.
-component JST_XH_2:
+component JST_XH_2(Connector):
     package = "Connector_JST:JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
 
-component JST_XH_3:
+component JST_XH_3(Connector):
     package = "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -74,7 +77,7 @@ component JST_XH_3:
 # MagJack NOTE: magnetics-integrated RJ45s (Hanrun HR911105A, Amphenol
 # RJHSE5380 …) add 30-60+ pads (transformer center-taps, LED pads on the
 # isolated side) and DO NOT share this pin map — swap package= and remap.
-component RJ45:
+component RJ45(Connector):
     package = "Connector_RJ:RJ45_Connfly_DS1128-09-S8xx-S_Horizontal"
     designator_prefix = "J"
     pin P1:     role=passive, pad=1
@@ -89,7 +92,7 @@ component RJ45:
     pin LED2:   role=passive, pad=10
     pin LED3:   role=passive, pad=11
     pin LED4:   role=passive, pad=12
-    pin SHIELD: role=ground,  pad=SH
+    pin SHIELD: role=ground,  pad=SH, is=shield
 
 # ---------- microSD card socket ----------
 # Hirose DM3AT-SF-PEJM5, push-push microSD. Pads read from the .kicad_mod:
@@ -100,7 +103,7 @@ component RJ45:
 # normally-open/closed sense is vendor-variable, verify before use.
 # NOTE: SD-mode vs SPI-mode reuse the same pins (CMD=DI, DAT0=DO, DAT3=CS,
 # CLK=SCLK) — the electrical map is identical; only the protocol differs.
-component MicroSD:
+component MicroSD(Connector):
     package = "Connector_Card:microSD_HC_Hirose_DM3AT-SF-PEJM5"
     designator_prefix = "J"
     pin DAT2:    role=bidirectional, pad=1
@@ -113,7 +116,7 @@ component MicroSD:
     pin DAT1:    role=bidirectional, pad=8
     pin CD:      role=passive,       pad=9
     pin CD_COM:  role=passive,       pad=10
-    pin SHIELD:  role=ground,        pad=11
+    pin SHIELD:  role=ground,        pad=11, is=shield
 
 # ---------- 3.5 mm audio jack (switched TRS) ----------
 # CUI SJ1-3525N, horizontal THT, switched TRS. Named pads read from the
@@ -122,7 +125,7 @@ component MicroSD:
 # T/R when no plug is inserted, opened by an inserted plug) — the classic
 # jack-detect / signal-interrupt contacts. Sleeve is ground in the common
 # headphone convention but that is an application choice: role=passive.
-component AudioJack_3p5:
+component AudioJack_3p5(Connector):
     package = "Connector_Audio:Jack_3.5mm_CUI_SJ1-3525N_Horizontal"
     designator_prefix = "J"
     pin TIP:    role=passive, pad=T
@@ -135,19 +138,19 @@ component AudioJack_3p5:
 # SMA edge/vertical jack (Amphenol 132134). Pads read from the .kicad_mod:
 # center pin id "1" = signal; the FOUR flange/ground posts all share id "2"
 # (one GND net). Keep the signal net at 50 ohm — set the constraint yourself.
-component SMAConnector:
+component SMAConnector(Connector):
     package = "Connector_Coaxial:SMA_Amphenol_132134_Vertical"
     designator_prefix = "J"
     pin SIG: role=passive, pad=1
-    pin GND: role=ground,  pad=2
+    pin GND: role=ground,  pad=2, is=shield   # flange/shell = the ground shield
 
 # U.FL / IPEX micro-coax (Hirose U.FL-R-SMT-1). Pads read from the
 # .kicad_mod: center pad id "1" = signal; the two ground pads share id "2".
-component UFL:
+component UFL(Connector):
     package = "Connector_Coaxial:U.FL_Hirose_U.FL-R-SMT-1_Vertical"
     designator_prefix = "J"
     pin SIG: role=passive, pad=1
-    pin GND: role=ground,  pad=2
+    pin GND: role=ground,  pad=2, is=shield   # shell = the ground shield
 
 # ---------- coin cell / battery holders ----------
 # Keystone 3002 SMD CR2032 holder. Pads read from the .kicad_mod: the two
@@ -155,27 +158,27 @@ component UFL:
 # POLARITY IS HOLDER-SPECIFIC: this follows KiCad's battery symbol pairing
 # (pad 1 = +, pad 2 = -). VERIFY which face of your holder is positive
 # before layout. Declare cell voltage per instance (e.g. voltage=3.0V).
-component CoinCellHolder:
+component CoinCellHolder(Battery):
     package = "Battery:BatteryHolder_Keystone_3002_1x2032"
     designator_prefix = "BT"
-    pin PLUS:  role=power_out, pad=1
-    pin MINUS: role=ground,    pad=2
+    pin PLUS:  role=power_out, pad=1, is=pos
+    pin MINUS: role=ground,    pad=2, is=neg
 
 # Generic 2-terminal battery / source (Keystone 1058 CR2032 holder, pads 1/2
 # read from the .kicad_mod). + = power_out, - = ground; same KiCad pad
 # polarity convention (pad 1 = +, pad 2 = -) — VERIFY on your holder.
-component Battery2:
+component Battery2(Battery):
     package = "Battery:BatteryHolder_Keystone_1058_1x2032"
     designator_prefix = "BT"
-    pin PLUS:  role=power_out, pad=1
-    pin MINUS: role=ground,    pad=2
+    pin PLUS:  role=power_out, pad=1, is=pos
+    pin MINUS: role=ground,    pad=2, is=neg
 
 # ---------- IC socket ----------
 # DIP-8 THT socket (Package_DIP DIP-8-16_W7.62mm_Socket footprint — a
 # socketed 8-lead DIP land pattern). Pads 1..8 read from the .kicad_mod;
 # this is a SOCKET land, so the DIP part drops into it — pin==pad straight
 # through, role=passive (the socketed IC owns the real pin functions).
-component ICSocket_DIP8:
+component ICSocket_DIP8(Connector):
     package = "Package_DIP:DIP-8-16_W7.62mm_Socket"
     designator_prefix = "XU"
     pin P1: role=passive, pad=1

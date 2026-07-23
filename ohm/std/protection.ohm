@@ -6,12 +6,15 @@
 # the .kicad_mod on disk (pad ids grepped). NO invented ratings — declare
 # vmax/imax/pmax at instantiation from your datasheet.
 
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
 # KiCad D_SOD-523 pads verified (1, 2); pad 1 = cathode (KiCad convention).
-component ESDDiode:
+component ESDDiode(Diode):
     package = "Diode_SMD:D_SOD-523"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
 # 4-channel ESD/TVS array, SOT-23-6. Pad map below is the COMMON array
 # convention (ch on 1,3,4,6; GND=2; VCC=5) — but channel ORDER VARIES BY
@@ -28,8 +31,8 @@ component TVSArray4:
     pin CH4: role=bidirectional, pad=6
 
 # Resettable PTC fuse, 1206 chip — non-polar two-terminal.
-component PolyFuse:
+component PolyFuse(Fuse):
     package = generate(CHIP1206)
     designator_prefix = "F"
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b

@@ -13,24 +13,27 @@
 # - Where a pad->function mapping is vendor-variable it is flagged in a
 #   comment — verify against your datasheet before fabbing.
 
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
 # ---------- pin headers (2.54 mm, vertical THT) ----------
 # Pads 1..N read from the .kicad_mod files; pin 1 is the marked end.
 # Headers carry whatever you wire through them: role=passive throughout.
 
-component Header_1x02:
+component Header_1x02(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
 
-component Header_1x03:
+component Header_1x03(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
     pin P3: role=passive, pad=3
 
-component Header_1x04:
+component Header_1x04(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -38,7 +41,7 @@ component Header_1x04:
     pin P3: role=passive, pad=3
     pin P4: role=passive, pad=4
 
-component Header_1x05:
+component Header_1x05(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -47,7 +50,7 @@ component Header_1x05:
     pin P4: role=passive, pad=4
     pin P5: role=passive, pad=5
 
-component Header_1x06:
+component Header_1x06(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -57,7 +60,7 @@ component Header_1x06:
     pin P5: role=passive, pad=5
     pin P6: role=passive, pad=6
 
-component Header_1x08:
+component Header_1x08(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -69,7 +72,7 @@ component Header_1x08:
     pin P7: role=passive, pad=7
     pin P8: role=passive, pad=8
 
-component Header_1x10:
+component Header_1x10(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1:  role=passive, pad=1
@@ -85,7 +88,7 @@ component Header_1x10:
 
 # 2-row headers: KiCad numbers pads 1..2N (odd row / even row zig-zag,
 # matching ribbon-cable IDC numbering). Pads 1..6 / 1..10 read from disk.
-component Header_2x03:
+component Header_2x03(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_2x03_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
@@ -95,7 +98,7 @@ component Header_2x03:
     pin P5: role=passive, pad=5
     pin P6: role=passive, pad=6
 
-component Header_2x05:
+component Header_2x05(Connector):
     package = "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical"
     designator_prefix = "J"
     pin P1:  role=passive, pad=1
@@ -118,12 +121,15 @@ component Header_2x05:
 # 1-2 are one pole and 3-4 the other; the switch closes 1/2 <-> 3/4.
 # VENDOR-VARIABLE: some tact families pair across the diagonal — verify the
 # internal pairing against your datasheet before relying on it.
-component TactSwitch4:
+# Switch requires two contacts (a,b): pads 1-2 are one pole, 3-4 the other,
+# so one pad from each side is the two electrical nodes — P1(pole 1/2)=a,
+# P3(pole 3/4)=b. P2/P4 are the tied extra contacts (unbound).
+component TactSwitch4(Switch):
     package = "Button_Switch_SMD:SW_MEC_5GSH9"
     designator_prefix = "SW"
-    pin P1: role=passive, pad=1
+    pin P1: role=passive, pad=1, is=a
     pin P2: role=passive, pad=2
-    pin P3: role=passive, pad=3
+    pin P3: role=passive, pad=3, is=b
     pin P4: role=passive, pad=4
 
 # SPDT slide switch. Footprint: C&K JS102011SAQN (JS series, SMD), pads
@@ -131,11 +137,13 @@ component TactSwitch4:
 # terminal (pad 2) is the common; position 1 closes 1-2, position 2 closes
 # 2-3. Center-common is near-universal for 3-pin slide switches, but verify
 # against your datasheet.
-component SlideSwitch:
+# Switch a,b = the common + one throw (COM=a, A=b); the other throw (B) is
+# the extra contact.
+component SlideSwitch(Switch):
     package = "Button_Switch_SMD:SW_SPDT_CK_JS102011SAQN"
     designator_prefix = "SW"
-    pin A:   role=passive, pad=1
-    pin COM: role=passive, pad=2
+    pin A:   role=passive, pad=1, is=b
+    pin COM: role=passive, pad=2, is=a
     pin B:   role=passive, pad=3
 
 # ---------- relay ----------
@@ -148,12 +156,12 @@ component SlideSwitch:
 # NO/NC 12 mm apart at the contact end). SRD coils are non-polarized.
 # N3: coil voltage/contact ratings are per-part — declare them at
 # instantiation from your datasheet (e.g. SRD-05VDC-SL-C = 5 V coil).
-component Relay_SPDT:
+component Relay_SPDT(Relay):
     package = "Relay_THT:Relay_SPDT_SANYOU_SRD_Series_Form_C"
     designator_prefix = "K"
-    pin COIL_A: role=passive, pad=2
-    pin COIL_B: role=passive, pad=5
-    pin COM:    role=passive, pad=1
+    pin COIL_A: role=passive, pad=2, is=coil_a
+    pin COIL_B: role=passive, pad=5, is=coil_b
+    pin COM:    role=passive, pad=1, is=com
     pin NO:     role=passive, pad=3
     pin NC:     role=passive, pad=4
 
@@ -210,11 +218,11 @@ component RotaryEncoder_EC11:
 # electromagnetic buzzers ARE polarized — the marked terminal (commonly pad 1)
 # is "+"; piezo transducers are NON-polarized. Pins named P1/P2 (neutral);
 # confirm the +/- assignment against your buzzer's datasheet.
-component Buzzer:
+component Buzzer(Buzzer):
     package = "Buzzer_Beeper:MagneticBuzzer_CUI_CST-931RP-A"
     designator_prefix = "BZ"
-    pin P1: role=passive, pad=1      # marked "+" on polarized DC types
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a      # marked "+" on polarized DC types
+    pin P2: role=passive, pad=2, is=b
 
 # ---------------------------------------------------------------------------
 # TEMPLATE (adapt to your datasheet): DPDT relay

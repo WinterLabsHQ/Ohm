@@ -10,76 +10,80 @@
 # pad 1 = cathode (K), pad 2 = anode (A). Verified in
 # D_SOD-123 / D_SMA / D_SOD-323 / LED_0603_1608Metric .kicad_mod (pads 1, 2).
 
-component Diode:
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
+component Diode(Diode):
     package = "Diode_SMD:D_SOD-123"
     designator_prefix = "D"
-    pin K: role=passive, pad=1    # cathode = pad 1 (KiCad diode convention)
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode    # cathode = pad 1 (KiCad diode convention)
+    pin A: role=passive, pad=2, is=anode
 
-component Schottky:
+component Schottky(Schottky):
     package = "Diode_SMD:D_SOD-123"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
-component Zener:
+component Zener(Zener):
     package = "Diode_SMD:D_SOD-123"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
-component LED:
+component LED(LED):
     package = "LED_SMD:LED_0603_1608Metric"
     designator_prefix = "D"
-    pin K: role=passive, pad=1    # cathode = pad 1 (KiCad LED convention)
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode    # cathode = pad 1 (KiCad LED convention)
+    pin A: role=passive, pad=2, is=anode
 
 # SOT-23-3 BJT industry convention: pin 1 = Base, pin 2 = Emitter,
 # pin 3 = Collector (e.g. BC846/BC856, MMBT3904/3906 families).
-component BJT_NPN:
+component BJT_NPN(BJT):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin B: role=input, pad=1
-    pin E: role=passive, pad=2
-    pin C: role=passive, pad=3
+    pin B: role=input, pad=1, is=base
+    pin E: role=passive, pad=2, is=emitter
+    pin C: role=passive, pad=3, is=collector
 
-component BJT_PNP:
+component BJT_PNP(BJT):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin B: role=input, pad=1
-    pin E: role=passive, pad=2
-    pin C: role=passive, pad=3
+    pin B: role=input, pad=1, is=base
+    pin E: role=passive, pad=2, is=emitter
+    pin C: role=passive, pad=3, is=collector
 
 # SOT-23-3 MOSFET industry convention: pin 1 = Gate, pin 2 = Source,
 # pin 3 = Drain (e.g. 2N7002, BSS138, AO3400 families).
-component NMOS:
+component NMOS(MOSFET):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin G: role=input, pad=1
-    pin S: role=passive, pad=2
-    pin D: role=passive, pad=3
+    pin G: role=input, pad=1, is=gate
+    pin S: role=passive, pad=2, is=source
+    pin D: role=passive, pad=3, is=drain
 
-component PMOS:
+component PMOS(MOSFET):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin G: role=input, pad=1
-    pin S: role=passive, pad=2
-    pin D: role=passive, pad=3
+    pin G: role=input, pad=1, is=gate
+    pin S: role=passive, pad=2, is=source
+    pin D: role=passive, pad=3, is=drain
 
 # TVS in SMA (DO-214AC): KiCad D_SMA pads verified (1, 2); unidirectional
 # follows the diode convention pad 1 = cathode.
-component TVS_Uni:
+component TVS_Uni(TVS):
     package = "Diode_SMD:D_SMA"
     designator_prefix = "D"
-    pin K: role=passive, pad=1
-    pin A: role=passive, pad=2
+    pin K: role=passive, pad=1, is=cathode
+    pin A: role=passive, pad=2, is=anode
 
 # Bidirectional TVS has no cathode/anode polarity — pins named T1/T2.
-component TVS_Bi:
+# Symmetric part: anode/cathode picked arbitrarily-but-consistently (T1=anode).
+component TVS_Bi(TVS):
     package = "Diode_SMD:D_SMA"
     designator_prefix = "D"
-    pin T1: role=passive, pad=1
-    pin T2: role=passive, pad=2
+    pin T1: role=passive, pad=1, is=anode
+    pin T2: role=passive, pad=2, is=cathode
 
 # ---------- appended: bridge rectifier, pre-biased & JFET, thyristors ----------
 # Same N3 discipline: concrete pads only where a paired KiCad symbol or the
@@ -93,13 +97,13 @@ component TVS_Bi:
 # VENDOR-VARIABLE: the +/-/~/~ package marking is universal, but WHICH pad
 # number carries each terminal changes by package (e.g. Vishay KBU is
 # 1=+ 2=~ 3=~ 4=-). Verify the pad->terminal map against YOUR bridge datasheet.
-component BridgeRectifier:
+component BridgeRectifier(BridgeRectifier):
     package = "Diode_SMD:Diode_Bridge_Diotec_ABS"
     designator_prefix = "D"
-    pin VP:  role=passive, pad=1    # V+  DC output ("+")
-    pin VN:  role=passive, pad=2    # V-  DC return ("-")
-    pin AC1: role=passive, pad=3    # AC input ("~")
-    pin AC2: role=passive, pad=4    # AC input ("~")
+    pin VP:  role=passive, pad=1, is=dcp    # V+  DC output ("+")
+    pin VN:  role=passive, pad=2, is=dcn    # V-  DC return ("-")
+    pin AC1: role=passive, pad=3, is=ac1    # AC input ("~")
+    pin AC2: role=passive, pad=4, is=ac2    # AC input ("~")
 
 # Pre-biased ("digital") BJT: an NPN/PNP with integrated base (and often
 # base-emitter) resistors inside the SOT-23. SAME SOT-23-3 pinout as BJT_NPN:
@@ -107,31 +111,32 @@ component BridgeRectifier:
 # (DTC/DTA, PDTC/PDTA, RN12xx families).
 # N3: internal bias R (R1/R2) and current gain set the input threshold and are
 # per-part datasheet facts (RR/gain per datasheet) — declare them per instance.
-component DigitalTransistor_NPN:
+component DigitalTransistor_NPN(BJT):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin B: role=input,   pad=1      # base via internal bias R
-    pin E: role=passive, pad=2
-    pin C: role=passive, pad=3
+    pin B: role=input,   pad=1, is=base      # base via internal bias R
+    pin E: role=passive, pad=2, is=emitter
+    pin C: role=passive, pad=3, is=collector
 
-component DigitalTransistor_PNP:
+component DigitalTransistor_PNP(BJT):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin B: role=input,   pad=1      # base via internal bias R
-    pin E: role=passive, pad=2
-    pin C: role=passive, pad=3
+    pin B: role=input,   pad=1, is=base      # base via internal bias R
+    pin E: role=passive, pad=2, is=emitter
+    pin C: role=passive, pad=3, is=collector
 
-# N-channel JFET, SOT-23-3. VENDOR-VARIABLE pinout — this follows the common
-# Fairchild MMBFJ11x / J11x family, verified against KiCad symbol
-# Transistor_FET:MMBFJ113 (-> BSR56): pin 1 = Drain, pin 2 = Source, pin 3 = Gate.
-# WARNING: other SOT-23 JFETs differ (e.g. BF545 is 1=Source 2=Drain 3=Gate).
+# N-channel JFET, SOT-23-3. VENDOR-VARIABLE pinout. This map (1=Drain 2=Source
+# 3=Gate) matches the Fairchild/ON J11x datasheet (Gate = the SOT-23 lone pad =
+# pad 3; D/S on 1/2) and KiCad symbol Transistor_FET:BSR56. NOTE: KiCad's own
+# MMBFJ113 symbol instead numbers G=1/S=2/D=3 — symbols disagree, so trust the
+# datasheet. Other SOT-23 JFETs differ again (BF545 = 1=Source 2=Drain 3=Gate).
 # ALWAYS verify the D/S/G-to-pad order against YOUR JFET datasheet before layout.
-component JFET_N:
+component JFET_N(JFET):
     package = generate(SOT23, pins=3)
     designator_prefix = "Q"
-    pin D: role=passive, pad=1
-    pin S: role=passive, pad=2
-    pin G: role=input,   pad=3
+    pin D: role=passive, pad=1, is=drain
+    pin S: role=passive, pad=2, is=source
+    pin G: role=input,   pad=3, is=gate
 
 # ---------------------------------------------------------------------------
 # TEMPLATE (adapt to your datasheet): thyristor / SCR (gate, anode, cathode)
