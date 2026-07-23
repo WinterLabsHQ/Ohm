@@ -1,0 +1,28 @@
+# USB connector + device — require pair() relation, ratings, mixed roles
+interface USB2:
+    dp: Signal, role=bidirectional
+    dm: Signal, role=bidirectional
+    require pair(dp, dm)
+
+component UsbConn:
+    package = "USB_Micro-B_Molex-105017-0001"
+    designator_prefix = "J"
+    pin VBUS: role=power_out, pad=1
+    pin DM:   role=bidirectional, pad=2
+    pin DP:   role=bidirectional, pad=3
+    pin GND:  role=ground, pad=5
+
+component UsbDevice:
+    package = "QFN-24-1EP_4x4mm_P0.5mm"
+    pin VDD: role=power_in, vmax=5.5V, pad=1
+    pin DP:  role=bidirectional, pad=10
+    pin DM:  role=bidirectional, pad=11
+    pin GND: role=ground, pad=13
+
+module UsbBoard:
+    j = UsbConn()
+    u = UsbDevice()
+    j.DP ~ u.DP
+    j.DM ~ u.DM
+    j.VBUS ~ u.VDD
+    j.GND ~ u.GND

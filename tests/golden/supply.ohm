@@ -1,0 +1,25 @@
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+
+interface Power:
+    v:   Signal, role=power_in
+    gnd: Signal, role=ground
+
+component NCP1529:
+    package = "TSOT-23-5"
+    mpn = "NCP1529ASNT1G"
+    pin EN:  role=input
+    pin GND: role=ground
+    pin SW:  role=power_out
+    pin VIN: role=power_in, vmax=6.0V
+    pin FB:  role=input
+
+module Supply:
+    vin  = io(Power)
+    vout = io(Power)
+    reg  = NCP1529()
+    vin.v   ~ reg.VIN
+    vin.gnd ~ reg.GND
+    assert vin.v.voltage <= reg.VIN.vmax        # Tier-Q closed-form
+    obligation ripple(vout.v) < 50mV            # HOLE -> solver seam (not built)

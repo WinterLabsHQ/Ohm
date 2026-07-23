@@ -136,6 +136,47 @@ class Design:
     top: str | None  # ponytail: top = last-declared module; --top flag when needed
 
 
+# ---------- IR-LOW (flat, emitter-ready; produced by P-LOWER) ----------
+@dataclass(frozen=True)
+class PartLow:
+    ref: str  # hierarchical path, e.g. "reg" or "sensor.u1" (deterministic uniquification)
+    designator: str  # e.g. "U1"
+    component: str
+    package: Value | None
+    attrs: tuple[tuple[str, Value], ...]
+
+
+@dataclass(frozen=True)
+class NetNode:
+    part_ref: str
+    designator: str
+    pin: str
+    pad: str | None  # netlist pin number = pad if mapped, else pin name
+
+
+@dataclass(frozen=True)
+class NetLow:
+    name: str
+    nodes: tuple[NetNode, ...]
+    ports: tuple[str, ...]  # external port-member labels on this net
+
+
+@dataclass(frozen=True)
+class Hole:
+    kind: str
+    args: tuple[tuple[str, ...], ...]
+    op: str
+    bound_repr: str
+
+
+@dataclass(frozen=True)
+class IRLow:
+    parts: tuple[PartLow, ...]
+    nets: tuple[NetLow, ...]
+    constraints: tuple = ()  # R7 constraint entries (P10)
+    holes: tuple[Hole, ...] = ()  # obligations → solver seam (P8)
+
+
 def _jsonable(obj):
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         d = {"__type__": type(obj).__name__}
@@ -149,6 +190,6 @@ def _jsonable(obj):
     return obj
 
 
-def to_json(design: Design) -> str:
-    """Deterministic serialization: same design ⇒ byte-identical JSON."""
-    return json.dumps(_jsonable(design), sort_keys=True, indent=1)
+def to_json(node: Design | IRLow) -> str:
+    """Deterministic serialization: same input ⇒ byte-identical JSON."""
+    return json.dumps(_jsonable(node), sort_keys=True, indent=1)

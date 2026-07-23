@@ -1,0 +1,24 @@
+# LED + series resistor — raw pin connects (escape hatch), mixed prefixes
+interface Power:
+    v:   Signal, role=power_in
+    gnd: Signal, role=ground
+
+component LED0603:
+    package = "LED_0603_1608Metric"
+    designator_prefix = "D"
+    pin A: role=passive, pad=1
+    pin K: role=passive, pad=2
+
+component R0402:
+    package = "R_0402_1005Metric"
+    designator_prefix = "R"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+module Blinky:
+    pwr = io(Power)
+    d1 = LED0603()
+    r1 = R0402(value=330ohm)
+    pwr.v ~ r1.P1
+    r1.P2 ~ d1.A
+    d1.K ~ pwr.gnd

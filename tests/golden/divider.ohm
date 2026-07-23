@@ -1,0 +1,21 @@
+# Resistor divider — passives, pads, tolerance, designator prefixes
+interface Power:
+    v:   Signal, role=power_in
+    gnd: Signal, role=ground
+
+component R0402:
+    package = "R_0402_1005Metric"
+    designator_prefix = "R"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+module Divider:
+    vin  = io(Power)
+    vout = io(Power)
+    r1 = R0402(value=10kohm +/- 1%)
+    r2 = R0402(value=10kohm +/- 1%)
+    vin.v ~ r1.P1
+    r1.P2 ~ r2.P1
+    r1.P2 ~ vout.v
+    vin.gnd ~ r2.P2
+    vin.gnd ~ vout.gnd

@@ -1,0 +1,12 @@
+(export (version "E")
+  (design (source "tests/golden/led.ohm") (tool "ohm 0.1.0"))
+  (components
+    (comp (ref "D1") (value "LED0603") (footprint "LED_0603_1608Metric") (fields (field (name "ohm_ref") "d1")))
+    (comp (ref "R1") (value "R0402") (footprint "R_0402_1005Metric") (fields (field (name "ohm_ref") "r1")))
+  )
+  (nets
+    (net (code "1") (name "d1.A") (node (ref "D1") (pin "1")) (node (ref "R1") (pin "2")))
+    (net (code "2") (name "pwr.gnd") (node (ref "D1") (pin "2")))
+    (net (code "3") (name "pwr.v") (node (ref "R1") (pin "1")))
+  )
+)

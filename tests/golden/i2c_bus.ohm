@@ -1,0 +1,31 @@
+# MCU + sensor over typed I2C — hierarchy + interface-to-interface expansion
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+
+component MCU:
+    package = "QFN-16-1EP_3x3mm_P0.5mm"
+    pin SCL: role=bidirectional, pad=5
+    pin SDA: role=bidirectional, pad=6
+
+component Sensor:
+    package = "SOT-23-6"
+    pin SCL: role=bidirectional, pad=1
+    pin SDA: role=bidirectional, pad=3
+
+module McuBlock:
+    bus = io(I2C)
+    u = MCU()
+    bus.scl ~ u.SCL
+    bus.sda ~ u.SDA
+
+module SensorBlock:
+    bus = io(I2C)
+    s = Sensor()
+    bus.scl ~ s.SCL
+    bus.sda ~ s.SDA
+
+module Board:
+    mcu = McuBlock()
+    sens = SensorBlock()
+    mcu.bus ~ sens.bus
