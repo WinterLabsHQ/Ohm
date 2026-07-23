@@ -14,24 +14,31 @@ from ohm.emit_netlist import emit_netlist
 
 
 def _emit_generated_packages(result, outdir: Path) -> None:
-    """P-GEN-PACKAGE: write .kicad_mod/.kicad_sym for every generate(...) component."""
+    """P-GEN-PACKAGE: write one .kicad_mod per distinct generated package
+    (spec-named, shared across parts) and one .kicad_sym per component."""
     from ohm.ir import GenerateSpec
     from ohm.pkggen.footprint import emit_footprint
-    from ohm.pkggen.packages import build_from_spec
+    from ohm.pkggen.packages import build_from_spec, spec_name
     from ohm.pkggen.pindata_iface import DeclaredPinData
     from ohm.pkggen.symbol import emit_symbol
 
     comps = {c.name: c for c in result.design.components}
-    done = set()
+    footprints_done: set[str] = set()
+    symbols_done: set[str] = set()
     for part in result.low.parts:
-        comp = comps[part.component]
-        if not isinstance(comp.package, GenerateSpec) or comp.name in done:
+        spec = part.package  # effective package (R9 override already applied)
+        if not isinstance(spec, GenerateSpec):
             continue
-        done.add(comp.name)
-        model = build_from_spec(comp.package, comp.name)  # S006 already gated errors
-        (outdir / f"{comp.name}.kicad_mod").write_text(emit_footprint(model))
-        pins = DeclaredPinData().pin_table(comp)
-        (outdir / f"{comp.name}.kicad_sym").write_text(emit_symbol(comp.name, pins))
+        fp_name = spec_name(spec)
+        if fp_name not in footprints_done:
+            footprints_done.add(fp_name)
+            model = build_from_spec(spec, fp_name)  # S006 already gated errors
+            (outdir / f"{fp_name}.kicad_mod").write_text(emit_footprint(model))
+        comp = comps[part.component]
+        if comp.name not in symbols_done:
+            symbols_done.add(comp.name)
+            pins = DeclaredPinData().pin_table(comp)
+            (outdir / f"{comp.name}.kicad_sym").write_text(emit_symbol(comp.name, pins))
 
 
 def _report(result, source: str, as_json: bool) -> None:

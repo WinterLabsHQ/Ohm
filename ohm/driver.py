@@ -17,8 +17,8 @@ from ohm.check_units import annotate_units, check_units
 from ohm.closedform import fold_asserts
 from ohm.diagnostics import Diagnostic, has_errors
 from ohm.holes import collect_holes
+from ohm.loader import load
 from ohm.lower import lower
-from ohm.parse import parse
 from ohm.resolve import resolve
 
 CHECKERS = [check_units, check_structural, check_intent, fold_asserts, check_quant]
@@ -39,7 +39,7 @@ class CompileResult:
 def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
                    debug_passes: bool = False) -> CompileResult:
     result = CompileResult()
-    program, pdiags = parse(source, path)
+    program, pdiags = load(source, path)  # parse + `use` import closure (ADR-007)
     result.diagnostics += pdiags
     # parse errors are not fatal to analysis: resolve + checkers still run on the
     # recovered partial Program (design §5 best-effort); lower/emit never runs.

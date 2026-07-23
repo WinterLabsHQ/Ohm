@@ -91,6 +91,7 @@ class InterfaceDecl:
     members: tuple[Member, ...]
     requires: tuple[Require, ...]
     span: Span
+    file: str | None = None  # stamped by the loader (ADR-007)
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,7 @@ class ComponentDecl:
     attrs: tuple[Attr, ...]  # package/mpn/...
     pins: tuple[PinDecl, ...]
     span: Span
+    file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,9 +152,20 @@ class ModuleDecl:
     name: str
     items: tuple[ModuleItem, ...]
     span: Span
+    file: str | None = None
 
 
-Decl = InterfaceDecl | ComponentDecl | ModuleDecl
+@dataclass(frozen=True)
+class UseDecl:
+    """`use std.passives` / `use "./mylib.ohm"` — resolved by the loader (ADR-007)."""
+
+    target: str
+    is_path: bool  # True for the quoted-string form
+    span: Span
+    file: str | None = None
+
+
+Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl
 
 
 def to_src(e: Expr) -> str:

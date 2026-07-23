@@ -1,0 +1,70 @@
+# Ohm standard library — bus and port interfaces (std.interfaces)
+#
+# Typed bundles for `io(...)` ports and interface-to-interface connects.
+# `require pair(...)` marks members that miswiring commonly swaps — the
+# compiler then catches crossed connections (I005).
+#
+# Honesty (N3): these declare signal INTENT only; electrical characteristics
+# (levels, termination, speed grades) are yours to check via asserts/ratings.
+
+interface Power:
+    v:   Signal, role=power_in
+    gnd: Signal, role=ground
+
+interface PowerOut:
+    v:   Signal, role=power_out
+    gnd: Signal, role=ground
+
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+    require pair(sda, scl)
+
+interface SPI4:
+    sck:  Signal, role=output
+    mosi: Signal, role=output
+    miso: Signal, role=input
+    cs:   Signal, role=output
+    require pair(mosi, miso)
+
+# UART deliberately has NO require pair: tx~rx CROSSING is the correct wiring
+# between two devices, so a same-name rule would reject valid designs.
+interface UART:
+    tx: Signal, role=output
+    rx: Signal, role=input
+
+interface USB2:
+    dp: Signal, role=bidirectional
+    dm: Signal, role=bidirectional
+    require pair(dp, dm)
+
+interface CAN:
+    canh: Signal, role=bidirectional
+    canl: Signal, role=bidirectional
+    require pair(canh, canl)
+
+interface RS485:
+    a: Signal, role=bidirectional
+    b: Signal, role=bidirectional
+    require pair(a, b)
+
+interface SWD:
+    swclk: Signal, role=output
+    swdio: Signal, role=bidirectional
+    require pair(swdio, swclk)
+
+interface JTAG:
+    tck: Signal, role=output
+    tms: Signal, role=output
+    tdi: Signal, role=output
+    tdo: Signal, role=input
+    require pair(tdi, tdo)
+
+interface DiffPair:
+    p: Signal, role=bidirectional
+    n: Signal, role=bidirectional
+    require pair(p, n)
+
+interface AnalogIn:
+    sig: Signal, role=input
+    gnd: Signal, role=ground

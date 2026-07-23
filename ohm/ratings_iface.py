@@ -22,11 +22,24 @@ class Ratings:
 
 
 class RatingsProvider(Protocol):
-    def ratings(self, component: ir.ComponentDef, pin: ir.Pin) -> Ratings: ...
+    def ratings(self, component: ir.ComponentDef, pin: ir.Pin,
+                part_attrs: dict[str, ir.Value] | None = None) -> Ratings: ...
 
 
 class DeclaredRatings:
-    """Provider (d): ratings are the pin's own declared typed fields."""
+    """Provider (d): the pin's declared typed fields, falling back to part-level
+    attrs (which already include instance overrides) — so a library block rated
+    per instance, `Resistor(value=…, pmax=250mW)`, is fully Tier-Q-checkable."""
 
-    def ratings(self, component: ir.ComponentDef, pin: ir.Pin) -> Ratings:
-        return Ratings(pin.vmax, pin.imax, pin.pmax)
+    def ratings(self, component: ir.ComponentDef, pin: ir.Pin,
+                part_attrs: dict[str, ir.Value] | None = None) -> Ratings:
+        attrs = part_attrs or {}
+
+        def pick(pin_field: ir.Quantity | None, key: str) -> ir.Quantity | None:
+            if pin_field is not None:
+                return pin_field
+            fallback = attrs.get(key)
+            return fallback if isinstance(fallback, ir.Quantity) else None
+
+        return Ratings(pick(pin.vmax, "vmax"), pick(pin.imax, "imax"),
+                       pick(pin.pmax, "pmax"))

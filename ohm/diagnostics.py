@@ -78,6 +78,8 @@ EXPLAIN: dict[str, str] = {
     "R012": "An instance override names a config/attr the target does not declare — modules accept only declared configs; components accept new attrs unless the name is a near-miss of a declared attr or pin.",
     "R013": "An argument in a require relation or obligation is not usable (keyword args and literal obligation args are ignored).",
     "R014": "A module instantiates itself, directly or through a cycle — the hierarchy cannot be built. Break the cycle.",
+    "R015": "A `use` import could not be found or read. std modules use dotted form (use std.passives); local files use the quoted form (use \"./lib.ohm\").",
+    "R016": "Import cycle: a file is (transitively) importing itself. Break the cycle; shared imports of the same file from two places are fine.",
     "U001": "Adding/subtracting quantities of different dimensions (e.g. volts + ohms). Convert or fix the expression.",
     "U002": "Comparing quantities of different dimensions. Both sides of a comparison must share a dimension.",
     "U003": "Unknown unit. See the v1 unit table in the language spec.",

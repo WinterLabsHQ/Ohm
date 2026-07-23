@@ -6,6 +6,10 @@ start: (_NL | top_decl)*
 top_decl: interface_decl
         | component_decl
         | module_decl
+        | use_stmt
+
+// ---------- imports (ADR-007) ----------
+use_stmt: "use" (ref | STRING) _NL
 
 // ---------- interface (R5) ----------
 interface_decl: "interface" NAME ":" _NL _INDENT interface_item+ _DEDENT

@@ -33,7 +33,9 @@ def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
         if isinstance(p.package, str):
             fp = p.package
         elif isinstance(p.package, ir.GenerateSpec):
-            fp = f"ohm:{p.component}"  # sibling generated .kicad_mod (P11)
+            from ohm.pkggen.packages import spec_name
+
+            fp = f"ohm:{spec_name(p.package)}"  # sibling generated .kicad_mod (P11)
         else:
             fp = ""
         attrs = dict(p.attrs)

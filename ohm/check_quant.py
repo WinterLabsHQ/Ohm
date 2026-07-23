@@ -47,6 +47,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
     if low is None:  # standalone use; the driver passes its single lower() result
         low, _ = lower(design, path)
     part_comp = {p.ref: comps[p.component] for p in low.parts}
+    part_attrs = {p.ref: dict(p.attrs) for p in low.parts}  # incl. instance overrides (R9)
     pins_of = {c.name: first_by_name(c.pins) for c in design.components}
     net_voltage: dict[tuple[str, str], tuple[str, Interval]] = {}  # (part_ref, pin) -> (net, V)
 
@@ -84,7 +85,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
 
             # --- Q001: over-voltage against each pin's vmax rating ---
             for node, comp, pin in pins:
-                vmax = _iv(provider.ratings(comp, pin).vmax)
+                vmax = _iv(provider.ratings(comp, pin, part_attrs[node.part_ref]).vmax)
                 if vmax is not None and hull.hi > vmax.lo:
                     diags.append(Diagnostic(
                         "error", "Q001",
@@ -99,7 +100,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
                  and (iv := _iv(pin.current)) is not None]
         if len(drivers) == 1 and draws:
             node, comp, pin = drivers[0]
-            imax = _iv(provider.ratings(comp, pin).imax)
+            imax = _iv(provider.ratings(comp, pin, part_attrs[node.part_ref]).imax)
             if imax is not None:
                 total = draws[0][1]
                 for _, iv in draws[1:]:
@@ -132,7 +133,7 @@ def check_quant(design: ir.Design, path: str = "<string>",
         dv_max = max(abs(diff.lo), abs(diff.hi))
         p_hi = dv_max * dv_max / r.iv.lo
         for pin in comp.pins:
-            pmax = _iv(provider.ratings(comp, pin).pmax)
+            pmax = _iv(provider.ratings(comp, pin, part_attrs[part.ref]).pmax)
             if pmax is not None and p_hi > pmax.lo:
                 diags.append(Diagnostic(
                     "error", "Q003",

@@ -34,10 +34,10 @@ def test_generated_package_footprint():
     path = FIXTURES / "agent_mcp9808.ohm"
     result = compile_ok(path.read_text(), str(path))
     net = emit_netlist(result.low, path.name)
-    assert '(footprint "ohm:MCP9808")' in net
+    assert '(footprint "ohm:TSSOP-8")' in net
     assert '(footprint "")' not in net
     sch = emit_kicad_sch(result.low, path.name)
-    assert "(ohm:MCP9808)" in sch
+    assert "(ohm:TSSOP-8)" in sch
 
 
 # ---------- finding 3: backslash escaped before quotes ----------

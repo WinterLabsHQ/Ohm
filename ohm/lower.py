@@ -155,11 +155,14 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         prefix = str(dict(comp.attrs).get("designator_prefix", "U"))
         counters[prefix] = counters.get(prefix, 0) + 1
         des_of[ref] = f"{prefix}{counters[prefix]}"
-        # instance overrides win over component attr defaults (R9)
+        # instance overrides win over component attr defaults (R9) — including
+        # the package itself ("Library parts carry default package/footprint;
+        # override via attrs")
         merged = dict(comp.attrs) | dict(overrides)
+        package = merged.pop("package", comp.package)
         keys = [k for k, _ in comp.attrs] + [k for k, _ in overrides if k not in dict(comp.attrs)]
-        attrs = tuple((k, merged[k]) for k in keys)
-        parts_low.append(ir.PartLow(ref, des_of[ref], comp.name, comp.package, attrs))
+        attrs = tuple((k, merged[k]) for k in keys if k != "package")
+        parts_low.append(ir.PartLow(ref, des_of[ref], comp.name, package, attrs))
 
     # group slots into nets
     groups: dict[str, list[str]] = {}

@@ -139,7 +139,7 @@ def test_build_emits_generated_packages(tmp_path):
     r = subprocess.run([str(OHM_BIN), "build", str(src), "-o", str(tmp_path / "out"),
                         "--emit", "kicad"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    mod = (tmp_path / "out" / "Op8.kicad_mod").read_text()
+    mod = (tmp_path / "out" / "SOIC-8.kicad_mod").read_text()  # footprint is spec-named, shared
     sym = (tmp_path / "out" / "Op8.kicad_sym").read_text()
     assert mod.count("(pad ") == 8
     assert '"OUTA"' in sym and '"VDD"' in sym  # symbol uses the declared pin names

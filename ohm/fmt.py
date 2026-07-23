@@ -64,6 +64,9 @@ def _item_line(item: A.ModuleItem) -> str:
 def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
     """[(source_line, source_end_line, formatted_text)] for a declaration."""
     out: list[tuple[int, int, str]] = []
+    if isinstance(decl, A.UseDecl):
+        target = f'"{decl.target}"' if decl.is_path else decl.target
+        return [(decl.span.line, decl.span.end_line, f"use {target}")]
     if isinstance(decl, A.InterfaceDecl):
         out.append((decl.span.line, decl.span.line, f"interface {decl.name}:"))
         for m in decl.members:
@@ -91,10 +94,13 @@ def format_source(source: str, path: str = "<string>") -> tuple[str, list[Diagno
         return source, diags
     full, trailing = _comments(source)
     lines: list[tuple[int, int, str]] = []
+    prev_use = False
     for decl in program.decls:
-        if lines:
+        is_use = isinstance(decl, A.UseDecl)
+        if lines and not (is_use and prev_use):  # consecutive use lines stay adjacent
             lines.append((lines[-1][0], lines[-1][0], ""))  # one blank line between decls
         lines.extend(_decl_lines(decl))
+        prev_use = is_use
     out: list[str] = []
     pending = sorted(full)
     for src_line, end_line, text in lines:

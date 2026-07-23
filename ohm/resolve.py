@@ -72,6 +72,7 @@ class _Resolver:
     def __init__(self, program: A.Program, path: str):
         self.program = program
         self.path = path
+        self._cur_path = path  # per-decl file (ADR-007); falls back to the entry path
         self.diags: list[Diagnostic] = []
         self.symbols: dict[str, A.Decl] = {}
         self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
@@ -79,9 +80,12 @@ class _Resolver:
     # ---------- P-SYMBOLS ----------
     def build_symbols(self) -> None:
         for decl in self.program.decls:
+            if isinstance(decl, A.UseDecl):
+                continue  # stripped by the loader; tolerated on parse-only paths
             if decl.name in self.symbols:
+                self._cur_path = decl.file or self.path
                 self.diags.append(
-                    _err("R001", f"duplicate top-level name '{decl.name}'", decl.span, self.path)
+                    _err("R001", f"duplicate top-level name '{decl.name}'", decl.span, self._cur_path)
                 )
             else:
                 self.symbols[decl.name] = decl
@@ -91,14 +95,18 @@ class _Resolver:
         self.build_symbols()
         interfaces, components, modules = [], [], []
         for decl in self.program.decls:
+            if isinstance(decl, A.UseDecl):
+                continue
             if self.symbols.get(decl.name) is not decl:
                 continue  # duplicate; first wins
+            self._cur_path = decl.file or self.path  # diagnostics point at the decl's own file
             if isinstance(decl, A.InterfaceDecl):
                 interfaces.append(self._interface(decl))
             elif isinstance(decl, A.ComponentDecl):
                 components.append(self._component(decl))
             else:
                 modules.append(self._module(decl))
+        self._cur_path = self.path
         top = modules[-1].name if modules else None
         return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top)
 
@@ -107,12 +115,12 @@ class _Resolver:
         role_attr = amap.get("role")
         if role_attr is None:
             if required:
-                self.diags.append(_err("R006", f"{owner} is missing required 'role'", span, self.path))
+                self.diags.append(_err("R006", f"{owner} is missing required 'role'", span, self._cur_path))
             return None
         role = role_attr.value.dotted() if isinstance(role_attr.value, A.Ref) else str(role_attr.value)
         if role not in VALID_ROLES:
             self.diags.append(
-                _err("R007", f"invalid role '{role}' on {owner}", role_attr.span, self.path,
+                _err("R007", f"invalid role '{role}' on {owner}", role_attr.span, self._cur_path,
                      _suggest(role, VALID_ROLES))
             )
             return None
@@ -132,7 +140,7 @@ class _Resolver:
                 if name not in member_names:
                     self.diags.append(
                         _err("R008", f"require relation names unknown member '{name}'", req.span,
-                             self.path, _suggest(name, member_names))
+                             self._cur_path, _suggest(name, member_names))
                     )
                 else:
                     args.append(name)
@@ -140,7 +148,7 @@ class _Resolver:
                 self.diags.append(Diagnostic(
                     "warning", "R013",
                     f"argument ignored: keyword '{k}' in require relation", req.span,
-                    file=self.path))
+                    file=self._cur_path))
             requires.append(ir.Relation(req.relation.callee.dotted(), tuple(args)))
         return ir.InterfaceDef(decl.name, members, tuple(requires), decl.span)
 
@@ -175,7 +183,7 @@ class _Resolver:
         return ir.ComponentDef(decl.name, package, tuple(pins), tuple(attrs), tuple(padmap), decl.span)
 
     def _module(self, decl: A.ModuleDecl) -> ir.Module:
-        path = self.path
+        path = self._cur_path
         configs, ports, instances, connections, asserts, obligations, constraints = \
             [], [], [], [], [], [], []
         scope: dict[str, str] = {}  # binding name -> def name ("" = poisoned/config)
@@ -294,9 +302,10 @@ class _Resolver:
                 if k not in declared:
                     self.diags.append(_err(
                         "R012", f"unknown config '{k}' on module '{target.name}'",
-                        item.span, self.path, _suggest(k, declared)))
+                        item.span, self._cur_path, _suggest(k, declared)))
         else:
             declared = {a.name for a in target.attrs} | {p.name for p in target.pins}
+            declared.add("package")  # R9: library parts' package is overridable per instance
             for k, _ in item.call.kwargs:
                 if k in declared:
                     continue
@@ -304,7 +313,7 @@ class _Resolver:
                 if close is not None and _edit_distance(k, close) <= 2:
                     self.diags.append(_err(
                         "R012", f"unknown attr '{k}' on component '{target.name}'",
-                        item.span, self.path, f"did you mean '{close}'?"))
+                        item.span, self._cur_path, f"did you mean '{close}'?"))
 
     def _check_ref(self, ref: A.Ref, scope: dict, poisoned: set, module: str,
                    connect: bool = False) -> bool:
@@ -314,7 +323,7 @@ class _Resolver:
             return False  # already reported; suppress cascade
         if base not in scope:
             self.diags.append(
-                _err("R002", f"unknown name '{base}' in module '{module}'", ref.span, self.path,
+                _err("R002", f"unknown name '{base}' in module '{module}'", ref.span, self._cur_path,
                      _suggest(base, scope))
             )
             return False
@@ -324,12 +333,12 @@ class _Resolver:
                 if isinstance(target, (A.ComponentDecl, A.ModuleDecl)):
                     self.diags.append(
                         _err("R011", f"cannot connect '{base}' — connect a pin, port, or "
-                             "interface member", ref.span, self.path)
+                             "interface member", ref.span, self._cur_path)
                     )
                     return False
                 if scope[base] == "":  # config binding (poisoned handled above)
                     self.diags.append(
-                        _err("R011", f"cannot connect config '{base}'", ref.span, self.path)
+                        _err("R011", f"cannot connect config '{base}'", ref.span, self._cur_path)
                     )
                     return False
             return True
@@ -343,7 +352,7 @@ class _Resolver:
             if connect and member in names and member not in pin_names:
                 self.diags.append(_err(
                     "R003", f"'{member}' is an attr on component '{target.name}', not a pin"
-                    " — connect endpoints must be pins", ref.span, self.path,
+                    " — connect endpoints must be pins", ref.span, self._cur_path,
                     _suggest(member, pin_names)))
                 return False
         elif isinstance(target, A.InterfaceDecl):
@@ -357,20 +366,20 @@ class _Resolver:
             if connect and member in names and member not in port_names:
                 self.diags.append(_err(
                     "R003", f"'{member}' is internal to module '{target.name}', not a port"
-                    " — connect endpoints must be io() ports", ref.span, self.path,
+                    " — connect endpoints must be io() ports", ref.span, self._cur_path,
                     _suggest(member, port_names)))
                 return False
         else:
             return True  # config or poisoned target: nothing to validate
         if member not in names:
             self.diags.append(
-                _err("R003", f"unknown {kind}: '{member}'", ref.span, self.path, _suggest(member, names))
+                _err("R003", f"unknown {kind}: '{member}'", ref.span, self._cur_path, _suggest(member, names))
             )
             return False
         if connect and isinstance(target, A.ComponentDecl) and len(ref.parts) > 2:
             self.diags.append(_err(
                 "R003", f"component pins have no sub-members: '{ref.dotted()}'",
-                ref.span, self.path))
+                ref.span, self._cur_path))
             return False
         if isinstance(target, A.ModuleDecl) and len(ref.parts) >= 3:
             # inst.port.member: resolve the port's io(Interface) and validate the member
@@ -382,7 +391,7 @@ class _Resolver:
                     if ref.parts[2] not in mnames:
                         self.diags.append(
                             _err("R003", f"unknown member on interface '{iface.name}': "
-                                 f"'{ref.parts[2]}'", ref.span, self.path,
+                                 f"'{ref.parts[2]}'", ref.span, self._cur_path,
                                  _suggest(ref.parts[2], mnames))
                         )
                         return False

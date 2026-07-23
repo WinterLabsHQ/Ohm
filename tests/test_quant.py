@@ -91,7 +91,7 @@ def test_undeclared_values_are_unchecked():
 
 def test_ratings_flow_through_provider():
     class NoRatings(DeclaredRatings):
-        def ratings(self, component, pin):
+        def ratings(self, component, pin, part_attrs=None):
             return Ratings(None, None, None)  # provider seam: erase all ratings
 
     from ohm.check_quant import check_quant

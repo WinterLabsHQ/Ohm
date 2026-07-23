@@ -193,6 +193,12 @@ class _ToAst(Transformer):
         name, *items = children
         return A.ModuleDecl(str(name), tuple(items), _span(meta, children))
 
+    def use_stmt(self, meta, children):
+        (target,) = children
+        if isinstance(target, A.Ref):
+            return A.UseDecl(target.dotted(), False, _span(meta, children))
+        return A.UseDecl(str(target)[1:-1], True, _span(meta, children))  # STRING token
+
     # ---------- top ----------
     def top_decl(self, meta, children):
         return children[0]

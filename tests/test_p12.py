@@ -51,7 +51,7 @@ def test_generated_package_emitted_for_library_missing_part(tmp_path):
     src = tmp_path / "board.ohm"
     src.write_text(FIXTURE)
     assert main(["build", str(src), "-o", str(tmp_path / "out"), "--emit", "kicad"]) == 0
-    mod = (tmp_path / "out" / "MCP9808.kicad_mod").read_text()
+    mod = (tmp_path / "out" / "TSSOP-8.kicad_mod").read_text()  # spec-named footprint
     sym = (tmp_path / "out" / "MCP9808.kicad_sym").read_text()
     assert mod.count("(pad ") == 8
     assert '"SDA"' in sym and '"VDD"' in sym  # datasheet pin names in the symbol

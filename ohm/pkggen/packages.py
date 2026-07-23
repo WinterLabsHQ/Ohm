@@ -180,3 +180,14 @@ def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = Non
 
 def build_from_spec(spec: ir.GenerateSpec, name: str | None = None) -> PackageModel:
     return build(spec.package_type, dict(spec.kwargs), name)
+
+
+def spec_name(spec: ir.GenerateSpec) -> str:
+    """Canonical footprint name of a generate(...) spec (e.g. SOIC-8, CHIP0603).
+
+    Identical specs share one name — and therefore one emitted .kicad_mod —
+    across every part that uses them."""
+    try:
+        return build_from_spec(spec).name
+    except PkgError:
+        return spec.package_type  # unbuildable specs are S006-gated before emit
