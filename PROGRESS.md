@@ -106,6 +106,18 @@ K004 param / K005 stray). Nominal claim + structural check; multiple kinds =
 union; conflict→error (no linearize); shallow IS-A + orthogonal capabilities;
 open-world base (no kind = unchecked). New roles open_collector/free; std/kinds.ohm
 (~30 research-minimal contracts); exemplar retrofits (R/C/L/OpAmp). Author-time
-only (no emit change). 418 tests green. **Remaining: K1** bulk-retrofit the ~100
-std blocks to declare kinds; **K2** adversarial contract audit + live-LLM
-custom-part-via-kind test.
+only (no emit change). **K1** (2026-07-24, fan-out): ~55 std blocks retrofitted to
+declare kinds across 12 domains; blocks with no clean kind (dual op-amp, 555, DIP
+switch, encoder, RGB/addressable LED, TVS array) left honestly un-kinded (never
+role-coerced); taxonomy grown to ~42 kinds; 2 contract bugs (relay coil, opto
+cathode roles) fixed. The parallel expansion-pinout re-verify caught + fixed **2
+board-breaking 7-segment pad maps** (CC56/CA56 — segments were on common pins).
+**K2** (2026-07-24, →d62bd3c): adversarial contract audit found + fixed **4
+false-positive `requires`** each verified against the shipping part it wrongly
+rejected — LDO `gnd` optional (LM317 has no GND), Comparator `out` accepts
+open_collector/open_drain (LM393, via a role-compatibility rule in check_kinds),
+Sensor `signal` optional (I2C sensors use bidirectional SDA), SwitchingConverter
+`sw` optional (Recom R-78 integrated inductor); live-LLM authored a kind demo
+(self-declared OpAmp + multi-kind MOSFET+ThermalPad + a USER-DEFINED
+`kind QuadratureEncoder`) frozen as a fixture. **Milestone K COMPLETE — 483 tests
+green, ruff+mypy clean.** Remaining: OSS license (legal) is the last open item.
