@@ -1,0 +1,13 @@
+# Q004: two rails with different declared voltages tied together
+component Reg5:
+    package = "SOT-23"
+    pin OUT: role=power_out, voltage=5.0V, pad=1
+
+component Reg33:
+    package = "SOT-23"
+    pin OUT: role=power_out, voltage=3.3V, pad=1
+
+module M:
+    a = Reg5()
+    b = Reg33()
+    a.OUT ~ b.OUT

@@ -1,0 +1,20 @@
+# Q002: 250mA + 150mA draws on a 300mA-rated driver
+component Reg:
+    package = "SOT-23"
+    pin OUT: role=power_out, imax=300mA, pad=1
+    pin GND: role=ground, pad=2
+
+component LoadA:
+    package = "QFN-16"
+    pin VDD: role=power_in, current=250mA, pad=1
+
+component LoadB:
+    package = "QFN-24"
+    pin VDD: role=power_in, current=150mA, pad=1
+
+module M:
+    reg = Reg()
+    a = LoadA()
+    b = LoadB()
+    reg.OUT ~ a.VDD
+    reg.OUT ~ b.VDD

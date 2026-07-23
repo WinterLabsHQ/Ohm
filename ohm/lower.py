@@ -75,7 +75,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     def walk(module: ir.Module, prefix: str) -> None:
         for inst in module.instances:
             if inst.def_ref in comps:
-                parts.append((f"{prefix}{inst.name}", comps[inst.def_ref]))
+                parts.append((f"{prefix}{inst.name}", comps[inst.def_ref], inst.overrides))
             elif inst.def_ref in mods:
                 walk(mods[inst.def_ref], f"{prefix}{inst.name}.")
         for conn in module.connections:
@@ -101,11 +101,15 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     counters: dict[str, int] = {}
     des_of: dict[str, str] = {}
     parts_low = []
-    for ref, comp in parts:
+    for ref, comp, overrides in parts:
         prefix = str(dict(comp.attrs).get("designator_prefix", "U"))
         counters[prefix] = counters.get(prefix, 0) + 1
         des_of[ref] = f"{prefix}{counters[prefix]}"
-        parts_low.append(ir.PartLow(ref, des_of[ref], comp.name, comp.package, comp.attrs))
+        # instance overrides win over component attr defaults (R9)
+        merged = dict(comp.attrs) | dict(overrides)
+        keys = [k for k, _ in comp.attrs] + [k for k, _ in overrides if k not in dict(comp.attrs)]
+        attrs = tuple((k, merged[k]) for k in keys)
+        parts_low.append(ir.PartLow(ref, des_of[ref], comp.name, comp.package, attrs))
 
     # group slots into nets
     groups: dict[str, list[str]] = {}

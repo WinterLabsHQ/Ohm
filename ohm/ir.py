@@ -33,6 +33,8 @@ class Pin:
     vmax: Quantity | None = None
     imax: Quantity | None = None
     pmax: Quantity | None = None
+    voltage: Quantity | None = None  # declared operating point (ADR-004)
+    current: Quantity | None = None  # declared draw (ADR-004)
     span: Span | None = None
 
 

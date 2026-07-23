@@ -1,0 +1,18 @@
+# Q003: 12V across a 100ohm resistor rated 100mW -> 1.44W
+component Src12:
+    package = "TO-220"
+    pin OUT: role=power_out, voltage=12V, pad=1
+    pin GND: role=ground, pad=2
+
+component R0603:
+    package = "R_0603_1608Metric"
+    designator_prefix = "R"
+    value = 100ohm
+    pin P1: role=passive, pmax=100mW, pad=1
+    pin P2: role=passive, pad=2
+
+module M:
+    src = Src12()
+    r = R0603()
+    src.OUT ~ r.P1
+    r.P2 ~ src.GND

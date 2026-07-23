@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from ohm import ir
 from ohm.check_intent import check_intent
+from ohm.check_quant import check_quant
 from ohm.check_structural import check_structural
 from ohm.check_units import annotate_units, check_units
 from ohm.closedform import fold_asserts
@@ -20,8 +21,7 @@ from ohm.lower import lower
 from ohm.parse import parse
 from ohm.resolve import resolve
 
-# checker registry — Tier-Q (P9) appends here
-CHECKERS = [check_units, check_structural, check_intent, fold_asserts]
+CHECKERS = [check_units, check_structural, check_intent, fold_asserts, check_quant]
 
 
 @dataclass

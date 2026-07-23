@@ -139,7 +139,8 @@ class _Resolver:
                 v = amap.get(key)
                 return _value(v) if isinstance(v, A.QuantityLit) else None
 
-            pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"), qty("pmax"), p.span))
+            pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"),
+                               qty("pmax"), qty("voltage"), qty("current"), p.span))
         return ir.ComponentDef(decl.name, package, tuple(pins), tuple(attrs), tuple(padmap), decl.span)
 
     def _module(self, decl: A.ModuleDecl) -> ir.Module:

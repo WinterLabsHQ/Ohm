@@ -1,0 +1,16 @@
+# Q001: 5V rail into a 3.6V-max pin
+component Reg5:
+    package = "SOT-23"
+    pin OUT: role=power_out, voltage=5.0V, pad=1
+    pin GND: role=ground, pad=2
+
+component Mcu:
+    package = "QFN-16"
+    pin VDD: role=power_in, vmax=3.6V, pad=1
+    pin GND: role=ground, pad=2
+
+module M:
+    reg = Reg5()
+    u = Mcu()
+    reg.OUT ~ u.VDD
+    reg.GND ~ u.GND
