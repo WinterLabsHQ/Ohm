@@ -15,19 +15,22 @@
 # - String footprints are "Lib:Name" KiCad ids, verified to exist in the
 #   system KiCad library; generate(...) footprints are built by the compiler.
 
-component Resistor:
+# kind conformance (ADR-008): each block IS-A category, checked by the compiler.
+use std.kinds
+
+component Resistor(Resistor):
     package = generate(CHIP0603)
     designator_prefix = "R"
     value = 0ohm
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
-component Capacitor:
+component Capacitor(Capacitor):
     package = generate(CHIP0603)
     designator_prefix = "C"
     value = 0F
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # A = anode = POSITIVE terminal (pad 1, the marked end on tantalum bodies),
 # K = cathode = negative. Default footprint: EIA-3216-18 / Kemet size A tantalum.
@@ -38,12 +41,12 @@ component CapacitorPolarized:
     pin A: role=passive, pad=1
     pin K: role=passive, pad=2
 
-component Inductor:
+component Inductor(Inductor):
     package = generate(CHIP0805)
     designator_prefix = "L"
     value = 0H
-    pin P1: role=passive, pad=1
-    pin P2: role=passive, pad=2
+    pin P1: role=passive, pad=1, is=a
+    pin P2: role=passive, pad=2, is=b
 
 # value-less on purpose: bead impedance is spec'd at a frequency (e.g.
 # 600ohm @ 100MHz) — record the part via mpn=, not a single scalar.

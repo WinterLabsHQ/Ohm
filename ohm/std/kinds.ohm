@@ -1,0 +1,148 @@
+# Ohm standard library — the component-type taxonomy (std.kinds, ADR-008)
+#
+# A `kind` is a checkable CONTRACT for a category of part: the pins (by role) and
+# params EVERY in-production member genuinely has. A component declares the kinds
+# it IS (`component TLV9061(OpAmp):`) and binds each required member to a pin
+# (`pin OUT: role=output, pad=1, is=out`); the compiler verifies conformance.
+#
+# HONESTY / OPEN-WORLD (N3):
+#   * `requires` is adversarially MINIMAL — only what NO real member lacks. Things
+#     that vary (op-amp V-, LDO EN, shunt-ref supply, 4-terminal MOSFET body) are
+#     `optional`, never required, so a legitimate part never false-fails.
+#   * A component with NO declared kind is the base `Component` — unchecked. The
+#     taxonomy never claims to enumerate every device; unknown = unasserted.
+#   * IS-A refinement (Schottky(Diode)) is a shallow single spine; capabilities
+#     (ThermalPad, ExposedPad) are orthogonal kinds that compose freely.
+
+# ---------- passives ----------
+kind TwoTerminal:
+    requires a: passive
+    requires b: passive
+
+# defining param names match the library's attr convention (`value`, `freq`), so
+# a retrofit `component Resistor(Resistor)` with `value=10kohm` conforms directly.
+kind Resistor(TwoTerminal):
+    param value: resistance
+
+kind Capacitor(TwoTerminal):
+    param value: capacitance
+
+kind Inductor(TwoTerminal):
+    param value: inductance
+
+kind Crystal(TwoTerminal):
+    param freq: frequency
+
+# ---------- diodes (polar two-terminal spine) ----------
+# Vf/Vz/Vbr vary in how they're specified and are often left to the datasheet, so
+# they are NOT required params — the subtypes just refine the pin contract.
+kind Diode:
+    requires anode: passive
+    requires cathode: passive
+
+kind Zener(Diode)
+
+kind Schottky(Diode)
+
+kind LED(Diode)
+
+kind TVS(Diode)
+
+# ---------- transistors ----------
+kind BJT:
+    requires base: input
+    requires collector: passive
+    requires emitter: passive
+
+kind MOSFET:
+    requires gate: input
+    requires drain: passive
+    requires source: passive
+    optional body: passive        # brought out only on 4-terminal parts
+
+kind JFET:
+    requires gate: input
+    requires drain: passive
+    requires source: passive
+
+# ---------- analog ICs ----------
+kind OpAmp:
+    requires inp: input
+    requires inn: input
+    requires out: output
+    requires vpos: power_in
+    optional vneg: power_in       # single-supply parts omit — NOT required
+
+kind Comparator:
+    requires inp: input
+    requires inn: input
+    requires out: output          # push-pull; open-collector parts override role=open_collector
+    requires vpos: power_in
+    optional vneg: power_in
+
+kind VoltageReference:
+    requires out: output          # shunt refs are 2-terminal + ref; supply is optional
+    optional vpos: power_in
+
+# ---------- power ICs ----------
+kind LDO:
+    requires vin: power_in
+    requires vout: power_out
+    requires gnd: ground
+    optional en: input            # fixed 3-pin LDOs have none
+
+kind SwitchingConverter:
+    requires vin: power_in
+    requires gnd: ground
+    requires sw: output           # controllers (no integrated switch) are a distinct kind
+
+# ---------- logic / interface ----------
+kind LogicGate:
+    requires out: output
+    requires vcc: power_in
+    requires gnd: ground
+
+kind Buffer(LogicGate):
+    requires inp: input
+
+kind Transceiver:
+    requires vcc: power_in
+    requires gnd: ground
+
+# ---------- misc ----------
+kind Oscillator:
+    requires out: output
+    requires vcc: power_in
+    requires gnd: ground
+
+kind Optocoupler:
+    requires led_anode: input
+    requires led_cathode: passive
+
+kind Relay:
+    requires coil_a: input
+    requires coil_b: passive
+    requires com: passive
+
+kind Fuse(TwoTerminal)
+
+# A connector is a mechanical mating interface; electrically its pins are
+# role-agnostic. The only universal is "has at least one contact" — so no
+# required members here (extends the open base).
+kind Connector:
+    optional shield: ground
+
+# A sensor's only near-universal is "produces a signal"; supply is NOT universal
+# (thermocouples, photodiodes, piezo are self-powered).
+kind Sensor:
+    requires signal: output
+
+# ---------- orthogonal capabilities (compose with any kind) ----------
+kind ThermalPad:
+    requires ep: passive
+
+kind ExposedPad:
+    requires ep: passive
+
+kind Shielded:
+    requires shield: ground

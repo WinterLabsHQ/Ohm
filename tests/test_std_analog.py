@@ -21,7 +21,8 @@ EXPECTED = {
 
 
 def declared_components(text):
-    return re.findall(r"^component (\w+):", text, flags=re.M)
+    # component NAME: or component NAME(Kind, ...):  (ADR-008 kind conformance)
+    return re.findall(r"^component (\w+)\s*(?:\([^)]*\))?:", text, flags=re.M)
 
 
 @pytest.mark.parametrize("fname", STD_FILES)

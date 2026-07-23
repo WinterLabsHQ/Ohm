@@ -107,6 +107,7 @@ class ComponentDecl:
     attrs: tuple[Attr, ...]  # package/mpn/...
     pins: tuple[PinDecl, ...]
     span: Span
+    kinds: tuple[str, ...] = ()  # declared component-type conformance (ADR-008)
     file: str | None = None
 
 
@@ -165,7 +166,34 @@ class UseDecl:
     file: str | None = None
 
 
-Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl
+@dataclass(frozen=True)
+class KindMember:
+    name: str
+    role: str
+    span: Span
+
+
+@dataclass(frozen=True)
+class KindParam:
+    name: str
+    dimension: str
+    span: Span
+
+
+@dataclass(frozen=True)
+class KindDecl:
+    """A component-type contract (ADR-008): required/optional pins-by-role + params."""
+
+    name: str
+    parents: tuple[str, ...]
+    requires: tuple[KindMember, ...]
+    optional: tuple[KindMember, ...]
+    params: tuple[KindParam, ...]
+    span: Span
+    file: str | None = None
+
+
+Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl | KindDecl
 
 
 def to_src(e: Expr) -> str:

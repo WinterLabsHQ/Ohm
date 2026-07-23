@@ -124,6 +124,32 @@ module Divider:
   have no standard pinout are `# TEMPLATE` comment blocks — copy, adapt to the
   datasheet, and the compiler checks your adaptation (the P12 flow).
 
+## Component kinds (checked component types)
+
+A `kind` is a *checkable contract* for a category of part — the pins (by role) and params
+every real member has. Declare the kinds a component *is*, and bind each required member to
+a pin with `is=`; the compiler verifies it (`use std.kinds` ships the taxonomy):
+
+```ohm
+use std.kinds
+
+component TLV9061(OpAmp):            # this component IS an OpAmp — checked
+    package = generate(SOT23, pins=5)
+    pin OUT: role=output,  pad=1, is=out
+    pin INP: role=input,   pad=3, is=inp
+    pin INN: role=input,   pad=4, is=inn
+    pin VDD: role=power_in, pad=5, is=vpos
+    pin VSS: role=power_in, pad=2, is=vneg   # optional member — single-supply parts omit
+```
+
+- **Multiple kinds** compose: `component IRLZ44(MOSFET, ThermalPad):` must satisfy both.
+- Missing a required member, a role that doesn't match, a missing/wrong-dimension param, or
+  two kinds that demand the same member with different roles → a `K0xx` error at author time.
+- **No kind = unchecked.** A `component X:` with no `(...)` is the base `Component` — declare
+  a kind only when you want the contract checked. The taxonomy never claims to be exhaustive;
+  define your own `kind` for anything it lacks.
+- Write your own contract: `kind MySensorBus:\n    requires sda: bidirectional\n    ...`.
+
 ## Workflow
 
 `ohm check file.ohm` — all diagnostics at once, none hidden. Machine format:

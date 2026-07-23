@@ -20,6 +20,15 @@ from ohm.diagnostics import Diagnostic, Span
 
 _GRAMMAR = (Path(__file__).parent / "ohm.lark").read_text()
 
+
+class _Conforms:
+    """Transformer marker for a `(A, B)` conformance/parent list on kind/component."""
+
+    __slots__ = ("names",)
+
+    def __init__(self, names: tuple[str, ...]):
+        self.names = names
+
 _QUANTITY_RE = re.compile(r"(\d+(?:\.\d+)?)([A-Za-z]+)")
 
 
@@ -165,11 +174,35 @@ class _ToAst(Transformer):
         name, value = children
         return A.Attr(str(name), value, _span(meta, children))
 
+    def conforms(self, meta, children):
+        return _Conforms(tuple(r.dotted() for r in children))  # kind / parent names
+
     def component_decl(self, meta, children):
-        name, *items = children
+        name, *rest = children
+        kinds = next((r.names for r in rest if isinstance(r, _Conforms)), ())
+        items = [i for i in rest if not isinstance(i, _Conforms)]
         attrs = tuple(i for i in items if isinstance(i, A.Attr))
         pins = tuple(i for i in items if isinstance(i, A.PinDecl))
-        return A.ComponentDecl(str(name), attrs, pins, _span(meta, children))
+        return A.ComponentDecl(str(name), attrs, pins, _span(meta, children), kinds)
+
+    # ---------- kind (ADR-008) ----------
+    def req_pin(self, meta, children):
+        return ("req", A.KindMember(str(children[0]), str(children[1]), _span(meta, children)))
+
+    def opt_pin(self, meta, children):
+        return ("opt", A.KindMember(str(children[0]), str(children[1]), _span(meta, children)))
+
+    def kind_param(self, meta, children):
+        return ("param", A.KindParam(str(children[0]), str(children[1]), _span(meta, children)))
+
+    def kind_decl(self, meta, children):
+        name, *rest = children
+        parents = next((r.names for r in rest if isinstance(r, _Conforms)), ())
+        items = [i for i in rest if isinstance(i, tuple)]
+        requires = tuple(n for k, n in items if k == "req")
+        optional = tuple(n for k, n in items if k == "opt")
+        params = tuple(n for k, n in items if k == "param")
+        return A.KindDecl(str(name), parents, requires, optional, params, _span(meta, children))
 
     # ---------- module ----------
     def binding(self, meta, children):

@@ -67,6 +67,18 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
     if isinstance(decl, A.UseDecl):
         target = f'"{decl.target}"' if decl.is_path else decl.target
         return [(decl.span.line, decl.span.end_line, f"use {target}")]
+    if isinstance(decl, A.KindDecl):
+        head = decl.name + (f"({', '.join(decl.parents)})" if decl.parents else "")
+        if not (decl.requires or decl.optional or decl.params):
+            return [(decl.span.line, decl.span.line, f"kind {head}")]  # bodyless refinement
+        out.append((decl.span.line, decl.span.line, f"kind {head}:"))
+        for km in decl.requires:
+            out.append((km.span.line, km.span.end_line, f"{_INDENT}requires {km.name}: {km.role}"))
+        for km in decl.optional:
+            out.append((km.span.line, km.span.end_line, f"{_INDENT}optional {km.name}: {km.role}"))
+        for kp in decl.params:
+            out.append((kp.span.line, kp.span.end_line, f"{_INDENT}param {kp.name}: {kp.dimension}"))
+        return out[:1] + sorted(out[1:], key=lambda t: t[0])
     if isinstance(decl, A.InterfaceDecl):
         out.append((decl.span.line, decl.span.line, f"interface {decl.name}:"))
         for m in decl.members:
@@ -75,7 +87,8 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
         for r in decl.requires:
             out.append((r.span.line, r.span.end_line, f"{_INDENT}require {A.to_src(r.relation)}"))
     elif isinstance(decl, A.ComponentDecl):
-        out.append((decl.span.line, decl.span.line, f"component {decl.name}:"))
+        head = decl.name + (f"({', '.join(decl.kinds)})" if decl.kinds else "")
+        out.append((decl.span.line, decl.span.line, f"component {head}:"))
         for a in decl.attrs:
             out.append((a.span.line, a.span.end_line, f"{_INDENT}{a.name} = {A.to_src(a.value)}"))
         for p in decl.pins:

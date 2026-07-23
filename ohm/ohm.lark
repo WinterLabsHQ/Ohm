@@ -6,10 +6,20 @@ start: (_NL | top_decl)*
 top_decl: interface_decl
         | component_decl
         | module_decl
+        | kind_decl
         | use_stmt
 
 // ---------- imports (ADR-007) ----------
 use_stmt: "use" (ref | STRING) _NL
+
+// ---------- kind (component-type taxonomy, ADR-008) ----------
+// body optional: `kind Zener(Diode)` refines with no new members
+kind_decl: "kind" NAME conforms? ((":" _NL _INDENT kind_item+ _DEDENT) | _NL)
+kind_item: "requires" NAME ":" NAME _NL   -> req_pin
+         | "optional" NAME ":" NAME _NL   -> opt_pin
+         | "param" NAME ":" NAME _NL      -> kind_param
+
+conforms: "(" ref ("," ref)* ")"          // declared kinds / parent kinds
 
 // ---------- interface (R5) ----------
 interface_decl: "interface" NAME ":" _NL _INDENT interface_item+ _DEDENT
@@ -18,7 +28,7 @@ interface_item: NAME ":" NAME ("," attr)* _NL     -> member_decl
               | "require" call _NL                -> require_decl
 
 // ---------- component (R1) ----------
-component_decl: "component" NAME ":" _NL _INDENT component_item+ _DEDENT
+component_decl: "component" NAME conforms? ":" _NL _INDENT component_item+ _DEDENT
 
 component_item: "pin" NAME ":" attr ("," attr)* _NL   -> pin_decl
               | NAME "=" value _NL                    -> attr_decl

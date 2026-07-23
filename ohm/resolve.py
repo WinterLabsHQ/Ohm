@@ -13,7 +13,10 @@ from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
 from shared.constraints_schema import CONSTRAINT_KINDS
 
-VALID_ROLES = {"power_in", "power_out", "input", "output", "bidirectional", "passive", "ground", "nc"}
+# open_collector/open_drain (wired-OR outputs: comparators, I2C, 1-Wire) and free (base
+# default, connects to anything) added for kind-contract fidelity (ADR-008 research)
+VALID_ROLES = {"power_in", "power_out", "input", "output", "bidirectional", "passive",
+               "ground", "nc", "open_collector", "open_drain", "free"}
 _BUILTIN_CTORS = {"io", "config"}
 
 
@@ -75,6 +78,7 @@ class _Resolver:
         self._cur_path = path  # per-decl file (ADR-007); falls back to the entry path
         self.diags: list[Diagnostic] = []
         self.symbols: dict[str, A.Decl] = {}
+        self.kinds_ns: dict[str, A.KindDecl] = {}  # kinds are a separate namespace (ADR-008)
         self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
 
     # ---------- P-SYMBOLS ----------
@@ -82,33 +86,87 @@ class _Resolver:
         for decl in self.program.decls:
             if isinstance(decl, A.UseDecl):
                 continue  # stripped by the loader; tolerated on parse-only paths
-            if decl.name in self.symbols:
+            if isinstance(decl, A.KindDecl):  # kinds are a separate namespace (ADR-008)
+                if decl.name in self.kinds_ns:
+                    self._cur_path = decl.file or self.path
+                    self.diags.append(_err("R001", f"duplicate kind '{decl.name}'",
+                                           decl.span, self._cur_path))
+                else:
+                    self.kinds_ns[decl.name] = decl
+            elif decl.name in self.symbols:
                 self._cur_path = decl.file or self.path
-                self.diags.append(
-                    _err("R001", f"duplicate top-level name '{decl.name}'", decl.span, self._cur_path)
-                )
+                self.diags.append(_err("R001", f"duplicate top-level name '{decl.name}'",
+                                       decl.span, self._cur_path))
             else:
                 self.symbols[decl.name] = decl
 
     # ---------- P-ELABORATE (includes P-RESOLVE ref checks, needs scope) ----------
     def run(self) -> ir.Design:
         self.build_symbols()
-        interfaces, components, modules = [], [], []
+        interfaces, components, modules, kinds = [], [], [], []
         for decl in self.program.decls:
             if isinstance(decl, A.UseDecl):
                 continue
-            if self.symbols.get(decl.name) is not decl:
+            registered = self.kinds_ns.get(decl.name) if isinstance(decl, A.KindDecl) \
+                else self.symbols.get(decl.name)
+            if registered is not decl:
                 continue  # duplicate; first wins
             self._cur_path = decl.file or self.path  # diagnostics point at the decl's own file
             if isinstance(decl, A.InterfaceDecl):
                 interfaces.append(self._interface(decl))
             elif isinstance(decl, A.ComponentDecl):
                 components.append(self._component(decl))
+            elif isinstance(decl, A.KindDecl):
+                kinds.append(self._kind(decl))
             else:
                 modules.append(self._module(decl))
         self._cur_path = self.path
         top = modules[-1].name if modules else None
-        return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top)
+        return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top, tuple(kinds))
+
+    def _kind(self, decl: A.KindDecl) -> ir.KindDef:
+        for role_name, members in (("required", decl.requires), ("optional", decl.optional)):
+            for m in members:
+                if m.role not in VALID_ROLES:
+                    self.diags.append(_err(
+                        "R007", f"invalid role '{m.role}' on kind member '{m.name}'",
+                        m.span, self._cur_path, _suggest(m.role, VALID_ROLES)))
+        from ohm import units
+        valid_dims = {d for d, _ in units.UNITS.values()} | {units.DIMENSIONLESS}
+        for p in decl.params:
+            if p.dimension not in valid_dims:
+                self.diags.append(_err(
+                    "R019", f"unknown dimension '{p.dimension}' on kind param '{p.name}'",
+                    p.span, self._cur_path, _suggest(p.dimension, valid_dims)))
+        for parent in decl.parents:
+            if parent not in self.kinds_ns:
+                self.diags.append(_err(
+                    "R017", f"kind '{decl.name}' refines unknown kind '{parent}'",
+                    decl.span, self._cur_path, _suggest(parent, self.kinds_ns)))
+            elif self._kind_cycles(decl.name):
+                self.diags.append(_err(
+                    "R018", f"kind refinement cycle through '{decl.name}'", decl.span, self._cur_path))
+                break
+        return ir.KindDef(
+            decl.name, decl.parents,
+            tuple((m.name, m.role) for m in decl.requires),
+            tuple((m.name, m.role) for m in decl.optional),
+            tuple((p.name, p.dimension) for p in decl.params), decl.span)
+
+    def _kind_cycles(self, start: str) -> bool:
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            k = stack.pop()
+            if k == start and seen:
+                return True
+            if k in seen:
+                continue
+            seen.add(k)
+            kd = self.kinds_ns.get(k)
+            if kd is not None:
+                stack.extend(kd.parents)
+        return False
 
     def _role_attr(self, attrs: tuple[A.Attr, ...], owner: str, span: Span, required: bool) -> str | None:
         amap = {a.name: a for a in attrs}
@@ -178,9 +236,21 @@ class _Resolver:
                 val = _value(v)
                 return val if isinstance(val, ir.Quantity) else None
 
+            satisfies = None  # `is=<member>` binds this pin to a kind member (ADR-008)
+            if "is" in amap:
+                iv = amap["is"]
+                satisfies = iv.dotted() if isinstance(iv, A.Ref) else str(_value(iv))
+
             pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"),
-                               qty("pmax"), qty("voltage"), qty("current"), p.span))
-        return ir.ComponentDef(decl.name, package, tuple(pins), tuple(attrs), tuple(padmap), decl.span)
+                               qty("pmax"), qty("voltage"), qty("current"), satisfies, p.span))
+        # validate declared kinds exist (R017); check_kinds does conformance
+        for kname in decl.kinds:
+            if kname not in self.kinds_ns:
+                self.diags.append(_err(
+                    "R017", f"component '{decl.name}' declares unknown kind '{kname}'",
+                    decl.span, self._cur_path, _suggest(kname, self.kinds_ns)))
+        return ir.ComponentDef(decl.name, package, tuple(pins), tuple(attrs), tuple(padmap),
+                               decl.kinds, decl.span)
 
     def _module(self, decl: A.ModuleDecl) -> ir.Module:
         path = self._cur_path

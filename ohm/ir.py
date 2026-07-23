@@ -35,6 +35,7 @@ class Pin:
     pmax: Quantity | None = None
     voltage: Quantity | None = None  # declared operating point (ADR-004)
     current: Quantity | None = None  # declared draw (ADR-004)
+    satisfies: str | None = None  # kind-member this pin binds via `is=` (ADR-008)
     span: Span | None = None
 
 
@@ -56,6 +57,7 @@ class ComponentDef:
     pins: tuple[Pin, ...]
     attrs: tuple[tuple[str, Value], ...]
     padmap: tuple[tuple[str, str], ...]  # pin name -> pad id (Tier-S loop)
+    kinds: tuple[str, ...] = ()  # declared component-type conformance (ADR-008)
     span: Span | None = None
 
 
@@ -142,11 +144,24 @@ class Module:
 
 
 @dataclass(frozen=True)
+class KindDef:
+    """Component-type contract (ADR-008): required/optional pins-by-role + typed params."""
+
+    name: str
+    parents: tuple[str, ...]
+    required: tuple[tuple[str, str], ...]  # (member name, role)
+    optional: tuple[tuple[str, str], ...]
+    params: tuple[tuple[str, str], ...]  # (param name, dimension)
+    span: Span | None = None
+
+
+@dataclass(frozen=True)
 class Design:
     interfaces: tuple[InterfaceDef, ...]
     components: tuple[ComponentDef, ...]
     modules: tuple[Module, ...]
     top: str | None  # ponytail: top = last-declared module; --top flag when needed
+    kinds: tuple[KindDef, ...] = ()  # component-type taxonomy (ADR-008)
 
 
 # ---------- IR-LOW (flat, emitter-ready; produced by P-LOWER) ----------
