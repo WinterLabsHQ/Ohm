@@ -86,11 +86,24 @@ class Require:
 
 
 @dataclass(frozen=True)
+class Expectation:
+    """`expects <pattern>[(args)] [on members] [when attr]` — a bring-up
+    requirement predicate over the bound members' nets (ADR-009)."""
+
+    pattern: str
+    args: tuple[Expr, ...]
+    members: tuple[str, ...]
+    when: str | None
+    span: Span
+
+
+@dataclass(frozen=True)
 class InterfaceDecl:
     name: str
     members: tuple[Member, ...]
     requires: tuple[Require, ...]
     span: Span
+    expects: tuple[Expectation, ...] = ()  # bring-up predicates (ADR-009)
     file: str | None = None  # stamped by the loader (ADR-007)
 
 
@@ -190,6 +203,7 @@ class KindDecl:
     optional: tuple[KindMember, ...]
     params: tuple[KindParam, ...]
     span: Span
+    expects: tuple[Expectation, ...] = ()  # bring-up predicates (ADR-009)
     file: str | None = None
 
 

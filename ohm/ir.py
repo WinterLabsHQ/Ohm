@@ -37,6 +37,8 @@ class Pin:
     current: Quantity | None = None  # declared draw (ADR-004)
     satisfies: str | None = None  # kind-member this pin binds via `is=` (ADR-008)
     span: Span | None = None
+    must_connect: bool = False  # pin may not be left netless (ADR-009)
+    tolerant_to: Quantity | None = None  # abs-max input for domain checks (ADR-009)
 
 
 @dataclass(frozen=True)
@@ -68,11 +70,24 @@ class Relation:
 
 
 @dataclass(frozen=True)
+class ExpectationDef:
+    """Bring-up requirement predicate (ADR-009): recorded on kinds/interfaces,
+    verified by check_bringup over the flat nets."""
+
+    pattern: str  # closed v1 set: pullup, decoupling, loadcaps, cap, termination, tie
+    args: tuple["Value", ...]
+    members: tuple[str, ...]
+    when: str | None  # instance-attr gate (e.g. "endpoint")
+    span: Span | None = None
+
+
+@dataclass(frozen=True)
 class InterfaceDef:
     name: str
     members: tuple[tuple[str, str, str | None], ...]  # (name, signal_type, role|None)
     requires: tuple[Relation, ...]
     span: Span | None = None
+    expects: tuple[ExpectationDef, ...] = ()  # ADR-009
 
 
 @dataclass(frozen=True)
@@ -96,6 +111,7 @@ class Instance:
     def_ref: str  # component or module name
     overrides: tuple[tuple[str, Value], ...]
     span: Span | None = None
+    waivers: tuple[str, ...] = ()  # suppressed expectation codes/patterns (ADR-009)
 
 
 @dataclass(frozen=True)
@@ -153,6 +169,7 @@ class KindDef:
     optional: tuple[tuple[str, str], ...]
     params: tuple[tuple[str, str], ...]  # (param name, dimension)
     span: Span | None = None
+    expects: tuple[ExpectationDef, ...] = ()  # ADR-009
 
 
 @dataclass(frozen=True)

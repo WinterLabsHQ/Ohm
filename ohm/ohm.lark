@@ -18,6 +18,13 @@ kind_decl: "kind" NAME conforms? ((":" _NL _INDENT kind_item+ _DEDENT) | _NL)
 kind_item: "requires" NAME ":" NAME _NL   -> req_pin
          | "optional" NAME ":" NAME _NL   -> opt_pin
          | "param" NAME ":" NAME _NL      -> kind_param
+         | expects_item
+
+// ---------- expects (bring-up requirement predicates, ADR-009) ----------
+expects_item: "expects" NAME expects_args? expects_on? expects_when? _NL
+expects_args: "(" arguments ")"
+expects_on: "on" NAME ("," NAME)*
+expects_when: "when" NAME
 
 conforms: "(" ref ("," ref)* ")"          // declared kinds / parent kinds
 
@@ -26,6 +33,7 @@ interface_decl: "interface" NAME ":" _NL _INDENT interface_item+ _DEDENT
 
 interface_item: NAME ":" NAME ("," attr)* _NL     -> member_decl
               | "require" call _NL                -> require_decl
+              | expects_item
 
 // ---------- component (R1) ----------
 component_decl: "component" NAME conforms? ":" _NL _INDENT component_item+ _DEDENT

@@ -163,7 +163,8 @@ class _ToAst(Transformer):
         name, *items = children
         members = tuple(i for i in items if isinstance(i, A.Member))
         requires = tuple(i for i in items if isinstance(i, A.Require))
-        return A.InterfaceDecl(str(name), members, requires, _span(meta, children))
+        expects = tuple(i for i in items if isinstance(i, A.Expectation))
+        return A.InterfaceDecl(str(name), members, requires, _span(meta, children), expects)
 
     # ---------- component ----------
     def pin_decl(self, meta, children):
@@ -202,7 +203,36 @@ class _ToAst(Transformer):
         requires = tuple(n for k, n in items if k == "req")
         optional = tuple(n for k, n in items if k == "opt")
         params = tuple(n for k, n in items if k == "param")
-        return A.KindDecl(str(name), parents, requires, optional, params, _span(meta, children))
+        expects = tuple(i for i in rest if isinstance(i, A.Expectation))
+        return A.KindDecl(str(name), parents, requires, optional, params,
+                          _span(meta, children), expects)
+
+    # ---------- expects (ADR-009) ----------
+    def expects_args(self, meta, children):
+        return ("eargs", children[0])  # the arguments list [(kind, payload), ...]
+
+    def expects_on(self, meta, children):
+        return ("eon", tuple(str(t) for t in children))
+
+    def expects_when(self, meta, children):
+        return ("ewhen", str(children[0]))
+
+    def expects_item(self, meta, children):
+        pattern, *rest = children
+        args: tuple = ()
+        members: tuple[str, ...] = ()
+        when = None
+        for item in rest:
+            if not isinstance(item, tuple):
+                continue
+            tag, payload = item
+            if tag == "eargs":
+                args = tuple(p for k, p in payload if k == "pos")  # positional args only
+            elif tag == "eon":
+                members = payload
+            elif tag == "ewhen":
+                when = payload
+        return A.Expectation(str(pattern), args, members, when, _span(meta, children))
 
     # ---------- module ----------
     def binding(self, meta, children):
@@ -234,6 +264,12 @@ class _ToAst(Transformer):
 
     # ---------- top ----------
     def top_decl(self, meta, children):
+        return children[0]
+
+    def interface_item(self, meta, children):
+        return children[0]  # unwrap the expects_item alternative
+
+    def kind_item(self, meta, children):
         return children[0]
 
     def start(self, meta, children):

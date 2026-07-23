@@ -17,6 +17,8 @@ from shared.constraints_schema import CONSTRAINT_KINDS
 # default, connects to anything) added for kind-contract fidelity (ADR-008 research)
 VALID_ROLES = {"power_in", "power_out", "input", "output", "bidirectional", "passive",
                "ground", "nc", "open_collector", "open_drain", "free"}
+# closed v1 set of expects patterns (ADR-009); each is a predicate in check_bringup
+EXPECT_PATTERNS = {"pullup", "decoupling", "loadcaps", "cap", "termination", "tie"}
 _BUILTIN_CTORS = {"io", "config"}
 
 
@@ -147,11 +149,13 @@ class _Resolver:
                 self.diags.append(_err(
                     "R018", f"kind refinement cycle through '{decl.name}'", decl.span, self._cur_path))
                 break
+        kind_members = ({m.name for m in decl.requires} | {m.name for m in decl.optional})
+        expects = self._expectations(decl.expects, kind_members, f"kind '{decl.name}'")
         return ir.KindDef(
             decl.name, decl.parents,
             tuple((m.name, m.role) for m in decl.requires),
             tuple((m.name, m.role) for m in decl.optional),
-            tuple((p.name, p.dimension) for p in decl.params), decl.span)
+            tuple((p.name, p.dimension) for p in decl.params), decl.span, expects)
 
     def _kind_cycles(self, start: str) -> bool:
         seen: set[str] = set()
@@ -184,6 +188,26 @@ class _Resolver:
             return None
         return role
 
+    def _expectations(self, expects: tuple[A.Expectation, ...],
+                      valid_members: set[str], owner: str) -> tuple[ir.ExpectationDef, ...]:
+        """Validate + lower `expects` declarations (ADR-009) — R020 on bad pattern/member."""
+        out = []
+        for e in expects:
+            if e.pattern not in EXPECT_PATTERNS:
+                self.diags.append(_err(
+                    "R020", f"unknown expects pattern '{e.pattern}' on {owner}",
+                    e.span, self._cur_path, _suggest(e.pattern, EXPECT_PATTERNS)))
+                continue
+            bad = [m for m in e.members if m not in valid_members]
+            if bad:
+                self.diags.append(_err(
+                    "R020", f"expects on {owner} names unknown member(s): {', '.join(bad)}",
+                    e.span, self._cur_path, _suggest(bad[0], valid_members)))
+                continue
+            out.append(ir.ExpectationDef(
+                e.pattern, tuple(_value(a) for a in e.args), e.members, e.when, e.span))
+        return tuple(out)
+
     def _interface(self, decl: A.InterfaceDecl) -> ir.InterfaceDef:
         members = tuple(
             (m.name, m.signal_type, self._role_attr(m.attrs, f"member '{m.name}'", m.span, required=False))
@@ -208,7 +232,8 @@ class _Resolver:
                     f"argument ignored: keyword '{k}' in require relation", req.span,
                     file=self._cur_path))
             requires.append(ir.Relation(req.relation.callee.dotted(), tuple(args)))
-        return ir.InterfaceDef(decl.name, members, tuple(requires), decl.span)
+        expects = self._expectations(decl.expects, member_names, f"interface '{decl.name}'")
+        return ir.InterfaceDef(decl.name, members, tuple(requires), decl.span, expects)
 
     def _component(self, decl: A.ComponentDecl) -> ir.ComponentDef:
         package = None
@@ -242,7 +267,9 @@ class _Resolver:
                 satisfies = iv.dotted() if isinstance(iv, A.Ref) else str(_value(iv))
 
             pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"),
-                               qty("pmax"), qty("voltage"), qty("current"), satisfies, p.span))
+                               qty("pmax"), qty("voltage"), qty("current"), satisfies, p.span,
+                               must_connect="must_connect" in amap,
+                               tolerant_to=qty("tolerant_to")))
         # validate declared kinds exist (R017); check_kinds does conformance
         for kname in decl.kinds:
             if kname not in self.kinds_ns:
@@ -316,9 +343,18 @@ class _Resolver:
                         bind(item.name, "", item.span)
                         continue
                     self._check_overrides(item, target)
-                    overrides = tuple((k, _value(v)) for k, v in item.call.kwargs)
+                    # `waive="B005,pullup"` suppresses expectation findings (ADR-009);
+                    # it is metadata, not an attr — never merged into part attrs
+                    waivers: tuple[str, ...] = ()
+                    for k, v in item.call.kwargs:
+                        if k == "waive":
+                            wv = _value(v)
+                            waivers = tuple(w.strip() for w in str(wv).split(",") if w.strip())
+                    overrides = tuple((k, _value(v)) for k, v in item.call.kwargs
+                                      if k != "waive")
                     if bind(item.name, callee, item.span):
-                        instances.append(ir.Instance(item.name, callee, overrides, item.span))
+                        instances.append(ir.Instance(item.name, callee, overrides, item.span,
+                                                     waivers=waivers))
                         self._current_overrides[item.name] = {k for k, _ in item.call.kwargs}
             elif isinstance(item, A.Connect):
                 lo = self._check_ref(item.left, scope, poisoned, decl.name, connect=True)
@@ -368,6 +404,7 @@ class _Resolver:
         if isinstance(target, A.ModuleDecl):
             declared = {b.name for b in target.items
                         if isinstance(b, A.Binding) and b.call.callee.dotted() == "config"}
+            declared.add("waive")  # expectation waivers are universal metadata (ADR-009)
             for k, _ in item.call.kwargs:
                 if k not in declared:
                     self.diags.append(_err(
@@ -376,6 +413,7 @@ class _Resolver:
         else:
             declared = {a.name for a in target.attrs} | {p.name for p in target.pins}
             declared.add("package")  # R9: library parts' package is overridable per instance
+            declared.add("waive")  # expectation waivers (ADR-009)
             for k, _ in item.call.kwargs:
                 if k in declared:
                     continue

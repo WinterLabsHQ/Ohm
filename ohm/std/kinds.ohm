@@ -192,6 +192,14 @@ kind Resonator:                  # ceramic resonator: 2 terminals + optional gnd
 kind Display
 
 # ---------- orthogonal capabilities (compose with any kind) ----------
+# Polarized: member `a` is the POSITIVE terminal, `b` the negative. Shares
+# member names with TwoTerminal (good diamond) so e.g.
+# `component CapacitorPolarized(Capacitor, Polarized)` binds one pin per member.
+# Enables B009: reverse-bias detection against declared operating voltages.
+kind Polarized:
+    requires a: passive
+    requires b: passive
+
 kind ThermalPad:
     requires ep: passive
 

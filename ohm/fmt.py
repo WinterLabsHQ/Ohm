@@ -47,6 +47,17 @@ def _attr(a: A.Attr) -> str:
     return f"{a.name}={A.to_src(a.value)}"
 
 
+def _expects_line(ex: A.Expectation) -> str:
+    parts = [f"expects {ex.pattern}"]
+    if ex.args:
+        parts[0] += f"({', '.join(A.to_src(a) for a in ex.args)})"
+    if ex.members:
+        parts.append(f"on {', '.join(ex.members)}")
+    if ex.when:
+        parts.append(f"when {ex.when}")
+    return " ".join(parts)
+
+
 def _item_line(item: A.ModuleItem) -> str:
     match item:
         case A.Binding():
@@ -69,7 +80,7 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
         return [(decl.span.line, decl.span.end_line, f"use {target}")]
     if isinstance(decl, A.KindDecl):
         head = decl.name + (f"({', '.join(decl.parents)})" if decl.parents else "")
-        if not (decl.requires or decl.optional or decl.params):
+        if not (decl.requires or decl.optional or decl.params or decl.expects):
             return [(decl.span.line, decl.span.line, f"kind {head}")]  # bodyless refinement
         out.append((decl.span.line, decl.span.line, f"kind {head}:"))
         for km in decl.requires:
@@ -78,6 +89,8 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
             out.append((km.span.line, km.span.end_line, f"{_INDENT}optional {km.name}: {km.role}"))
         for kp in decl.params:
             out.append((kp.span.line, kp.span.end_line, f"{_INDENT}param {kp.name}: {kp.dimension}"))
+        for ex in decl.expects:
+            out.append((ex.span.line, ex.span.end_line, f"{_INDENT}{_expects_line(ex)}"))
         return out[:1] + sorted(out[1:], key=lambda t: t[0])
     if isinstance(decl, A.InterfaceDecl):
         out.append((decl.span.line, decl.span.line, f"interface {decl.name}:"))
@@ -86,6 +99,8 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
             out.append((m.span.line, m.span.end_line, f"{_INDENT}{m.name}: {m.signal_type}{attrs}"))
         for r in decl.requires:
             out.append((r.span.line, r.span.end_line, f"{_INDENT}require {A.to_src(r.relation)}"))
+        for ex in decl.expects:
+            out.append((ex.span.line, ex.span.end_line, f"{_INDENT}{_expects_line(ex)}"))
     elif isinstance(decl, A.ComponentDecl):
         head = decl.name + (f"({', '.join(decl.kinds)})" if decl.kinds else "")
         out.append((decl.span.line, decl.span.line, f"component {head}:"))

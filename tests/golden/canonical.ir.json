@@ -18,6 +18,7 @@
      "__type__": "Pin",
      "current": null,
      "imax": null,
+     "must_connect": false,
      "name": "EN",
      "pad": null,
      "pmax": null,
@@ -30,6 +31,7 @@
       "end_line": 12,
       "line": 12
      },
+     "tolerant_to": null,
      "vmax": null,
      "voltage": null
     },
@@ -37,6 +39,7 @@
      "__type__": "Pin",
      "current": null,
      "imax": null,
+     "must_connect": false,
      "name": "GND",
      "pad": null,
      "pmax": null,
@@ -49,6 +52,7 @@
       "end_line": 13,
       "line": 13
      },
+     "tolerant_to": null,
      "vmax": null,
      "voltage": null
     },
@@ -56,6 +60,7 @@
      "__type__": "Pin",
      "current": null,
      "imax": null,
+     "must_connect": false,
      "name": "SW",
      "pad": null,
      "pmax": null,
@@ -68,6 +73,7 @@
       "end_line": 14,
       "line": 14
      },
+     "tolerant_to": null,
      "vmax": null,
      "voltage": null
     },
@@ -75,6 +81,7 @@
      "__type__": "Pin",
      "current": null,
      "imax": null,
+     "must_connect": false,
      "name": "VIN",
      "pad": null,
      "pmax": null,
@@ -87,6 +94,7 @@
       "end_line": 15,
       "line": 15
      },
+     "tolerant_to": null,
      "vmax": {
       "__type__": "Quantity",
       "tol_hi": null,
@@ -101,6 +109,7 @@
      "__type__": "Pin",
      "current": null,
      "imax": null,
+     "must_connect": false,
      "name": "FB",
      "pad": null,
      "pmax": null,
@@ -113,6 +122,7 @@
       "end_line": 16,
       "line": 16
      },
+     "tolerant_to": null,
      "vmax": null,
      "voltage": null
     }
@@ -129,6 +139,7 @@
  "interfaces": [
   {
    "__type__": "InterfaceDef",
+   "expects": [],
    "members": [
     [
      "scl",
@@ -153,6 +164,7 @@
   },
   {
    "__type__": "InterfaceDef",
+   "expects": [],
    "members": [
     [
      "v",
@@ -285,7 +297,8 @@
       "end_col": 21,
       "end_line": 21,
       "line": 21
-     }
+     },
+     "waivers": []
     }
    ],
    "name": "Supply",

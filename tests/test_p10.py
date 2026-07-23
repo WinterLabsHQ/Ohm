@@ -145,7 +145,7 @@ def test_every_emitted_code_has_an_explanation():
     ohm_pkg = Path(__file__).parent.parent / "ohm"
     emitted = set()
     for py in ohm_pkg.rglob("*.py"):
-        emitted |= set(re.findall(r'"([PRUSICQZK]\d{3})"', py.read_text()))
+        emitted |= set(re.findall(r'"([PRUSICQZKBM]\d{3})"', py.read_text()))
     missing = emitted - set(EXPLAIN)
     assert not missing, f"codes without explain entries: {sorted(missing)}"
 
