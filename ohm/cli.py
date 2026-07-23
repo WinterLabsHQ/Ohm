@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="compile and emit outputs")
     p_build.add_argument("file")
     p_build.add_argument("-o", "--out", default=".", help="output directory")
-    p_build.add_argument("--emit", choices=["netlist", "kicad", "all"], default="all")
+    p_build.add_argument("--emit", choices=["netlist", "kicad", "zen", "all"], default="all")
     p_build.add_argument("--dump-ir", choices=["high", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
 
@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.emit in ("kicad", "all"):
             (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(result.low, args.file))
             (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(result.low, args.file))
+        if args.emit in ("zen", "all"):
+            from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
+
+            (outdir / f"{stem}.zen").write_text(emit_zen(result.low, args.file))
     return 0
 
 
