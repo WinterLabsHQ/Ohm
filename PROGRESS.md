@@ -21,4 +21,13 @@ Plan: Milestone 1 = P0–P6 (approved 2026-07-23).
 | P8 Closed-form + holes | ✅ 2026-07-23 | microstrip Z frozen golden 51.3159 (fixed-precision float boundary); interval-exact divider (monotonic, no decorrelation blowup); per-context assert folding C001/C002/C003; `obligation` → `Hole(kind,args,op,"50mV")` in IR-LOW, bound never evaluated; solver-import grep green (ADR-003) |
 | P9 Tier-Q | ✅ 2026-07-23 | Q001–Q004 known_bad fixtures error deterministically with exact code+span; ratings via `ratings_iface` (provider (d) baseline, seam respected by provider-swap test); declared operating points per ADR-004; undeclared values honestly unchecked; golden designs clean |
 
-**Milestone 2 (P7–P9) COMPLETE** — 123 tests green. Next: M3 = P10 constraints emitter + CLI/LSP, P11 pkggen (IPC-7351), P12 agent-usability validation.
+**Milestone 2 (P7–P9) COMPLETE** — 123 tests green.
+
+| Phase | Status | Gate evidence |
+|---|---|---|
+| P10 Constraints+CLI+LSP | ✅ 2026-07-23 | `constraint` decls (ADR-005) → `shared/constraints_schema.py` seam incl. holes; stdlib-only `ohm lsp` publishes I005 as severity-1 at the offending line (red squiggle before build); `ohm fmt` idempotent + comment-preserving; `ohm explain` covers every emitted code (test-enforced); venv pinned back to Python 3.12 |
+| P11 pkggen | ✅ 2026-07-23 | IPC-7351 catalog SOIC/SSOP/TSSOP/SOT23/CHIP (ADR-006, out-of-catalog = S006); SOIC-8 within tolerance of KiCad 7's official land pattern; generated .kicad_mod imports via kicad-cli, .kicad_sym parses via `sym upgrade`; byte-identical; `ohm gen-package` standalone + build wiring; pindata_iface (acquisition never in build) |
+| P12 Agent validation | ✅ 2026-07-23 | live LLM given ONLY docs/STYLE.md + MCP9808 datasheet excerpt authored a clean design incl. generated TSSOP-8 (zero-shot had 1 error — R005 undeclared Power, a guide gap; 1 machine-diagnostic round fixed it); swapped SDA/SCL caught; **found+fixed a Tier-I gap**: require-pair crossed onto one instance's like-named pins now I005; frozen as tests/fixtures/agent_mcp9808.ohm |
+
+**Milestone 3 (P10–P12) COMPLETE — ALL PHASES P0–P12 DONE, 150 tests green.**
+Out of scope by design: Meridian router, convergence solver, hosted platform (proprietary side of the D6 boundary). Open items from the blueprint: OSS license needs legal advice (D6); `pcb` toolchain cross-check on the .zen interop path when the binary is available.

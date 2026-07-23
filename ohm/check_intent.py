@@ -58,6 +58,10 @@ def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
 
     # ---- connection-shape checks (per module) ----
     for module in design.modules:
+        # (port_path, instance_path) -> {member: (pin_name, conn)} for member↔pin wiring;
+        # lets a require-pair crossed onto one instance's like-named pins be caught
+        member_pin_wiring: dict[tuple, dict[str, tuple]] = {}
+        group_iface: dict[tuple, str] = {}
         for conn in module.connections:
             left = _classify(conn.left, module, comps, mods)
             right = _classify(conn.right, module, comps, mods)
@@ -89,6 +93,33 @@ def check_intent(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
                         f"swapped interface members: '{m1}' ~ '{m2}' violates "
                         f"require {rel.kind}({', '.join(rel.members)}) on '{left[1]}'",
                         conn.span, path, f"connect '{m1}' ~ '{m1}'"))
+            elif {lk, rk} == {"member", "pin"}:
+                member_side, refparts_m = (left, conn.left) if lk == "member" else (right, conn.right)
+                pin_side, refparts_p = (right, conn.right) if lk == "member" else (left, conn.left)
+                key = (refparts_m[:-1], refparts_p[:-1])  # (port path, instance path)
+                member_pin_wiring.setdefault(key, {})[member_side[2]] = (pin_side[2], conn)
+                group_iface[key] = member_side[1]
+
+        # crossed require-pair wired onto one instance's like-named pins (found by P12)
+        for key, wiring in member_pin_wiring.items():
+            iface = ifaces.get(group_iface[key])
+            if iface is None:
+                continue
+            for rel in iface.requires:
+                for i, a in enumerate(rel.members):
+                    for b in rel.members[i + 1:]:
+                        if a not in wiring or b not in wiring:
+                            continue
+                        pin_a, conn_a = wiring[a]
+                        pin_b, conn_b = wiring[b]
+                        if pin_a.lower() == b.lower() and pin_b.lower() == a.lower():
+                            for m, pin, conn in ((a, pin_a, conn_a), (b, pin_b, conn_b)):
+                                diags.append(_d(
+                                    "error", "I005",
+                                    f"swapped interface members: '{m}' is wired to pin "
+                                    f"'{pin}' while require {rel.kind}({', '.join(rel.members)}) "
+                                    f"pairs it with the like-named pin", conn.span, path,
+                                    f"connect '{m}' to the pin named like '{m}'"))
 
     # ---- net-level role rules (flat view — every wiring path lands here) ----
     # ponytail: lower() recomputed here; pure + cheap, keeps one net algorithm

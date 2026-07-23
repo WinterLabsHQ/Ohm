@@ -1,0 +1,41 @@
+interface I2C:
+    scl: Signal, role=bidirectional
+    sda: Signal, role=bidirectional
+    require pair(sda, scl)
+
+interface Power:
+    v: Signal
+    gnd: Signal
+
+component MCP9808:
+    package = generate(TSSOP, pins=8, pitch=0.65mm)
+    mpn = "MCP9808T-E/MS"
+    pin SDA:   role=bidirectional, pad=1
+    pin SCL:   role=bidirectional, pad=2
+    pin Alert: role=output, pad=3
+    pin GND:   role=ground, pad=4
+    pin A2:    role=input, pad=5
+    pin A1:    role=input, pad=6
+    pin A0:    role=input, pad=7
+    pin VDD:   role=power_in, vmax=6.0V, current=200uA, pad=8
+
+module SensorBoard:
+    bus    = io(I2C)
+    supply = io(Power)
+    vcc    = config(Voltage, default=3.3V)
+    sensor = MCP9808()
+
+    bus.sda ~ sensor.SDA
+    bus.scl ~ sensor.SCL
+
+    supply.v   ~ sensor.VDD
+    supply.gnd ~ sensor.GND
+
+    # address 0x18: A2 = A1 = A0 = 0
+    supply.gnd ~ sensor.A2
+    supply.gnd ~ sensor.A1
+    supply.gnd ~ sensor.A0
+
+    assert vcc <= sensor.VDD.vmax
+    assert vcc >= 2.7V
+    assert vcc <= 5.5V
