@@ -6,19 +6,22 @@ if any diagnostic is an error. No output is ever emitted from an errored design.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from ohm import ir
 from ohm.check_intent import check_intent
 from ohm.check_structural import check_structural
 from ohm.check_units import annotate_units, check_units
+from ohm.closedform import fold_asserts
 from ohm.diagnostics import Diagnostic, has_errors
+from ohm.holes import collect_holes
 from ohm.lower import lower
 from ohm.parse import parse
 from ohm.resolve import resolve
 
 # checker registry — Tier-Q (P9) appends here
-CHECKERS = [check_units, check_structural, check_intent]
+CHECKERS = [check_units, check_structural, check_intent, fold_asserts]
 
 
 @dataclass
@@ -46,6 +49,7 @@ def compile_source(source: str, path: str = "<string>", *, emit: bool = True) ->
     for checker in CHECKERS:
         result.diagnostics += checker(design, path)
     if emit and result.ok:
-        result.low, ldiags = lower(design, path)
+        low, ldiags = lower(design, path)
+        result.low = dataclasses.replace(low, holes=collect_holes(design))
         result.diagnostics += ldiags
     return result

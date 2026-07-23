@@ -27,6 +27,9 @@ UNITS: dict[str, tuple[str, Decimal]] = {
     "MHz": ("frequency", _D(1000000)), "GHz": ("frequency", _D(1000000000)),
     "m": ("length", _D(1)), "mm": ("length", _D("0.001")),
     "um": ("length", _D("0.000001")), "mil": ("length", _D("0.0000254")),
+    # time added for closed-form RC constants (P8); ADR-003
+    "s": ("time", _D(1)), "ms": ("time", _D("0.001")),
+    "us": ("time", _D("0.000001")), "ns": ("time", _D("1e-9")),
 }
 
 # dimensional algebra for * and / — only the combos closed-form physics needs;
@@ -34,6 +37,7 @@ UNITS: dict[str, tuple[str, Decimal]] = {
 _MUL: dict[tuple[str, str], str] = {
     ("voltage", "current"): "power",
     ("current", "resistance"): "voltage",
+    ("resistance", "capacitance"): "time",
 }
 _DIV: dict[tuple[str, str], str] = {
     ("voltage", "current"): "resistance",

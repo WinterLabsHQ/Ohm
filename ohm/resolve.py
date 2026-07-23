@@ -51,6 +51,7 @@ class _Resolver:
         self.path = path
         self.diags: list[Diagnostic] = []
         self.symbols: dict[str, A.Decl] = {}
+        self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
 
     # ---------- P-SYMBOLS ----------
     def build_symbols(self) -> None:
@@ -146,6 +147,7 @@ class _Resolver:
         configs, ports, instances, connections, asserts, obligations = [], [], [], [], [], []
         scope: dict[str, str] = {}  # binding name -> def name ("" = poisoned/config)
         poisoned: set[str] = set()
+        self._current_overrides = {}
 
         def bind(name: str, target: str, span: Span) -> bool:
             if name in scope:
@@ -191,6 +193,7 @@ class _Resolver:
                     overrides = tuple((k, _value(v)) for k, v in item.call.kwargs)
                     if bind(item.name, callee, item.span):
                         instances.append(ir.Instance(item.name, callee, overrides, item.span))
+                        self._current_overrides[item.name] = {k for k, _ in item.call.kwargs}
             elif isinstance(item, A.Connect):
                 lo = self._check_ref(item.left, scope, poisoned, decl.name)
                 ro = self._check_ref(item.right, scope, poisoned, decl.name)
@@ -227,8 +230,10 @@ class _Resolver:
         target = self.symbols.get(scope[base])
         member = ref.parts[1]
         if isinstance(target, A.ComponentDecl):
-            names = {p.name for p in target.pins}
-            kind = f"pin on component '{target.name}'"
+            # pins, declared attrs, and per-instance overrides are all addressable
+            names = {p.name for p in target.pins} | {a.name for a in target.attrs}
+            names |= self._current_overrides.get(base, set())
+            kind = f"pin or attr on component '{target.name}'"
         elif isinstance(target, A.InterfaceDecl):
             names = {m.name for m in target.members}
             kind = f"member on interface '{target.name}'"

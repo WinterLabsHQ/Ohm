@@ -149,6 +149,29 @@ class ModuleDecl:
 Decl = InterfaceDecl | ComponentDecl | ModuleDecl
 
 
+def to_src(e: Expr) -> str:
+    """Canonical source rendering of an expression (deterministic)."""
+    match e:
+        case Ref():
+            return e.dotted()
+        case Num():
+            return str(e.value)
+        case Str():
+            return f'"{e.value}"'
+        case QuantityLit():
+            tol = ""
+            if e.tol is not None:
+                tol = f" +/- {e.tol.value}{e.tol.unit or '%'}"
+            return f"{e.value}{e.unit}{tol}"
+        case BinOp():
+            left = f"({to_src(e.left)})" if isinstance(e.left, BinOp) else to_src(e.left)
+            right = f"({to_src(e.right)})" if isinstance(e.right, BinOp) else to_src(e.right)
+            return f"{left} {e.op} {right}"
+        case Call():
+            args = [to_src(a) for a in e.args] + [f"{k}={to_src(v)}" for k, v in e.kwargs]
+            return f"{e.callee.dotted()}({', '.join(args)})"
+
+
 @dataclass(frozen=True)
 class Program:
     decls: tuple[Decl, ...] = field(default=())
