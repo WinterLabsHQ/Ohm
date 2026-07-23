@@ -1,0 +1,59 @@
+use std.interfaces
+use std.passives
+use std.power
+use std.sensors
+
+component BME280:
+    package = generate(TSSOP, pins=8, pitch=0.65mm)
+    designator_prefix = "U"
+    pin GND1:  role=ground, pad=1
+    pin CSB:   role=input, pad=2
+    pin SDI:   role=bidirectional, pad=3
+    pin SCK:   role=input, pad=4
+    pin SDO:   role=input, pad=5
+    pin VDDIO: role=power_in, pad=6
+    pin GND2:  role=ground, pad=7
+    pin VDD:   role=power_in, vmax=3.6V, pad=8
+
+module sensor_node:
+    pwr = io(Power)
+    bus = io(I2C)
+
+    reg = LDO_SOT23_5(vmax=6.0V)
+    cin  = Capacitor(value=1uF)
+    cout = Capacitor(value=1uF)
+
+    pwr.v ~ reg.IN
+    pwr.gnd ~ reg.GND
+    pwr.v ~ reg.EN
+
+    cin.P1 ~ pwr.v
+    cin.P2 ~ pwr.gnd
+    cout.P1 ~ reg.OUT
+    cout.P2 ~ reg.GND
+
+    u1 = BME280()
+    u1.VDD ~ reg.OUT
+    u1.VDDIO ~ reg.OUT
+    u1.GND1 ~ reg.GND
+    u1.GND2 ~ reg.GND
+
+    r_csb = Resistor(value=10kohm)
+    r_csb.P1 ~ reg.OUT
+    r_csb.P2 ~ u1.CSB
+
+    u1.SDO ~ reg.GND
+
+    r_sda = Resistor(value=4.7kohm)
+    r_scl = Resistor(value=4.7kohm)
+    r_sda.P1 ~ reg.OUT
+    r_sda.P2 ~ bus.sda
+    r_scl.P1 ~ reg.OUT
+    r_scl.P2 ~ bus.scl
+
+    bus.sda ~ u1.SDI
+    bus.scl ~ u1.SCK
+
+    assert 3.3V <= u1.VDD.vmax
+    obligation ripple(reg.OUT) <= 50mV
+    constraint netclass(reg.OUT, "power")

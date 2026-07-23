@@ -54,3 +54,20 @@ docs are immutable; deviations live here per the session ritual):**
 - **mypy gate**: ~~deferred~~ CLOSED 2026-07-23 — all annotation errors fixed
   (65 at default strictness), `[tool.mypy]` pinned in pyproject, gated in CI
   alongside ruff + pytest.
+
+## Standard library — Milestone L (2026-07-23)
+
+Building blocks across the electronics spectrum (user's idea: generic blocks,
+not market parts; a real part = an instantiation with overrides). Blueprint R9
+made real. **L0** (foundation): `use` imports + `ohm/loader.py` (R015/R016,
+per-decl file fidelity, post-order merge keeps entry `top`), per-instance
+`package=` override with instance-site Tier-S, spec-named shared generated
+footprints, ratings fallback chain (pin → part attrs), package-data shipping;
+ADR-007. **L1** (fan-out, 4 agents): 11 `ohm/std/*.ohm` files, ~60 blocks —
+interfaces/passives/discrete/protection/analog/power/logic/electromech/
+connectivity/opto + sensors adaptation patterns; every string footprint + pad
+id verified against the local KiCad libraries; industry-standard pinouts with
+vendor-variance comments; non-standard pinouts kept as `# TEMPLATE` blocks.
+**L2** (verification): adversarial pinout audit vs KiCad symbol libs — 44/45
+CONFIRMED, 1 comment fix (LMV331), VRef demoted; live-LLM sensor-node built
+from STYLE.md + stdlib in one diagnostic round. 353 tests green, ruff+mypy clean.

@@ -40,11 +40,13 @@ component OpAmp_Dual_SOIC8:
     pin VDD:  role=power_in, pad=8   # V+
 
 # Single comparator, SOT-23-5. Same pad arrangement as the single op-amp
-# above (e.g. TLV7011, TLV3011, MCP6561R-check!, LMV331 use this order):
+# above (e.g. TLV7011, TLV3011 use this order):
 #   1=OUT  2=V- (VSS)  3=IN+  4=IN-  5=V+ (VDD)
-# NOTE: many single comparators have OPEN-DRAIN outputs (TLV7031, LMV331 ...)
-# and need an external pull-up; push-pull variants also exist. Check YOUR
-# datasheet — the output structure is not encoded here.
+# WARNING: comparator SOT-23-5 pinouts are NOT universal — the TI LMV331, for
+# one, puts OUT on pad 4 (1=IN+ 2=GND 3=IN- 4=OUT 5=V+). Verify against YOUR
+# datasheet, or override package/pads.
+# NOTE: many single comparators have OPEN-DRAIN outputs (TLV7031 ...) and need
+# an external pull-up; push-pull variants also exist — not encoded here.
 component Comparator_SOT23_5:
     package = generate(SOT23, pins=5)
     designator_prefix = "U"

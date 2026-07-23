@@ -47,3 +47,15 @@ pmax=125mW, mpn="RC0805FR-0710KL")`.
   read from the actual `.kicad_mod`.
 - No invented default ratings. Blocks are categories; datasheet values are the
   user's to declare per instance.
+
+## Adversarial pinout verification (wave L2, 2026-07-23)
+A fresh-context auditor checked every concrete pad map against hermetic sources
+(KiCad `*.kicad_sym` symbol libraries for real parts, USB/JEDEC specs, one TI
+datasheet). ~45 pinned blocks across 9 files: **44 CONFIRMED** (9 with
+vendor-variance caveats the block comments already state), **1 correction** —
+`Comparator_SOT23_5`'s pad map is valid (MCP6561/TLV703x) but its comment cited
+LMV331, whose OUT is on pad 4; the citation was removed and a variance warning
+added. `VRef_SOT23_3` was demoted to a template during L1 for the same honesty
+reason (no cross-vendor SOT-23-3 reference pinout). Live-agent test: a fresh
+LLM built a BME280 I2C sensor node from STYLE.md + stdlib after one diagnostic
+round (frozen as `tests/examples/sensor_node_bme280.ohm`).
