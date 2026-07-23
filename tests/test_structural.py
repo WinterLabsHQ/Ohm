@@ -50,4 +50,9 @@ def test_warning_does_not_block_emit():
 def test_good_designs_still_emit(design):
     result = compile_source(design.read_text(), str(design))
     assert result.ok and result.low is not None
-    assert not [d for d in result.diagnostics if d.code.startswith("S")]
+    s_diags = [d for d in result.diagnostics if d.code.startswith("S")]
+    assert not [d for d in s_diags if d.severity == "error"]
+    if design.stem == "supply":  # NCP1529 declares no pads at all -> S004 warning
+        assert [d.code for d in s_diags] == ["S004"]
+    else:
+        assert s_diags == []

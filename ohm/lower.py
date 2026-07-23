@@ -54,6 +54,8 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         """Endpoint ref → slot labels (one per member for interface endpoints)."""
         base = refparts[0]
         inst = next((i for i in module.instances if i.name == base), None)
+        if inst is not None and len(refparts) < 2:
+            return []  # depth-1 instance ref (`a ~ b`): resolver's to reject; never crash
         if inst is not None and inst.def_ref in comps:
             comp = comps[inst.def_ref]
             pin_name = refparts[1]
@@ -73,12 +75,12 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             return [slot(f"{prefix}{base}.{m}", (_PORT,)) for m in members]
         return []  # config or unresolvable (already diagnosed by resolver)
 
-    def walk(module: ir.Module, prefix: str) -> None:
+    def walk(module: ir.Module, prefix: str, stack: frozenset[str]) -> None:
         for inst in module.instances:
             if inst.def_ref in comps:
                 parts.append((f"{prefix}{inst.name}", comps[inst.def_ref], inst.overrides))
-            elif inst.def_ref in mods:
-                walk(mods[inst.def_ref], f"{prefix}{inst.name}.")
+            elif inst.def_ref in mods and inst.def_ref not in stack:  # cycle guard
+                walk(mods[inst.def_ref], f"{prefix}{inst.name}.", stack | {inst.def_ref})
         for conn in module.connections:
             left = expand(conn.left, module, prefix)
             right = expand(conn.right, module, prefix)
@@ -99,7 +101,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     top = mods.get(design.top) if design.top else None
     if top is None:
         return ir.IRLow((), ()), diags
-    walk(top, "")
+    walk(top, "", frozenset({top.name}))
 
     # designators: walk order, one counter per prefix
     counters: dict[str, int] = {}

@@ -26,7 +26,8 @@ CHECKERS = [check_units, check_structural, check_intent, fold_asserts, check_qua
 
 @dataclass
 class CompileResult:
-    design: ir.Design | None = None
+    design: ir.Design | None = None  # post-annotate_units (typed)
+    design_high: ir.Design | None = None  # pre-annotation (high)
     low: ir.IRLow | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
@@ -43,6 +44,7 @@ def compile_source(source: str, path: str = "<string>", *, emit: bool = True) ->
         return result  # fatal boundary: no analysis on unparsed source
     design, rdiags = resolve(program, path)
     result.diagnostics += rdiags
+    result.design_high = design
     design, udiags = annotate_units(design, path)
     result.diagnostics += udiags
     result.design = design

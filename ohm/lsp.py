@@ -69,10 +69,21 @@ def serve(stdin=None, stdout=None) -> int:
     docs: dict[str, str] = {}
 
     def publish(uri: str) -> None:
+        try:
+            diagnostics = _lsp_diagnostics(docs[uri], uri)
+        except Exception as exc:  # compiler bug must not kill the server
+            diagnostics = [{
+                "range": {"start": {"line": 0, "character": 0},
+                          "end": {"line": 0, "character": 0}},
+                "severity": 1,
+                "code": "X000",
+                "source": "ohm",
+                "message": f"internal error: {exc}",
+            }]
         _write_message(stdout, {
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
-            "params": {"uri": uri, "diagnostics": _lsp_diagnostics(docs[uri], uri)},
+            "params": {"uri": uri, "diagnostics": diagnostics},
         })
 
     while True:

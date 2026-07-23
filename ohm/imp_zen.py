@@ -34,6 +34,7 @@ class _ZenImporter:
         self.diags: list[Diagnostic] = []
         self.net_vars: dict[str, str] = {}  # var -> net name
         self.config_vars: set[str] = set()  # vars bound to config(...) — not nets
+        self.nonnet_vars: set[str] = set()  # NotConnected()/part-bound vars — never nets
         self.module_vars: dict[str, str] = {}  # var -> generic path
         self.nets: dict[str, list[tuple[str, str]]] = {}  # net name -> [(ref, pin)]
         self.parts: list[ir.PartLow] = []
@@ -44,12 +45,15 @@ class _ZenImporter:
         if isinstance(node, ast.Name):
             if node.id in self.net_vars:
                 return self.net_vars[node.id]
-            if node.id not in self.config_vars:
+            if node.id not in self.config_vars and node.id not in self.nonnet_vars:
                 self.diags.append(Diagnostic(
                     "warning", "Z002", f"unknown net variable '{node.id}'", _span(node), file=self.path))
             return None
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            return self.net_vars.get(node.value.id)  # e.g. VCC.NET
+            base = self.net_vars.get(node.value.id)
+            if base is None or node.attr == "NET":  # X.NET is the base net itself
+                return base
+            return f"{base}.{node.attr}"  # bundle member → its own net
         if isinstance(node, ast.Call):
             name = _call_name(node)
             if name == "NotConnected":
@@ -130,6 +134,8 @@ class _ZenImporter:
                 fn = _call_name(stmt.value)
                 if fn == "Module":
                     self.module_vars[var] = _str_const(stmt.value.args[0]) if stmt.value.args else var
+                elif fn == "NotConnected":  # no-connect var: pins wired to it are dropped
+                    self.nonnet_vars.add(var)
                 elif fn in _NET_CTORS:
                     self.net_vars[var] = self._net_from_ctor(stmt.value, var)
                 elif fn == "io":  # boundary bundle → treat as a named net (ADR-002)
@@ -137,6 +143,12 @@ class _ZenImporter:
                     self.nets.setdefault(var, [])
                 elif fn == "config":
                     self.config_vars.add(var)
+                elif fn == "Component":  # assignment-form part: import it, bind var as non-net
+                    self._component_call(stmt.value)
+                    self.nonnet_vars.add(var)
+                elif fn in self.module_vars:
+                    self._generic_call(stmt.value, self.module_vars[fn])
+                    self.nonnet_vars.add(var)
                 # interface/etc: no electrical content for flat interop
             elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 fn = _call_name(stmt.value)

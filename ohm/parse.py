@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from lark import Lark, Token, Transformer, v_args
-from lark.exceptions import UnexpectedInput, UnexpectedToken
+from lark.exceptions import LarkError, UnexpectedToken
 from lark.indenter import Indenter
 
 from ohm import ast_nodes as A
@@ -188,9 +188,9 @@ class _ToAst(Transformer):
         return A.Program(tuple(children))
 
 
-def _syntax_diag(exc: UnexpectedInput, path: str) -> Diagnostic:
-    line = getattr(exc, "line", 1) or 1
-    col = getattr(exc, "column", 1) or 1
+def _syntax_diag(exc: LarkError, path: str) -> Diagnostic:
+    line = max(getattr(exc, "line", 1) or 1, 1)
+    col = max(getattr(exc, "column", 1) or 1, 1)
     if isinstance(exc, UnexpectedToken):
         tok = exc.token
         shown = "end of file" if tok.type == "$END" else repr(str(tok))
@@ -225,7 +225,7 @@ def parse(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnost
         source += "\n"
     try:
         return _ToAst().transform(_parser().parse(source)), []
-    except UnexpectedInput:
+    except LarkError:  # incl. DedentError, which is not UnexpectedInput
         pass
     # recovery: parse each top-level block on its own, newline-padded for true spans
     decls: list[A.Decl] = []
@@ -235,7 +235,7 @@ def parse(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnost
         try:
             prog = _ToAst().transform(_parser().parse(padded))
             decls.extend(prog.decls)
-        except UnexpectedInput as exc:
+        except LarkError as exc:
             diags.append(_syntax_diag(exc, path))
     return A.Program(tuple(decls)), diags
 

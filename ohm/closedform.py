@@ -205,7 +205,10 @@ def eval_expr(expr: A.Expr, env: Env) -> Qty | None:
             args = [eval_expr(a, env) for a in expr.args]
             if any(a is None for a in args):
                 return None
-            return fn(*args)
+            try:
+                return fn(*args)
+            except TypeError:  # wrong arity → unevaluable, surfaces as C003
+                return None
         case A.BinOp() if expr.op in ("+", "-", "*", "/"):
             left, right = eval_expr(expr.left, env), eval_expr(expr.right, env)
             if left is None or right is None:

@@ -109,7 +109,23 @@ def _pad_geometry(family: str, density: str) -> tuple[Decimal, Decimal, Decimal]
     return length, center, width
 
 
+def _pins(kwargs: dict[str, ir.Value]) -> int:
+    value = kwargs.get("pins")
+    if value is None:
+        return 0
+    if isinstance(value, Decimal) and value == value.to_integral_value():
+        return int(value)
+    raise PkgError(f"'pins' must be a plain integer, got '{value}'")
+
+
 def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = None) -> PackageModel:
+    # chip packages have fixed 2-pad geometry: pins/pitch are not accepted there
+    allowed = {"density"} if package_type in _CHIP else {"pins", "pitch", "density"}
+    unknown = sorted(set(kwargs) - allowed)
+    if unknown:
+        raise PkgError(f"unrecognized generate() argument(s): {', '.join(unknown)} "
+                       f"({package_type} accepts: {', '.join(sorted(allowed))})")
+
     density = str(kwargs.get("density", "nominal"))
     if density not in _FILLETS_GULLWING:
         raise PkgError(f"unknown density '{density}' (least, nominal, most)")
@@ -130,7 +146,7 @@ def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = Non
         raise PkgError(
             f"package type '{package_type}' is not in the v1 catalog: {', '.join(CATALOG)}")
 
-    pins = int(kwargs.get("pins", 0))
+    pins = _pins(kwargs)
     pitch = _mm(kwargs.get("pitch"), "pitch") or _GULLWING[package_type][0]
     length, center, width = _pad_geometry(package_type, density)
 

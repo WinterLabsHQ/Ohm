@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = ["lark>=1.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 ohm = "ohm.cli:main"
@@ -17,3 +17,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["ohm", "ohm.pkggen", "shared"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"

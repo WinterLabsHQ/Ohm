@@ -1,4 +1,4 @@
-"""Ohm CLI driver: `ohm build`, `ohm check` (P4); fmt/explain/gen-package later."""
+"""Ohm CLI driver: `ohm build|check|fmt|explain|lsp|gen-package`."""
 
 from __future__ import annotations
 
@@ -53,14 +53,24 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="compile and emit outputs")
     p_build.add_argument("file")
     p_build.add_argument("-o", "--out", default=".", help="output directory")
-    p_build.add_argument("--emit", choices=["netlist", "kicad", "zen", "constraints", "all"],
+    p_build.add_argument("--emit",
+                         choices=["netlist", "kicad", "zen", "constraints", "package", "all"],
                          default="all")
-    p_build.add_argument("--dump-ir", choices=["high", "low"])
+    p_build.add_argument("--dump-ir", choices=["high", "typed", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
+    p_build.add_argument("--target-kicad", default="7",
+                         help="KiCad major version to target (v1 supports: 7)")
+    # ponytail: single 'declared' provider today; the flag is the provider seam
+    p_build.add_argument("--ratings", choices=["declared"], default="declared",
+                         help="pin-ratings provider")
+    p_build.add_argument("--pindata", choices=["declared"], default="declared",
+                         help="pin-data provider for generated symbols")
 
     p_check = sub.add_parser("check", help="run all checks, no emit (fast inner loop)")
-    p_check.add_argument("file")
+    p_check.add_argument("file", nargs="?")
     p_check.add_argument("--json-diagnostics", action="store_true")
+    p_check.add_argument("--explain", metavar="CODE",
+                         help="print the explanation for a diagnostic code and exit")
 
     p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
     p_fmt.add_argument("file")
@@ -84,15 +94,24 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    if args.command == "explain":
+    if args.command == "explain" or (args.command == "check" and args.explain):
         from ohm.diagnostics import EXPLAIN
 
-        text = EXPLAIN.get(args.code.upper())
+        code = args.code if args.command == "explain" else args.explain
+        text = EXPLAIN.get(code.upper())
         if text is None:
-            print(f"unknown diagnostic code '{args.code}'", file=sys.stderr)
+            print(f"unknown diagnostic code '{code}'", file=sys.stderr)
             return 1
-        print(f"{args.code.upper()}: {text}")
+        print(f"{code.upper()}: {text}")
         return 0
+
+    if args.command == "check" and args.file is None:
+        print("error: ohm check needs a file (or --explain CODE)", file=sys.stderr)
+        return 1
+
+    if args.command == "build" and args.target_kicad != "7":
+        print("error: only KiCad 7 is supported in v1", file=sys.stderr)
+        return 1
 
     if args.command == "lsp":
         from ohm.lsp import serve
@@ -110,9 +129,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.pins:
             kwargs["pins"] = Decimal(args.pins)
         if args.pitch:
+            from decimal import InvalidOperation
+
             from ohm.ir import Quantity
 
-            kwargs["pitch"] = Quantity(Decimal(args.pitch), "mm")
+            try:
+                kwargs["pitch"] = Quantity(Decimal(args.pitch), "mm")
+            except InvalidOperation:
+                print(f"error: invalid --pitch '{args.pitch}' (expected mm, e.g. 1.27)",
+                      file=sys.stderr)
+                return 1
         kwargs["density"] = args.density
         try:
             model = build(args.type, kwargs, args.name)
@@ -127,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"generated {model.name}.kicad_mod + {model.name}.kicad_sym in {outdir}")
         return 0
 
-    source = Path(args.file).read_text()
+    try:
+        source = Path(args.file).read_text()
+    except OSError as exc:
+        print(f"error: cannot read '{args.file}': {exc.strerror or exc}", file=sys.stderr)
+        return 1
 
     if args.command == "fmt":
         from ohm.fmt import format_source
@@ -138,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
         if diags:
             return 1
         if args.write:
-            Path(args.file).write_text(formatted)
+            try:
+                Path(args.file).write_text(formatted)
+            except OSError as exc:
+                print(f"error: cannot write '{args.file}': {exc.strerror or exc}",
+                      file=sys.stderr)
+                return 1
         else:
             print(formatted, end="")
         return 0
@@ -149,27 +184,35 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "build":
         if args.dump_ir:
-            node = result.design if args.dump_ir == "high" else result.low
+            node = {"high": result.design_high, "typed": result.design,
+                    "low": result.low}[args.dump_ir]
             print(ir.to_json(node))
             return 0
         stem = Path(args.file).stem
         outdir = Path(args.out)
-        outdir.mkdir(parents=True, exist_ok=True)
-        if args.emit in ("netlist", "all"):
-            (outdir / f"{stem}.net").write_text(emit_netlist(result.low, args.file))
-        if args.emit in ("kicad", "all"):
-            (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(result.low, args.file))
-            (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(result.low, args.file))
-            _emit_generated_packages(result, outdir)
-        if args.emit in ("zen", "all"):
-            from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
+        try:
+            outdir.mkdir(parents=True, exist_ok=True)
+            if args.emit in ("netlist", "all"):
+                (outdir / f"{stem}.net").write_text(emit_netlist(result.low, args.file))
+            if args.emit in ("kicad", "all"):
+                (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(result.low, args.file))
+                (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(result.low, args.file))
+                _emit_generated_packages(result, outdir)
+            if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
+                _emit_generated_packages(result, outdir)
+            if args.emit in ("zen", "all"):
+                from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 
-            (outdir / f"{stem}.zen").write_text(emit_zen(result.low, args.file))
-        if args.emit in ("constraints", "all"):
-            from ohm.emit_constraints import emit_constraints
+                (outdir / f"{stem}.zen").write_text(emit_zen(result.low, args.file))
+            if args.emit in ("constraints", "all"):
+                from ohm.emit_constraints import emit_constraints
 
-            (outdir / f"{stem}.constraints.json").write_text(
-                emit_constraints(result.low, args.file))
+                (outdir / f"{stem}.constraints.json").write_text(
+                    emit_constraints(result.low, args.file))
+        except OSError as exc:
+            print(f"error: cannot write outputs to '{outdir}': {exc.strerror or exc}",
+                  file=sys.stderr)
+            return 1
     return 0
 
 

@@ -11,6 +11,10 @@ indentation blocks (4 spaces), `#` comments, newline-terminated statements.
 Declaration order is free — forward references are fine.
 
 ```ohm
+interface Power:
+    v:   Signal, role=power_in
+    gnd: Signal, role=ground
+
 interface I2C:
     scl: Signal, role=bidirectional
     sda: Signal, role=bidirectional

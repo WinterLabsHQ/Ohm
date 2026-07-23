@@ -153,6 +153,15 @@ class _Resolver:
         self._current_overrides = {}
 
         def bind(name: str, target: str, span: Span) -> bool:
+            if name in self.symbols:
+                g = self.symbols[name]
+                kind = ("interface" if isinstance(g, A.InterfaceDecl)
+                        else "component" if isinstance(g, A.ComponentDecl) else "module")
+                self.diags.append(
+                    _err("R010", f"binding '{name}' shadows the global {kind} '{name}'", span, path)
+                )
+                poisoned.add(name)  # suppress cascades from later refs to this binding
+                return False
             if name in scope:
                 self.diags.append(_err("R004", f"duplicate binding '{name}' in module '{decl.name}'", span, path))
                 return False
@@ -198,8 +207,8 @@ class _Resolver:
                         instances.append(ir.Instance(item.name, callee, overrides, item.span))
                         self._current_overrides[item.name] = {k for k, _ in item.call.kwargs}
             elif isinstance(item, A.Connect):
-                lo = self._check_ref(item.left, scope, poisoned, decl.name)
-                ro = self._check_ref(item.right, scope, poisoned, decl.name)
+                lo = self._check_ref(item.left, scope, poisoned, decl.name, connect=True)
+                ro = self._check_ref(item.right, scope, poisoned, decl.name, connect=True)
                 if lo and ro:
                     connections.append(ir.Connection(item.left.parts, item.right.parts, item.span))
             elif isinstance(item, A.AssertStmt):
@@ -232,7 +241,8 @@ class _Resolver:
                          tuple(connections), tuple(asserts), tuple(obligations),
                          tuple(constraints), decl.span)
 
-    def _check_ref(self, ref: A.Ref, scope: dict, poisoned: set, module: str) -> bool:
+    def _check_ref(self, ref: A.Ref, scope: dict, poisoned: set, module: str,
+                   connect: bool = False) -> bool:
         """Validate base binding and (when depth>=2) the pin/member name."""
         base = ref.parts[0]
         if base in poisoned:
@@ -243,9 +253,21 @@ class _Resolver:
                      _suggest(base, scope))
             )
             return False
-        if len(ref.parts) < 2:
-            return True
         target = self.symbols.get(scope[base])
+        if len(ref.parts) < 2:
+            if connect:
+                if isinstance(target, (A.ComponentDecl, A.ModuleDecl)):
+                    self.diags.append(
+                        _err("R011", f"cannot connect '{base}' — connect a pin, port, or "
+                             "interface member", ref.span, self.path)
+                    )
+                    return False
+                if scope[base] == "":  # config binding (poisoned handled above)
+                    self.diags.append(
+                        _err("R011", f"cannot connect config '{base}'", ref.span, self.path)
+                    )
+                    return False
+            return True
         member = ref.parts[1]
         if isinstance(target, A.ComponentDecl):
             # pins, declared attrs, and per-instance overrides are all addressable
@@ -265,6 +287,20 @@ class _Resolver:
                 _err("R003", f"unknown {kind}: '{member}'", ref.span, self.path, _suggest(member, names))
             )
             return False
+        if isinstance(target, A.ModuleDecl) and len(ref.parts) >= 3:
+            # inst.port.member: resolve the port's io(Interface) and validate the member
+            sub = next(i for i in target.items if isinstance(i, A.Binding) and i.name == member)
+            if sub.call.callee.dotted() == "io":
+                iface = self.symbols.get(sub.call.args[0].dotted() if sub.call.args else "")
+                if isinstance(iface, A.InterfaceDecl):
+                    mnames = {m.name for m in iface.members}
+                    if ref.parts[2] not in mnames:
+                        self.diags.append(
+                            _err("R003", f"unknown member on interface '{iface.name}': "
+                                 f"'{ref.parts[2]}'", ref.span, self.path,
+                                 _suggest(ref.parts[2], mnames))
+                        )
+                        return False
         return True
 
     def _check_expr_refs(self, expr: A.Expr, scope, poisoned, module) -> None:
