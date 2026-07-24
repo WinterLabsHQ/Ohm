@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--explain", metavar="CODE",
                          help="print the explanation for a diagnostic code and exit")
 
+    p_conv = sub.add_parser("convert",
+                            help="convert a Zener .zen design to annotatable Ohm source")
+    p_conv.add_argument("file", help="the .zen file")
+    p_conv.add_argument("-o", "--out", help="write to a file instead of stdout")
+
     p_sign = sub.add_parser("signoff",
                             help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
     p_sign.add_argument("file", help="the Ohm source")
@@ -202,6 +207,33 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(formatted, end="")
         return 0
+    # ---- .zen ecosystem paths (ADR-012 X0) ----
+    if args.command == "convert" or (args.command == "check" and args.file.endswith(".zen")):
+        from ohm.imp_zen import flat_lints, import_zen
+
+        zlow, zdiags = import_zen(source, args.file)
+        diags = zdiags + flat_lints(zlow, args.file)
+        if args.command == "convert":
+            from ohm.emit_ohm import emit_ohm
+
+            text = emit_ohm(zlow, args.file)
+            for dg in zdiags:
+                print(dg.human(source), file=sys.stderr)
+            if args.out:
+                Path(args.out).write_text(text)
+                print(f"wrote {args.out} — fill the TODOs (or hand them to your agent) "
+                      "to enable the checking tiers", file=sys.stderr)
+            else:
+                print(text, end="")
+        elif getattr(args, "json_diagnostics", False):
+            print(json.dumps([{
+                "severity": dg.severity, "code": dg.code, "message": dg.message,
+                "file": dg.file, "help": dg.help} for dg in diags]))
+        else:
+            for dg in diags:
+                print(dg.human(source), file=sys.stderr)
+        return 1 if any(dg.severity == "error" for dg in diags) else 0
+
     if args.command == "signoff":
         from ohm.signoff import signoff
 

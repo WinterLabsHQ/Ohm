@@ -51,6 +51,13 @@ compile-time errors:
 Every check has a declared escape (`waive=` → an auditable note, never silence),
 and every code has an explanation: `ohm explain B001`.
 
+**Ohm is also an on-ramp from the existing ecosystem.** `ohm check design.zen`
+lints a Zener design's flat netlist directly; `ohm convert design.zen` turns it
+into annotatable Ohm source whose TODOs are exactly the intent `.zen` cannot
+express — fill them (or hand them to your agent) and the full tier stack lights
+up. Most of the table above is what other design languages list as explicitly
+unchecked; you don't have to start from scratch to get it.
+
 ## Install (from source)
 
 Requires Python 3.12+.
@@ -102,5 +109,13 @@ tests/          608 tests: golden netlists, adversarial suites, determinism gate
 ## Status & license
 
 Pre-release (v0.1.0). The language and compiler are feature-complete through
-signoff (see [`CHANGELOG.md`](CHANGELOG.md)); the license is being finalized —
-**all rights reserved until it lands**.
+signoff (see [`CHANGELOG.md`](CHANGELOG.md)).
+
+**Honesty about validation**: every claim above is enforced by the test suite
+(golden netlists, adversarial suites, KiCad ground-truth agreement, live-LLM
+authoring fixtures) — but no Ohm-designed board has been manufactured yet.
+Until a first spin comes back from a fab and boots, treat the bring-up tier as
+*test-validated, not field-validated*. That first board is the next gate, and
+this line will change when it happens.
+
+The license is being finalized — **all rights reserved until it lands**.

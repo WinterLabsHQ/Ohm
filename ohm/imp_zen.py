@@ -189,3 +189,30 @@ class _ZenImporter:
 def import_zen(source: str, path: str = "<string>") -> tuple[ir.IRLow, list[Diagnostic]]:
     imp = _ZenImporter(path)
     return imp.run(source), imp.diags
+
+
+def flat_lints(low: ir.IRLow, path: str = "<string>") -> list[Diagnostic]:
+    """What is honestly checkable on a FLAT imported netlist (no declared intent):
+    Z007 single-endpoint nets, Z008 fully-unconnected parts. Intent-level tiers
+    need annotation — `ohm convert` emits the skeleton for that (ecosystem X0)."""
+    diags: list[Diagnostic] = []
+    span = Span(1, 1, 1, 1)
+    connected = {n.part_ref for net in low.nets for n in net.nodes}
+    for net in sorted(low.nets, key=lambda n: n.name):
+        if len(net.nodes) == 1:
+            node = net.nodes[0]
+            diags.append(Diagnostic(
+                "info", "Z007",
+                f"net '{net.name}' has a single endpoint ({node.part_ref}.{node.pin})",
+                span, path))
+    for p in sorted(low.parts, key=lambda p: p.ref):
+        if p.ref not in connected:
+            diags.append(Diagnostic(
+                "warning", "Z008", f"part '{p.ref}' has no connections at all", span, path))
+    if low.parts:
+        diags.append(Diagnostic(
+            "info", "Z009",
+            f"flat netlist: {len(low.parts)} parts, {len(low.nets)} nets — intent tiers "
+            "(kinds, bring-up, quantities) need annotation; run `ohm convert` for the skeleton",
+            span, path))
+    return diags
