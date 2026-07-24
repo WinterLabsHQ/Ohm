@@ -7,12 +7,22 @@ names become diagnostics + poisoned bindings that suppress cascading errors.
 from __future__ import annotations
 
 import difflib
+import re
+from decimal import Decimal
 
 from ohm import ast_nodes as A
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
 from ohm import closedform as _cf
 from shared.constraints_schema import CONSTRAINT_KINDS
+
+# loop-index arithmetic (ADR-010 G1): `[i]`, `[i+1]`, `[i-2]` inside ref parts
+_IDX_RE = re.compile(r"\[([A-Za-z_]\w*)([+-]\d+(?:\.\d+)?)?\]")
+
+
+class _BadIndex(Exception):
+    """A loop-index expression that cannot produce a valid element index (→ R021)."""
+
 
 # open_collector/open_drain (wired-OR outputs: comparators, I2C, 1-Wire) and free (base
 # default, connects to anything) added for kind-contract fidelity (ADR-008 research)
@@ -385,11 +395,27 @@ class _Resolver:
         # main loop (and every checker after it) sees only plain items ----
         self._current_arrays = {}
 
+        def subst_part(p: str, var: str, i: int) -> str:
+            # `[i]` / `[i+1]` / `[i-1]` → evaluated literal index (ADR-010 G1)
+            def rep(m: "re.Match[str]") -> str:
+                if m.group(1) != var:
+                    return m.group(0)
+                off = Decimal(m.group(2)) if m.group(2) else Decimal(0)
+                if off != off.to_integral_value():
+                    raise _BadIndex(f"index offset must be an integer in '{p}'")
+                n = i + int(off)
+                if n < 0:
+                    raise _BadIndex(
+                        f"index {var}{m.group(2)} is {n} at {var}={i} in '{p}'")
+                return f"[{n}]"
+
+            return _IDX_RE.sub(rep, p)
+
         def subst_ref(ref: A.Ref, var: str, i: int) -> A.Ref:
             import dataclasses as _dc
 
             return _dc.replace(ref, parts=tuple(
-                p.replace(f"[{var}]", f"[{i}]") for p in ref.parts))
+                subst_part(p, var, i) for p in ref.parts))
 
         def subst_expr(e: A.Expr, var: str, i: int) -> A.Expr:
             import dataclasses as _dc
@@ -443,9 +469,14 @@ class _Resolver:
                         "R021", f"for range must be integer lo..hi with at most 1024 "
                         f"iterations, got {lo}..{hi}", item.span, path))
                     continue
-                for i in range(int(lo), int(hi) + 1):
-                    for inner in item.items:
-                        expanded.append(subst_item(inner, item.var, i))
+                try:
+                    unrolled = [subst_item(inner, item.var, i)
+                                for i in range(int(lo), int(hi) + 1)
+                                for inner in item.items]
+                except _BadIndex as bad:  # one diagnostic per loop; drop the whole loop
+                    self.diags.append(_err("R021", str(bad), item.span, path))
+                    continue
+                expanded.extend(unrolled)
             else:
                 expanded.append(item)
 
@@ -584,9 +615,10 @@ class _Resolver:
                 stem, _, idx = base.partition("[")
                 idx = idx.rstrip("]")
                 if not idx.isdigit():
-                    self.diags.append(_err(
-                        "R021", f"loop variable '{idx}' used outside its loop in '{base}'",
-                        ref.span, self._cur_path))
+                    msg = (f"array index must be an integer, got '{idx}' in '{base}'"
+                           if re.fullmatch(r"[\d.]+", idx) else
+                           f"loop variable '{idx}' used outside its loop in '{base}'")
+                    self.diags.append(_err("R021", msg, ref.span, self._cur_path))
                     return False
                 if stem in self._current_arrays:
                     self.diags.append(_err(

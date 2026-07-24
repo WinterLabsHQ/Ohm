@@ -41,9 +41,11 @@ for i in 0..7:                          # bounded loop, inclusive range
 - No `while`, no unbounded or config-driven counts — bounds are literals so elaboration
   is trivially terminating and hermetic (same guarantee as ADR-003 closed forms).
 - No bindings inside `for` bodies — one way to instantiate repetition (arrays), not two.
-- No arithmetic on loop variables (`rs[i+1]`) — chain topologies (ladders, cascades)
-  need it and will come as a follow-up *only* with real demand; substitution stays
-  string-simple until then.
+- ~~No arithmetic on loop variables~~ **Shipped as G1** (same day): `rs[i+1]` /
+  `rs[i-1]` — loop-var ± literal integer offset only, evaluated during unroll.
+  Negative or non-integer results → **R021** once per loop. This is exactly what
+  chains/ladders/cascades need; general index expressions (`rs[2*i]`) remain
+  excluded until real demand.
 - fmt preserves source forms (`8 * LED()`, the `for` block, unfolded expressions) —
   the *author's* intent is the artifact; unrolling is the compiler's business.
 

@@ -166,3 +166,14 @@ verified (`expects tie` in a 3-array fires B002 ×3); loop wiring structurally
 equals hand-written. Excluded from v1 (documented in ADR): loop-var arithmetic
 (`rs[i+1]`), bindings in loop bodies, non-literal bounds. **584 tests green,
 ruff+mypy clean.**
+
+**G1 (2026-07-24): loop-var arithmetic** — `rs[i+1]` / `rs[i-1]` (loop-var ±
+literal integer offset, evaluated at unroll) for chains/ladders/cascades. Grammar
+reuses the existing `+`/`-` tokens (`!`-kept index rule, no new terminals under the
+basic lexer). Bad indices → **R021** once per loop (negative result, non-integer
+offset; whole loop dropped, no partial expansion); off-by-one overruns caught by
+the existing out-of-range check; non-integer *literal* indices (`rs[1.5]`) now get
+an honest "must be an integer" message instead of the loop-var one. Chain wiring
+structurally equals hand-written (netlist-identical modulo naming); fmt preserves
+`rs[i+1]` idempotently. General index expressions (`rs[2*i]`) still excluded until
+real demand. **591 tests green, ruff+mypy clean.**

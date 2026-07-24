@@ -160,3 +160,74 @@ def test_fmt_preserves_repetition_forms():
     assert "value=(vcc - 2V) / 10mA" in once  # NOT unrolled/folded in fmt
     twice, _ = format_source(once)
     assert once == twice
+
+
+# ---------- G1: loop-var arithmetic (chains/ladders) ----------
+CHAIN = (
+    "use std.passives\ninterface P:\n    v: Signal, role=power_in\n"
+    "    gnd: Signal, role=ground\n"
+    "module M:\n    p = io(P)\n    rs = 3 * Resistor(value=1kohm)\n"
+    "    p.v ~ rs[0].P1\n"
+    "    for i in 0..1:\n        rs[i].P2 ~ rs[i+1].P1\n"
+    "    rs[2].P2 ~ p.gnd\n"
+)
+
+
+def test_chain_matches_handwritten():
+    hand = (
+        "use std.passives\ninterface P:\n    v: Signal, role=power_in\n"
+        "    gnd: Signal, role=ground\n"
+        "module M:\n    p = io(P)\n"
+        "    rs0 = Resistor(value=1kohm)\n    rs1 = Resistor(value=1kohm)\n"
+        "    rs2 = Resistor(value=1kohm)\n"
+        "    p.v ~ rs0.P1\n    rs0.P2 ~ rs1.P1\n    rs1.P2 ~ rs2.P1\n"
+        "    rs2.P2 ~ p.gnd\n"
+    )
+    a, b = result_of(CHAIN), result_of(hand)
+    assert a.ok, [d.machine() for d in a.diagnostics]
+    canon = emit_netlist(a.low, "x")
+    for i in range(3):
+        canon = canon.replace(f"[{i}]", str(i))
+    assert canon == emit_netlist(b.low, "x")
+
+
+def test_negative_offset_works():
+    src = ("use std.passives\nmodule M:\n    rs = 3 * Resistor(value=1kohm)\n"
+           "    for i in 1..2:\n        rs[i-1].P2 ~ rs[i].P1\n")
+    assert result_of(src).ok
+
+
+def test_r021_negative_index():
+    src = ("use std.passives\nmodule M:\n    rs = 3 * Resistor(value=1kohm)\n"
+           "    for i in 0..2:\n        rs[i-1].P2 ~ rs[i].P1\n")
+    diags = result_of(src).diagnostics
+    r021 = [d for d in diags if d.code == "R021"]
+    assert len(r021) == 1 and "-1" in r021[0].message  # once per loop, not per iteration
+
+
+def test_r021_offset_overruns_array():
+    src = ("use std.passives\nmodule M:\n    rs = 3 * Resistor(value=1kohm)\n"
+           "    for i in 0..2:\n        rs[i].P2 ~ rs[i+1].P1\n")
+    diags = result_of(src).diagnostics
+    assert any(d.code == "R021" and "out of range" in d.message for d in diags)
+
+
+def test_r021_non_integer_offset():
+    src = ("use std.passives\nmodule M:\n    rs = 3 * Resistor(value=1kohm)\n"
+           "    for i in 0..1:\n        rs[i+1.5].P2 ~ rs[i].P1\n")
+    assert "R021" in codes(src)
+
+
+def test_r021_non_integer_literal_index():
+    src = ("use std.passives\nmodule M:\n    rs = 3 * Resistor(value=1kohm)\n"
+           "    rs[1.5].P1 ~ rs[0].P2\n")
+    diags = result_of(src).diagnostics
+    assert any(d.code == "R021" and "must be an integer" in d.message for d in diags)
+
+
+def test_fmt_preserves_index_arithmetic():
+    once, diags = format_source(CHAIN)
+    assert not diags
+    assert "rs[i].P2 ~ rs[i+1].P1" in once
+    twice, _ = format_source(once)
+    assert once == twice

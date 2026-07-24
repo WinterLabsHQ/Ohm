@@ -69,7 +69,8 @@ argument: NAME "=" sum     -> kwarg
         | sum              -> posarg
 
 ref: NAME index? ("." NAME index?)*
-index: "[" (NUMBER | NAME) "]"    // literal or the enclosing loop variable (ADR-010)
+// literal, loop variable, or loop-var +/- literal offset for chains (ADR-010 G1)
+!index: "[" (NUMBER | NAME (("+" | "-") NUMBER)?) "]"
 
 // ---------- expressions (R7 assert / obligation bounds) ----------
 ?expr: comparison

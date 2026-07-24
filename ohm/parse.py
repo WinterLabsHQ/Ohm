@@ -92,7 +92,8 @@ def _tok_span(tok: Token) -> Span:
 class _ToAst(Transformer):
     # ---------- expressions ----------
     def index(self, meta, children):
-        return _Index(str(children[0]))  # literal number or loop-var name
+        # `!`-kept rule: children include "[" "]"; join the rest ("3", "i", "i+1")
+        return _Index("".join(str(c) for c in children if str(c) not in "[]"))
 
     def ref(self, meta, children):
         # fuse each `index` onto its preceding NAME: leds [3] .A -> ("leds[3]", "A")
