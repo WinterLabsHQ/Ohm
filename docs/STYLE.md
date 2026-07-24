@@ -150,6 +150,68 @@ component TLV9061(OpAmp):            # this component IS an OpAmp — checked
   define your own `kind` for anything it lacks.
 - Write your own contract: `kind MySensorBus:\n    requires sda: bidirectional\n    ...`.
 
+## Bring-up checks (`expects`) and DFM lints
+
+Kinds and interfaces can declare *bring-up requirements* over their members' nets —
+the mistakes that pass every netlist check but kill the board on the bench:
+
+```ohm
+interface I2C:
+    ...
+    expects pullup on sda, scl                        # B001 if missing
+
+kind MOSFET:
+    ...
+    expects tie on gate                               # B002 if floating
+
+interface RS485:
+    ...
+    expects termination(100ohm, 130ohm) on a, b when endpoint   # B007, endpoint-only
+```
+
+Patterns: `pullup`, `decoupling(min, max)`, `loadcaps(min, max)`, `cap(min)`,
+`termination(min, max)`, `tie`. `when <attr>` gates on a truthy instance attr
+(`n1 = Node(endpoint=1)`). Pin attrs: `must_connect=true` (B003 if netless),
+`tolerant_to=3.6V` (B004 if a rail exceeds it — damage class, a series R does not fix it).
+
+**Waivers are the escape hatch**: `q = NMOS(waive="tie")` suppresses a finding into a
+visible B010 info note — auditable in the source, never silent. `--strict` still passes
+on a fully-waived board.
+
+**Modeling convention** (avoids false undriven-input warnings): high-impedance analog
+sense pins that are *by design* fed through passive networks — crystal pins, regulator
+ADJ/FB, 555 TRIG/THRES — are `role=passive`. `role=input` is for digital logic inputs.
+
+**DFM/DFT lints (M-codes)** activate at *BOM stage* — once any part declares `mpn=` (or
+`dnp=`): missing MPNs, conflicting BOM groupings, valueless passives, power rails with
+no test point or connector access, fine-pitch/mixed-tech/fiducial process notes. All
+warning/info; promote with `--strict`.
+
+**Honesty — what Ohm does NOT check** (needs layout or simulation): copper geometry
+(trace width/clearance, acid traps, annular rings), solder mask, courtyard overlap and
+spacing, paste/stencil, test-point *accessibility*, panelization — and all SI/PI/EMC
+(≈30% of respin causes). Layout-stage DRC/DFM tools own those.
+
+## Placement intent (routing stays out of the language)
+
+```ohm
+module Board:
+    ...
+    constraint fixed(j1, 0mm, 0mm)        # anchor: connector locked at the origin
+    constraint near(c1, u1, 2mm)          # decoupling cap adjacent to its IC
+    constraint diffpair(usb.dp, usb.dm)   # emitted as _P/_N for KiCad's pair router
+    constraint netclass(pwr.v, "power")   # lands in .kicad_pro net classes
+```
+
+Module hierarchy is the implicit placement grouping — every module instance becomes a
+KiCad `(group)` with an `ohm_path` property on each footprint. `ohm build` emits real
+placement: anchors locked at their declared pose, everything else courtyard-aware and
+clustered by module. Generated packages arrive fully padded and net-bound; string
+footprints are stubs — run KiCad's *Update Footprints from Library* to hydrate them
+(placement and grouping survive). The constraints JSON carries the same
+placement/groups/rules triple for the downstream router. No stitching vias, no drawn
+routes, no coordinates on non-anchors — that is the router's job.
+
 ## Workflow
 
 `ohm check file.ohm` — all diagnostics at once, none hidden. Machine format:

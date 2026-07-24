@@ -121,3 +121,27 @@ Sensor `signal` optional (I2C sensors use bidirectional SDA), SwitchingConverter
 (self-declared OpAmp + multi-kind MOSFET+ThermalPad + a USER-DEFINED
 `kind QuadratureEncoder`) frozen as a fixture. **Milestone K COMPLETE — 483 tests
 green, ruff+mypy clean.** Remaining: OSS license (legal) is the last open item.
+
+## Milestone F — first-spin success (2026-07-24, ADR-009, →dc946d0+)
+
+Research-driven (3 tracks: ~2.9 respins/project avg, 35–40% of causes pre-layout-
+addressable; Cadence concedes ERC can't see protocol-level mistakes; Flux does it
+only LLM-heuristically — deterministic compile-time bring-up checking was an empty
+lane). **F0**: the `expects` mechanism — kinds/interfaces declare requirement
+predicates (pullup/decoupling/loadcaps/cap/termination/tie) over members' nets;
+`when` gates (endpoint-only termination); waivers suppress-to-B010-note;
+must_connect/tolerant_to pin attrs; check_bringup B001–B010. **F1**: std adoption
+(I2C pullups, RS485/CAN endpoint termination, MOSFET gate tie, gated crystal/LDO
+caps, universal IC decoupling) — B005 immediately caught 2 of our own examples
+missing decoupling caps (fixed; dogfooding); check_mfg M001–M008 DFM/DFT lints
+(BOM-stage activation: fire once any part declares mpn/dnp); placement intent
+(fixed/near/edge constraints) + routing-friendly KiCad handoff (real placed
+footprints, locked anchors, module-hierarchy groups + ohm_path join keys,
+.kicad_pro net classes, _P/_N diff-pairs, DSN-shaped constraints JSON). **F2**:
+seeded-mistake boards fire exactly their intended finding; adversarial FP suite
+(single-supply op-amp, mid-bus RS485, integrated-cap crystal, LM317 no-GND,
+off-board pulls, pre-BOM board) = zero false errors/warnings — it caught 2 I006
+FPs on analog sense pins, resolved by documenting the 555-precedent convention
+(passive-fed analog sense pins are role=passive) in STYLE.md. 566 tests green.
+**Deferred**: live-LLM diagnostic-loop test (subagent session limit; run when
+capacity resets — the mechanism is otherwise fully verified by the F2 suites).
