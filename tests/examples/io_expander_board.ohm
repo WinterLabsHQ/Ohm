@@ -1,0 +1,59 @@
+use std.interfaces
+use std.passives
+use std.power
+
+component PCA9536:
+    # PCA9536-style 4-bit I2C I/O expander, SO-8 (datasheet pinout)
+    package = generate(SOIC, pins=8)
+    pin IO0: role=bidirectional, pad=1
+    pin IO1: role=bidirectional, pad=2
+    pin IO2: role=bidirectional, pad=3
+    pin VSS: role=ground, pad=4
+    pin SDA: role=open_collector, pad=5
+    pin SCL: role=open_collector, pad=6
+    pin IO3: role=bidirectional, pad=7
+    pin VDD: role=power_in, pad=8, vmax=6.0V
+
+component Header_1x04:
+    package = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+
+module IoExpanderBoard:
+    vin = io(Power)
+    i2c = io(I2C)
+
+    reg = LDO_SOT23_5(vmax=6.0V)
+    cin = Capacitor(value=1uF)
+    cout = Capacitor(value=1uF)
+    exp = PCA9536()
+    hdr = Header_1x04()
+    rsda = Resistor(value=4.7kohm)
+    rscl = Resistor(value=4.7kohm)
+
+    vin.v ~ reg.IN
+    vin.gnd ~ reg.GND
+    reg.EN ~ reg.IN
+    cin.P1 ~ reg.IN
+    cin.P2 ~ reg.GND
+    cout.P1 ~ reg.OUT
+    cout.P2 ~ reg.GND
+
+    reg.OUT ~ exp.VDD
+    vin.gnd ~ exp.VSS
+
+    i2c.sda ~ exp.SDA
+    i2c.scl ~ exp.SCL
+    rsda.P1 ~ reg.OUT
+    rsda.P2 ~ i2c.sda
+    rscl.P1 ~ reg.OUT
+    rscl.P2 ~ i2c.scl
+
+    exp.IO0 ~ hdr.P1
+    exp.IO1 ~ hdr.P2
+    exp.IO2 ~ hdr.P3
+    exp.IO3 ~ hdr.P4
+
+    assert 3.3V <= exp.VDD.vmax
