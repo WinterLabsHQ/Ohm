@@ -84,6 +84,8 @@ EXPLAIN: dict[str, str] = {
     "R018": "Kind refinement cycle: a kind is (transitively) its own parent. Break the cycle.",
     "R019": "A kind `param` names a physical dimension that isn't known (voltage, current, resistance, capacitance, frequency, time, length, power, temperature, dimensionless).",
     "R020": "An `expects` declaration uses an unknown pattern (pullup, decoupling, loadcaps, cap, termination, tie) or names a member the kind/interface doesn't declare.",
+    "R021": "Array/loop misuse: count or range must be literal integers (1..1024 elements), array refs must be indexed within range, and a loop variable is only usable inside its own loop's index brackets.",
+    "R022": "A computed attr/override expression must fold at compile time: literals, this module's configs with literal defaults, and closed-form arithmetic only.",
     "U001": "Adding/subtracting quantities of different dimensions (e.g. volts + ohms). Convert or fix the expression.",
     "U002": "Comparing quantities of different dimensions. Both sides of a comparison must share a dimension.",
     "U003": "Unknown unit. See the v1 unit table in the language spec.",

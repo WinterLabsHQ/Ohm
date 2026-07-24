@@ -29,6 +29,15 @@ class _Conforms:
     def __init__(self, names: tuple[str, ...]):
         self.names = names
 
+
+class _Index:
+    """Transformer marker for a `[n]` / `[i]` ref index (ADR-010)."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str):
+        self.value = value
+
 _QUANTITY_RE = re.compile(r"(\d+(?:\.\d+)?)([A-Za-z]+)")
 
 
@@ -82,8 +91,18 @@ def _tok_span(tok: Token) -> Span:
 @v_args(meta=True)
 class _ToAst(Transformer):
     # ---------- expressions ----------
+    def index(self, meta, children):
+        return _Index(str(children[0]))  # literal number or loop-var name
+
     def ref(self, meta, children):
-        return A.Ref(tuple(str(t) for t in children), _span(meta))
+        # fuse each `index` onto its preceding NAME: leds [3] .A -> ("leds[3]", "A")
+        parts: list[str] = []
+        for child in children:
+            if isinstance(child, _Index):
+                parts[-1] += f"[{child.value}]"
+            else:
+                parts.append(str(child))
+        return A.Ref(tuple(parts), _span(meta))
 
     def number(self, meta, children):
         return A.Num(Decimal(str(children[0])), _span(meta))
@@ -239,6 +258,18 @@ class _ToAst(Transformer):
         name, call = children
         return A.Binding(str(name), call, _span(meta, children))
 
+    def array_binding(self, meta, children):
+        name, count, call = children
+        return A.ArrayBinding(str(name), Decimal(str(count)), call, _span(meta, children))
+
+    def for_stmt(self, meta, children):
+        var, lo, hi, *items = children
+        return A.ForStmt(str(var), Decimal(str(lo)), Decimal(str(hi)),
+                         tuple(items), _span(meta, children))
+
+    def loop_item(self, meta, children):
+        return children[0]
+
     def connect(self, meta, children):
         return A.Connect(children[0], children[1], _span(meta, children))
 
@@ -271,6 +302,9 @@ class _ToAst(Transformer):
 
     def kind_item(self, meta, children):
         return children[0]
+
+    def module_item(self, meta, children):
+        return children[0]  # unwrap the for_stmt alternative
 
     def start(self, meta, children):
         return A.Program(tuple(children))

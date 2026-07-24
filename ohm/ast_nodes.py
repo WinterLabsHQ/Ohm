@@ -132,6 +132,27 @@ class Binding:
 
 
 @dataclass(frozen=True)
+class ArrayBinding:
+    """`leds = 8 * LED(...)` — unrolled to leds[0..N-1] at elaborate (ADR-010)."""
+
+    name: str
+    count: Decimal
+    call: Call
+    span: Span
+
+
+@dataclass(frozen=True)
+class ForStmt:
+    """`for i in 0..7:` — bounded, unrolled at elaborate (ADR-010)."""
+
+    var: str
+    lo: Decimal
+    hi: Decimal
+    items: tuple["ModuleItem", ...]  # connects/asserts/constraints only
+    span: Span
+
+
+@dataclass(frozen=True)
 class Connect:
     left: Ref
     right: Ref
@@ -158,7 +179,7 @@ class ConstraintStmt:
     span: Span
 
 
-ModuleItem = Binding | Connect | AssertStmt | ObligationStmt | ConstraintStmt
+ModuleItem = Binding | ArrayBinding | ForStmt | Connect | AssertStmt | ObligationStmt | ConstraintStmt
 
 
 @dataclass(frozen=True)

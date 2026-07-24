@@ -39,32 +39,37 @@ interface_item: NAME ":" NAME ("," attr)* _NL     -> member_decl
 component_decl: "component" NAME conforms? ":" _NL _INDENT component_item+ _DEDENT
 
 component_item: "pin" NAME ":" attr ("," attr)* _NL   -> pin_decl
-              | NAME "=" value _NL                    -> attr_decl
+              | NAME "=" sum _NL                      -> attr_decl
 
 // ---------- module (R6) ----------
 module_decl: "module" NAME ":" _NL _INDENT module_item+ _DEDENT
 
 module_item: NAME "=" call _NL                    -> binding
+           | NAME "=" NUMBER "*" call _NL         -> array_binding
            | ref "~" ref _NL                      -> connect
            | "assert" expr _NL                    -> assert_stmt
            | "obligation" call cmp_op expr _NL    -> obligation_stmt
            | "constraint" call _NL                -> constraint_stmt
+           | for_stmt
+
+// ---------- bounded repetition (ADR-010): unrolled at elaborate ----------
+for_stmt: "for" NAME "in" NUMBER ".." NUMBER ":" _NL _INDENT loop_item+ _DEDENT
+loop_item: ref "~" ref _NL                        -> connect
+         | "assert" expr _NL                      -> assert_stmt
+         | "constraint" call _NL                  -> constraint_stmt
 
 // ---------- shared pieces ----------
-attr: NAME "=" value
-
-?value: STRING      -> string
-      | quantity
-      | NUMBER      -> number
-      | call
-      | ref
+// attr/kwarg values accept closed-form arithmetic (`sum`, ADR-010); `sum`
+// subsumes every plain literal form (STRING/quantity/NUMBER/call/ref)
+attr: NAME "=" sum
 
 call: ref "(" [arguments] ")"
 arguments: argument ("," argument)*
-argument: NAME "=" value   -> kwarg
-        | value            -> posarg
+argument: NAME "=" sum     -> kwarg
+        | sum              -> posarg
 
-ref: NAME ("." NAME)*
+ref: NAME index? ("." NAME index?)*
+index: "[" (NUMBER | NAME) "]"    // literal or the enclosing loop variable (ADR-010)
 
 // ---------- expressions (R7 assert / obligation bounds) ----------
 ?expr: comparison

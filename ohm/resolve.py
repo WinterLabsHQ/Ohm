@@ -11,6 +11,7 @@ import difflib
 from ohm import ast_nodes as A
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
+from ohm import closedform as _cf
 from shared.constraints_schema import CONSTRAINT_KINDS
 
 # open_collector/open_drain (wired-OR outputs: comparators, I2C, 1-Wire) and free (base
@@ -73,6 +74,36 @@ def _value(expr: A.Expr) -> ir.Value:
             return A.to_src(expr)
 
 
+class _CfgEnv(_cf.Env):
+    """Minimal Env for folding computed attr values at elaborate (ADR-010):
+    resolves single-name refs against the enclosing module's literal configs."""
+
+    def __init__(self, cfgs: dict[str, "ir.Value"]):  # noqa: super-init not needed
+        self.cfgs = cfgs
+
+    def resolve(self, ref: A.Ref):
+        from ohm import closedform, units as U
+
+        if len(ref.parts) == 1:
+            v = self.cfgs.get(ref.parts[0])
+            if isinstance(v, ir.Quantity):
+                v, _err_ = U.normalize(v)  # tol_raw -> tol_lo/hi (pre-annotation fold)
+            return closedform.value_qty(v) if v is not None else None
+        return None
+
+
+# canonical unit per dimension (the factor-1 entry of the unit table)
+def _base_unit(dim: str) -> str | None:
+    from decimal import Decimal as D
+
+    from ohm import units as U
+
+    for unit, (d, factor) in U.UNITS.items():
+        if d == dim and factor == D(1):
+            return unit
+    return None
+
+
 class _Resolver:
     def __init__(self, program: A.Program, path: str):
         self.program = program
@@ -82,6 +113,7 @@ class _Resolver:
         self.symbols: dict[str, A.Decl] = {}
         self.kinds_ns: dict[str, A.KindDecl] = {}  # kinds are a separate namespace (ADR-008)
         self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
+        self._current_arrays: dict[str, int] = {}  # per-module: array name -> size (ADR-010)
 
     # ---------- P-SYMBOLS ----------
     def build_symbols(self) -> None:
@@ -188,6 +220,50 @@ class _Resolver:
             return None
         return role
 
+    def _fold_value(self, expr: A.Expr, cfgs: dict[str, ir.Value],
+                    span: Span) -> ir.Value | None:
+        """Fold a computed attr/override expression (ADR-010) to a concrete value.
+
+        Reuses the closed-form engine; must resolve entirely at compile time
+        (literals + this module's literal-default configs) — else R022."""
+        from ohm import closedform, units as U
+
+        if not isinstance(expr, A.BinOp):
+            return _value(expr)
+        if expr.op not in ("+", "-", "*", "/"):
+            self.diags.append(_err(
+                "R022", "attr expressions must be arithmetic, not comparisons",
+                span, self._cur_path))
+            return None
+        qty = closedform.eval_expr(expr, _CfgEnv(cfgs))
+        if qty is None:
+            self.diags.append(_err(
+                "R022", f"attr expression does not fold at compile time: {A.to_src(expr)}",
+                span, self._cur_path,
+                "computed values may use literals, this module's configs with literal "
+                "defaults, and closed-form arithmetic"))
+            return None
+        from decimal import Decimal as D
+
+        def clean(d: D) -> D:  # 1.3E+2 -> 130 (no exponent leak into outputs)
+            d = d.normalize()
+            exp = d.as_tuple().exponent
+            return d.quantize(D(1)) if d == d.to_integral_value() and isinstance(exp, int) and exp > 0 else d
+
+        if qty.dim == U.DIMENSIONLESS:
+            v = qty.iv.lo if qty.iv.lo == qty.iv.hi else (qty.iv.lo + qty.iv.hi) / 2
+            return clean(v)
+        unit = _base_unit(qty.dim)
+        if unit is None:
+            self.diags.append(_err(
+                "R022", f"attr expression folds to unexpressible dimension '{qty.dim}'",
+                span, self._cur_path))
+            return None
+        if qty.iv.lo == qty.iv.hi:
+            return ir.Quantity(clean(qty.iv.lo), unit)
+        mid = clean((qty.iv.lo + qty.iv.hi) / 2)
+        return ir.Quantity(mid, unit, clean(qty.iv.lo), clean(qty.iv.hi))
+
     def _expectations(self, expects: tuple[A.Expectation, ...],
                       valid_members: set[str], owner: str) -> tuple[ir.ExpectationDef, ...]:
         """Validate + lower `expects` declarations (ADR-009) — R020 on bad pattern/member."""
@@ -239,7 +315,9 @@ class _Resolver:
         package = None
         attrs = []
         for a in decl.attrs:
-            v = _value(a.value)
+            v = self._fold_value(a.value, {}, a.span)  # computed attrs fold (ADR-010)
+            if v is None:
+                continue
             if a.name == "package":
                 package = v
             else:
@@ -303,7 +381,75 @@ class _Resolver:
             scope[name] = target
             return True
 
+        # ---- ADR-010 pre-expansion: unroll arrays and bounded for-loops so the
+        # main loop (and every checker after it) sees only plain items ----
+        self._current_arrays = {}
+
+        def subst_ref(ref: A.Ref, var: str, i: int) -> A.Ref:
+            import dataclasses as _dc
+
+            return _dc.replace(ref, parts=tuple(
+                p.replace(f"[{var}]", f"[{i}]") for p in ref.parts))
+
+        def subst_expr(e: A.Expr, var: str, i: int) -> A.Expr:
+            import dataclasses as _dc
+
+            match e:
+                case A.Ref():
+                    return subst_ref(e, var, i)
+                case A.BinOp():
+                    return _dc.replace(e, left=subst_expr(e.left, var, i),
+                                       right=subst_expr(e.right, var, i))
+                case A.Call():
+                    return _dc.replace(
+                        e, args=tuple(subst_expr(a, var, i) for a in e.args),
+                        kwargs=tuple((k, subst_expr(v, var, i)) for k, v in e.kwargs))
+                case _:
+                    return e
+
+        def subst_item(item: A.ModuleItem, var: str, i: int) -> A.ModuleItem:
+            import dataclasses as _dc
+
+            match item:
+                case A.Connect():
+                    return _dc.replace(item, left=subst_ref(item.left, var, i),
+                                       right=subst_ref(item.right, var, i))
+                case A.AssertStmt():
+                    return _dc.replace(item, expr=subst_expr(item.expr, var, i))
+                case A.ConstraintStmt():
+                    new_call = subst_expr(item.call, var, i)
+                    assert isinstance(new_call, A.Call)
+                    return _dc.replace(item, call=new_call)
+                case _:
+                    return item
+
+        expanded: list[A.ModuleItem] = []
         for item in decl.items:
+            if isinstance(item, A.ArrayBinding):
+                n = item.count
+                if n != n.to_integral_value() or not (1 <= int(n) <= 1024):
+                    self.diags.append(_err(
+                        "R021", f"array count must be an integer 1..1024, got {n}",
+                        item.span, path))
+                    continue
+                self._current_arrays[item.name] = int(n)
+                for i in range(int(n)):
+                    expanded.append(A.Binding(f"{item.name}[{i}]", item.call, item.span))
+            elif isinstance(item, A.ForStmt):
+                lo, hi = item.lo, item.hi
+                if (lo != lo.to_integral_value() or hi != hi.to_integral_value()
+                        or lo > hi or hi - lo + 1 > 1024):
+                    self.diags.append(_err(
+                        "R021", f"for range must be integer lo..hi with at most 1024 "
+                        f"iterations, got {lo}..{hi}", item.span, path))
+                    continue
+                for i in range(int(lo), int(hi) + 1):
+                    for inner in item.items:
+                        expanded.append(subst_item(inner, item.var, i))
+            else:
+                expanded.append(item)
+
+        for item in expanded:
             if isinstance(item, A.Binding):
                 callee = item.call.callee.dotted()
                 if callee == "io":
@@ -350,16 +496,19 @@ class _Resolver:
                         if k == "waive":
                             wv = _value(v)
                             waivers = tuple(w.strip() for w in str(wv).split(",") if w.strip())
-                    overrides = tuple((k, _value(v)) for k, v in item.call.kwargs
-                                      if k != "waive")
+                    # computed overrides fold against configs declared so far (ADR-010)
+                    cfg_map = {c.name: c.default for c in configs if c.default is not None}
+                    folded = [(k, self._fold_value(v, cfg_map, item.span))
+                              for k, v in item.call.kwargs if k != "waive"]
+                    overrides = tuple((k, v) for k, v in folded if v is not None)
                     if bind(item.name, callee, item.span):
                         instances.append(ir.Instance(item.name, callee, overrides, item.span,
                                                      waivers=waivers))
                         self._current_overrides[item.name] = {k for k, _ in item.call.kwargs}
             elif isinstance(item, A.Connect):
-                lo = self._check_ref(item.left, scope, poisoned, decl.name, connect=True)
-                ro = self._check_ref(item.right, scope, poisoned, decl.name, connect=True)
-                if lo and ro:
+                okl = self._check_ref(item.left, scope, poisoned, decl.name, connect=True)
+                okr = self._check_ref(item.right, scope, poisoned, decl.name, connect=True)
+                if okl and okr:
                     connections.append(ir.Connection(item.left.parts, item.right.parts, item.span))
             elif isinstance(item, A.AssertStmt):
                 self._check_expr_refs(item.expr, scope, poisoned, decl.name)
@@ -430,6 +579,25 @@ class _Resolver:
         if base in poisoned:
             return False  # already reported; suppress cascade
         if base not in scope:
+            # ADR-010 array diagnostics before the generic unknown-name error
+            if "[" in base:
+                stem, _, idx = base.partition("[")
+                idx = idx.rstrip("]")
+                if not idx.isdigit():
+                    self.diags.append(_err(
+                        "R021", f"loop variable '{idx}' used outside its loop in '{base}'",
+                        ref.span, self._cur_path))
+                    return False
+                if stem in self._current_arrays:
+                    self.diags.append(_err(
+                        "R021", f"index {idx} out of range for array '{stem}' "
+                        f"(size {self._current_arrays[stem]})", ref.span, self._cur_path))
+                    return False
+            elif base in self._current_arrays:
+                self.diags.append(_err(
+                    "R021", f"'{base}' is an array of {self._current_arrays[base]} — "
+                    f"index it, e.g. {base}[0]", ref.span, self._cur_path))
+                return False
             self.diags.append(
                 _err("R002", f"unknown name '{base}' in module '{module}'", ref.span, self._cur_path,
                      _suggest(base, scope))

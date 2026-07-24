@@ -145,3 +145,24 @@ FPs on analog sense pins, resolved by documenting the 555-precedent convention
 (passive-fed analog sense pins are role=passive) in STYLE.md. 566 tests green.
 **Deferred**: live-LLM diagnostic-loop test (subagent session limit; run when
 capacity resets — the mechanism is otherwise fully verified by the F2 suites).
+**Deferred item CLOSED 2026-07-24**: live LLM given only STYLE.md excerpts authored
+an I2C I/O-expander board; first attempt invented Power member names (R003 ×3) and
+omitted the I2C pull-ups — **B001 caught it** (the guide never mentioned pull-ups;
+the compiler taught the requirement). One round of machine diagnostics → clean
+board, frozen as tests/examples/io_expander_board.ohm + test_f2_livellm.py.
+
+## Milestone G0 — bounded repetition (2026-07-24, ADR-010)
+
+Arrays (`leds = 8 * LED()`, literal count 1..1024), bounded `for i in 0..7:` loops
+(connects/asserts/constraints only), computed attr/kwarg values reusing the ADR-003
+closed-form engine (`value=(vcc - 2V) / 10mA` folds to `130ohm`; tolerances
+propagate to intervals). Pure elaboration — unrolled at resolve before the main
+binding loop, so every checker/emitter sees plain instances; determinism +
+hermeticity hold (double-build byte-identical, tested). New diagnostics **R021**
+(array/loop misuse: bounds, out-of-range index, loop-var escape, bare-array ref
+with "index it" hint) and **R022** (expression doesn't fold: instance refs, div by
+zero, comparisons). fmt preserves source forms, idempotent. Per-element checking
+verified (`expects tie` in a 3-array fires B002 ×3); loop wiring structurally
+equals hand-written. Excluded from v1 (documented in ADR): loop-var arithmetic
+(`rs[i+1]`), bindings in loop bodies, non-literal bounds. **584 tests green,
+ruff+mypy clean.**

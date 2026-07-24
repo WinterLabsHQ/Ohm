@@ -58,10 +58,12 @@ def _expects_line(ex: A.Expectation) -> str:
     return " ".join(parts)
 
 
-def _item_line(item: A.ModuleItem) -> str:
+def _item_line(item: A.ModuleItem) -> str:  # ForStmt handled by caller
     match item:
         case A.Binding():
             return f"{item.name} = {A.to_src(item.call)}"
+        case A.ArrayBinding():
+            return f"{item.name} = {item.count} * {A.to_src(item.call)}"
         case A.Connect():
             return f"{item.left.dotted()} ~ {item.right.dotted()}"
         case A.AssertStmt():
@@ -70,6 +72,8 @@ def _item_line(item: A.ModuleItem) -> str:
             return f"obligation {A.to_src(item.call)} {item.op} {A.to_src(item.bound)}"
         case A.ConstraintStmt():
             return f"constraint {A.to_src(item.call)}"
+        case _:
+            return ""  # ForStmt: multi-line, rendered by _decl_lines
 
 
 def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
@@ -112,7 +116,14 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
     else:
         out.append((decl.span.line, decl.span.line, f"module {decl.name}:"))
         for item in decl.items:
-            out.append((item.span.line, item.span.end_line, f"{_INDENT}{_item_line(item)}"))
+            if isinstance(item, A.ForStmt):  # multi-line: header + indented body (ADR-010)
+                out.append((item.span.line, item.span.line,
+                            f"{_INDENT}for {item.var} in {int(item.lo)}..{int(item.hi)}:"))
+                for inner in item.items:
+                    out.append((inner.span.line, inner.span.end_line,
+                                f"{_INDENT}{_INDENT}{_item_line(inner)}"))
+            else:
+                out.append((item.span.line, item.span.end_line, f"{_INDENT}{_item_line(item)}"))
     return out[:1] + sorted(out[1:], key=lambda t: t[0])  # body in source order
 
 
