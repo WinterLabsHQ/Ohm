@@ -259,17 +259,47 @@ class _ToAst(Transformer):
         name, call = children
         return A.Binding(str(name), call, _span(meta, children))
 
+    def cnt(self, meta, children):
+        tok = str(children[0])
+        return A.BoundE(None, Decimal(tok)) if tok[0].isdigit() else A.BoundE(tok, Decimal(0))
+
+    def bnd(self, meta, children):
+        toks = [str(c) for c in children]
+        if toks[0][0].isdigit():
+            return A.BoundE(None, Decimal(toks[0]))
+        off = Decimal(0)
+        if len(toks) == 3:
+            off = Decimal(toks[2]) if toks[1] == "+" else -Decimal(toks[2])
+        return A.BoundE(toks[0], off)
+
     def array_binding(self, meta, children):
         name, count, call = children
-        return A.ArrayBinding(str(name), Decimal(str(count)), call, _span(meta, children))
+        return A.ArrayBinding(str(name), count, call, _span(meta, children))
 
     def for_stmt(self, meta, children):
         var, lo, hi, *items = children
-        return A.ForStmt(str(var), Decimal(str(lo)), Decimal(str(hi)),
-                         tuple(items), _span(meta, children))
+        return A.ForStmt(str(var), lo, hi, tuple(items), _span(meta, children))
 
     def loop_item(self, meta, children):
         return children[0]
+
+    def if_stmt(self, meta, children):
+        cond, *rest = children
+        orelse: tuple = ()
+        if rest and isinstance(rest[-1], tuple):  # else_blk result
+            orelse, rest = rest[-1], rest[:-1]
+        return A.IfStmt(cond, tuple(rest), orelse, _span(meta, children))
+
+    def else_blk(self, meta, children):
+        return tuple(children)
+
+    def fn_decl(self, meta, children):
+        name, *mid, expr = children
+        params = mid[0] if mid and mid[0] is not None else ()
+        return A.FnDecl(str(name), params, expr, _span(meta, children))
+
+    def fn_params(self, meta, children):
+        return tuple(str(c) for c in children)
 
     def connect(self, meta, children):
         return A.Connect(children[0], children[1], _span(meta, children))

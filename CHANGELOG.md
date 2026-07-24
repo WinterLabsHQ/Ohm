@@ -25,6 +25,11 @@ Initial development, complete through signoff. Milestones (details in
   compile-time computed values; adversarially verified (ADR-010).
 - **V**: `ohm signoff` — routed-board verification against the source
   (V001–V006), validated against KiCad's connectivity engine (ADR-011).
+- **E0/X0/X1**: expressiveness + ecosystem (ADR-012) — pure `fn` functions,
+  config-driven array counts/loop bounds, compile-time `if`/`else` variants
+  (all folding at elaborate, override-guarded); `.zen` designs as check input
+  + `ohm convert` to annotatable Ohm source; `ohm import-symbol` turns real
+  KiCad symbols into Ohm components with true pads and roles.
 
-608 tests; ruff + mypy clean; deterministic double-build byte-identity and
+648 tests; ruff + mypy clean; deterministic double-build byte-identity and
 hermeticity enforced in CI.

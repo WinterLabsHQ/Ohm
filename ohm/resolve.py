@@ -88,9 +88,12 @@ class _CfgEnv(_cf.Env):
     """Minimal Env for folding computed attr values at elaborate (ADR-010):
     resolves single-name refs against the enclosing module's literal configs."""
 
-    def __init__(self, cfgs: dict[str, "ir.Value"]):  # noqa: super-init not needed
+    def __init__(self, cfgs: dict[str, "ir.Value"],
+                 fns: dict | None = None):  # noqa: super-init not needed
         self.cfgs = cfgs
         self.used: set[str] = set()  # configs the fold consumed (override guard)
+        self.fns = fns or {}  # user `fn` decls fold here too (ADR-012 E0)
+        self._fn_stack: set[str] = set()
 
     def resolve(self, ref: A.Ref):
         from ohm import closedform, units as U
@@ -126,6 +129,7 @@ class _Resolver:
         self.diags: list[Diagnostic] = []
         self.symbols: dict[str, A.Decl] = {}
         self.kinds_ns: dict[str, A.KindDecl] = {}  # kinds are a separate namespace (ADR-008)
+        self.fns_ns: dict[str, A.FnDecl] = {}  # pure fns, separate namespace (ADR-012 E0)
         self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
         self._current_arrays: dict[str, int] = {}  # per-module: array name -> size (ADR-010)
         # ADR-010 override guard: module -> configs consumed by computed-value folds,
@@ -146,6 +150,13 @@ class _Resolver:
                                            decl.span, self._cur_path))
                 else:
                     self.kinds_ns[decl.name] = decl
+            elif isinstance(decl, A.FnDecl):  # fns: separate namespace (ADR-012 E0)
+                if decl.name in self.fns_ns:
+                    self._cur_path = decl.file or self.path
+                    self.diags.append(_err("R023", f"duplicate fn '{decl.name}'",
+                                           decl.span, self._cur_path))
+                else:
+                    self.fns_ns[decl.name] = decl
             elif decl.name in self.symbols:
                 self._cur_path = decl.file or self.path
                 self.diags.append(_err("R001", f"duplicate top-level name '{decl.name}'",
@@ -154,8 +165,69 @@ class _Resolver:
                 self.symbols[decl.name] = decl
 
     # ---------- P-ELABORATE (includes P-RESOLVE ref checks, needs scope) ----------
+    def _validate_fns(self) -> None:
+        """ADR-012 E0: fn bodies are pure — refs must be params, calls must hit
+        known fns or closed-form builtins, and the call graph must be acyclic."""
+        from ohm.closedform import FUNCTIONS
+
+        edges: dict[str, set[str]] = {name: set() for name in self.fns_ns}
+
+        def walk(fn: A.FnDecl, expr: A.Expr) -> None:
+            path = fn.file or self.path
+            match expr:
+                case A.Ref():
+                    if len(expr.parts) != 1 or expr.parts[0] not in fn.params:
+                        self.diags.append(_err(
+                            "R023", f"fn '{fn.name}': '{expr.dotted()}' is not a parameter "
+                            "— fn bodies are pure (params and literals only)",
+                            expr.span, path))
+                case A.BinOp():
+                    walk(fn, expr.left)
+                    walk(fn, expr.right)
+                case A.Call():
+                    callee = expr.callee.dotted()
+                    if callee in self.fns_ns:
+                        edges[fn.name].add(callee)
+                        if len(expr.args) != len(self.fns_ns[callee].params) or expr.kwargs:
+                            self.diags.append(_err(
+                                "R023", f"fn '{fn.name}' calls '{callee}' with "
+                                f"{len(expr.args)} args (needs "
+                                f"{len(self.fns_ns[callee].params)}, positional only)",
+                                expr.span, path))
+                    elif callee not in FUNCTIONS:
+                        self.diags.append(_err(
+                            "R023", f"fn '{fn.name}' calls unknown function '{callee}'",
+                            expr.span, path))
+                    for a in expr.args:
+                        walk(fn, a)
+                case _:
+                    pass
+
+        for fn in self.fns_ns.values():
+            if len(set(fn.params)) != len(fn.params):
+                self.diags.append(_err("R023", f"fn '{fn.name}' repeats a parameter name",
+                                       fn.span, fn.file or self.path))
+            walk(fn, fn.expr)
+        # cycle detection over the fn->fn edges
+        state: dict[str, int] = {}
+
+        def dfs(name: str) -> bool:
+            state[name] = 1
+            for nxt in edges[name]:
+                if state.get(nxt) == 1 or (state.get(nxt) is None and dfs(nxt)):
+                    return True
+            state[name] = 2
+            return False
+
+        for name, fn in self.fns_ns.items():
+            if state.get(name) is None and dfs(name):
+                self.diags.append(_err(
+                    "R023", f"fn '{name}' is (transitively) recursive — fns must fold "
+                    "at compile time", fn.span, fn.file or self.path))
+
     def run(self) -> ir.Design:
         self.build_symbols()
+        self._validate_fns()
         interfaces, components, modules, kinds = [], [], [], []
         for decl in self.program.decls:
             if isinstance(decl, A.UseDecl):
@@ -171,6 +243,8 @@ class _Resolver:
                 components.append(self._component(decl))
             elif isinstance(decl, A.KindDecl):
                 kinds.append(self._kind(decl))
+            elif isinstance(decl, A.FnDecl):
+                continue  # validated in _validate_fns; lowered below from fns_ns
             else:
                 modules.append(self._module(decl))
         self._cur_path = self.path
@@ -185,7 +259,10 @@ class _Resolver:
                     "computed values fold against the declared default at compile "
                     "time — pass the final value directly instead"))
         top = modules[-1].name if modules else None
-        return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top, tuple(kinds))
+        fns = tuple(ir.FnDef(f.name, f.params, f.expr, f.span)
+                    for f in self.fns_ns.values())
+        return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top,
+                         tuple(kinds), fns)
 
     def _kind(self, decl: A.KindDecl) -> ir.KindDef:
         for role_name, members in (("required", decl.requires), ("optional", decl.optional)):
@@ -257,14 +334,15 @@ class _Resolver:
         (literals + this module's literal-default configs) — else R022."""
         from ohm import closedform, units as U
 
-        if not isinstance(expr, A.BinOp):
+        is_fn_call = isinstance(expr, A.Call) and expr.callee.dotted() in self.fns_ns
+        if not isinstance(expr, A.BinOp) and not is_fn_call:
             return _value(expr)
-        if expr.op not in ("+", "-", "*", "/"):
+        if isinstance(expr, A.BinOp) and expr.op not in ("+", "-", "*", "/"):
             self.diags.append(_err(
                 "R022", "attr expressions must be arithmetic, not comparisons",
                 span, self._cur_path))
             return None
-        env = _CfgEnv(cfgs)
+        env = _CfgEnv(cfgs, self.fns_ns)
         qty = closedform.eval_expr(expr, env)
         if module is not None and env.used:  # folds bake the default in — guard overrides
             self._folded_cfg_uses.setdefault(module, set()).update(env.used)
@@ -295,6 +373,45 @@ class _Resolver:
             return ir.Quantity(clean(qty.iv.lo), unit)
         mid = clean((qty.iv.lo + qty.iv.hi) / 2)
         return ir.Quantity(mid, unit, clean(qty.iv.lo), clean(qty.iv.hi))
+
+    def _fold_cond(self, expr: A.Expr, cfgs: dict[str, ir.Value], span: Span,
+                   module: str, path: str) -> bool | None:
+        """Fold an `if` condition to a definite truth at elaborate (ADR-012 E0).
+        Comparisons compare point values of one dimension; a bare expression is
+        truthy iff it folds to a nonzero dimensionless point. Anything else → R024."""
+        from ohm import closedform, units as U
+
+        env = _CfgEnv(cfgs, self.fns_ns)
+
+        def point(e: A.Expr) -> "closedform.Qty | None":
+            q = closedform.eval_expr(e, env)
+            if q is None or q.iv.lo != q.iv.hi:
+                return None
+            return q
+
+        if isinstance(expr, A.BinOp) and expr.op in ("<", "<=", ">", ">=", "==", "!="):
+            left, right = point(expr.left), point(expr.right)
+            if left is None or right is None or left.dim != right.dim:
+                self.diags.append(_err(
+                    "R024", f"if-condition does not fold to a definite comparison: "
+                    f"{A.to_src(expr)}", span, path,
+                    "both sides must fold to point values of one dimension "
+                    "(literals, configs with literal defaults, fn calls)"))
+                return None
+            a, b = left.iv.lo, right.iv.lo
+            result = {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b,
+                      "==": a == b, "!=": a != b}[expr.op]
+        else:
+            q = point(expr)
+            if q is None or q.dim != U.DIMENSIONLESS:
+                self.diags.append(_err(
+                    "R024", f"if-condition must fold to a dimensionless point value "
+                    f"(nonzero = true): {A.to_src(expr)}", span, path))
+                return None
+            result = q.iv.lo != 0
+        if env.used:  # condition consumed config defaults — guard overrides
+            self._folded_cfg_uses.setdefault(module, set()).update(env.used)
+        return result
 
     def _expectations(self, expects: tuple[A.Expectation, ...],
                       valid_members: set[str], owner: str) -> tuple[ir.ExpectationDef, ...]:
@@ -476,42 +593,94 @@ class _Resolver:
                 case _:
                     return item
 
-        expanded: list[A.ModuleItem] = []
-        for item in decl.items:
-            if isinstance(item, A.ArrayBinding):
-                if item.call.callee.dotted() in ("io", "config"):
-                    self.diags.append(_err(
-                        "R021", f"arrays instantiate components or modules; "
-                        f"{item.call.callee.dotted()}() cannot be arrayed",
-                        item.span, path))
-                    continue
-                n = item.count
-                if n != n.to_integral_value() or not (1 <= int(n) <= 1024):
-                    self.diags.append(_err(
-                        "R021", f"array count must be an integer 1..1024, got {n}",
-                        item.span, path))
-                    continue
-                self._current_arrays[item.name] = int(n)
-                for i in range(int(n)):
-                    expanded.append(A.Binding(f"{item.name}[{i}]", item.call, item.span))
-            elif isinstance(item, A.ForStmt):
-                lo, hi = item.lo, item.hi
-                if (lo != lo.to_integral_value() or hi != hi.to_integral_value()
-                        or lo > hi or hi - lo + 1 > 1024):
-                    self.diags.append(_err(
-                        "R021", f"for range must be integer lo..hi with at most 1024 "
-                        f"iterations, got {lo}..{hi}", item.span, path))
-                    continue
-                try:
-                    unrolled = [subst_item(inner, item.var, i)
-                                for i in range(int(lo), int(hi) + 1)
-                                for inner in item.items]
-                except _BadIndex as bad:  # one diagnostic per loop; drop the whole loop
-                    self.diags.append(_err("R021", str(bad), item.span, path))
-                    continue
-                expanded.extend(unrolled)
+        # configs with literal defaults, visible to counts/bounds/conditions
+        # (ADR-012 E0). Declared unconditionally — `if`-nested configs are R024.
+        cfg_defaults: dict[str, ir.Value] = {}
+        for it in decl.items:
+            if isinstance(it, A.Binding) and it.call.callee.dotted() == "config":
+                for k, v in it.call.kwargs:
+                    if k == "default" and isinstance(v, (A.Num, A.QuantityLit)):
+                        cfg_defaults[it.name] = _value(v)
+
+        def resolve_bound(b: A.BoundE, what: str, span: Span) -> int | None:
+            if b.var is None:
+                n = b.num
             else:
-                expanded.append(item)
+                v = cfg_defaults.get(b.var)
+                if not isinstance(v, Decimal):
+                    self.diags.append(_err(
+                        "R021", f"{what} '{b.src()}': '{b.var}' must be a config with "
+                        "a literal dimensionless default", span, path))
+                    return None
+                self._folded_cfg_uses.setdefault(decl.name, set()).add(b.var)
+                n = v + b.num
+            if n != n.to_integral_value():
+                self.diags.append(_err(
+                    "R021", f"{what} must be an integer, got {b.src()} = {n}", span, path))
+                return None
+            return int(n)
+
+        def expand_items(items: tuple[A.ModuleItem, ...]) -> list[A.ModuleItem]:
+            out: list[A.ModuleItem] = []
+            for item in items:
+                if isinstance(item, A.ArrayBinding):
+                    if item.call.callee.dotted() in ("io", "config"):
+                        self.diags.append(_err(
+                            "R021", f"arrays instantiate components or modules; "
+                            f"{item.call.callee.dotted()}() cannot be arrayed",
+                            item.span, path))
+                        continue
+                    n = resolve_bound(item.count, "array count", item.span)
+                    if n is None:
+                        continue
+                    if not (1 <= n <= 1024):
+                        self.diags.append(_err(
+                            "R021", f"array count must be 1..1024, got {n}",
+                            item.span, path))
+                        continue
+                    self._current_arrays[item.name] = n
+                    for i in range(n):
+                        out.append(A.Binding(f"{item.name}[{i}]", item.call, item.span))
+                elif isinstance(item, A.ForStmt):
+                    lo = resolve_bound(item.lo, "for bound", item.span)
+                    hi = resolve_bound(item.hi, "for bound", item.span)
+                    if lo is None or hi is None:
+                        continue
+                    if lo > hi or hi - lo + 1 > 1024:
+                        self.diags.append(_err(
+                            "R021", f"for range must be lo..hi with at most 1024 "
+                            f"iterations, got {lo}..{hi}", item.span, path))
+                        continue
+                    try:
+                        unrolled = [subst_item(inner, item.var, i)
+                                    for i in range(lo, hi + 1)
+                                    for inner in item.items]
+                    except _BadIndex as bad:  # one diagnostic per loop; drop it whole
+                        self.diags.append(_err("R021", str(bad), item.span, path))
+                        continue
+                    out.extend(unrolled)
+                elif isinstance(item, A.IfStmt):
+                    taken = self._fold_cond(item.cond, cfg_defaults, item.span,
+                                            decl.name, path)
+                    if taken is None:
+                        continue  # R024 already reported
+                    chosen = item.then if taken else item.orelse
+                    legal = []
+                    for it in chosen:
+                        if (isinstance(it, A.Binding)
+                                and it.call.callee.dotted() in ("io", "config")):
+                            self.diags.append(_err(
+                                "R024", "declare io()/config() unconditionally — the "
+                                "module's boundary cannot depend on a variant",
+                                it.span, path))
+                        else:
+                            legal.append(it)
+                    out.extend(expand_items(tuple(legal)))
+                else:
+                    out.append(item)
+            return out
+
+        expanded = expand_items(decl.items)
 
         for item in expanded:
             if isinstance(item, A.Binding):

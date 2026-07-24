@@ -7,7 +7,12 @@ top_decl: interface_decl
         | component_decl
         | module_decl
         | kind_decl
+        | fn_decl
         | use_stmt
+
+// ---------- pure compile-time functions (ADR-012 E0) ----------
+fn_decl: "fn" NAME "(" [fn_params] ")" "=" expr _NL
+fn_params: NAME ("," NAME)*
 
 // ---------- imports (ADR-007) ----------
 use_stmt: "use" (ref | STRING) _NL
@@ -45,18 +50,27 @@ component_item: "pin" NAME ":" attr ("," attr)* _NL   -> pin_decl
 module_decl: "module" NAME ":" _NL _INDENT module_item+ _DEDENT
 
 module_item: NAME "=" call _NL                    -> binding
-           | NAME "=" NUMBER "*" call _NL         -> array_binding
+           | NAME "=" cnt "*" call _NL            -> array_binding
            | ref "~" ref _NL                      -> connect
            | "assert" expr _NL                    -> assert_stmt
            | "obligation" call cmp_op expr _NL    -> obligation_stmt
            | "constraint" call _NL                -> constraint_stmt
            | for_stmt
+           | if_stmt
 
 // ---------- bounded repetition (ADR-010): unrolled at elaborate ----------
-for_stmt: "for" NAME "in" NUMBER ".." NUMBER ":" _NL _INDENT loop_item+ _DEDENT
+// counts/bounds: literal, or a config name (+/- literal offset) with a literal
+// default (ADR-012 E0) — folded at elaborate, override-guarded like values
+!cnt: NUMBER | NAME
+!bnd: NUMBER | NAME (("+" | "-") NUMBER)?
+for_stmt: "for" NAME "in" bnd ".." bnd ":" _NL _INDENT loop_item+ _DEDENT
 loop_item: ref "~" ref _NL                        -> connect
          | "assert" expr _NL                      -> assert_stmt
          | "constraint" call _NL                  -> constraint_stmt
+
+// ---------- compile-time variants (ADR-012 E0): the taken branch elaborates ----------
+if_stmt: "if" expr ":" _NL _INDENT module_item+ _DEDENT else_blk?
+else_blk: "else" ":" _NL _INDENT module_item+ _DEDENT
 
 // ---------- shared pieces ----------
 // attr/kwarg values accept closed-form arithmetic (`sum`, ADR-010); `sum`

@@ -165,10 +165,15 @@ _PIN_PROPS = ("vmax", "imax", "pmax", "voltage", "current")
 class Env:
     """Resolves refs inside one module instantiation context. Read-only."""
 
+    fns: dict[str, "ir.FnDef"] = {}  # user `fn` decls (ADR-012 E0); shadowed per-instance
+    _fn_stack: set[str]
+
     def __init__(self, design: ir.Design, module: ir.Module, configs: dict[str, Qty | None]):
         self.comps = {c.name: c for c in design.components}
         self.instances = {i.name: i for i in module.instances}
         self.configs = configs
+        self.fns = {f.name: f for f in design.fns}
+        self._fn_stack = set()
 
     def resolve(self, ref: A.Ref) -> Qty | None:
         parts = ref.parts
@@ -192,6 +197,21 @@ class Env:
         return None
 
 
+class _FnEnv(Env):
+    """Param scope for one user-fn call: params first, everything else delegates
+    (fns and the recursion stack are SHARED objects with the parent)."""
+
+    def __init__(self, parent: Env, bindings: dict[str, Qty | None]):  # noqa: super
+        self.parent, self.bindings = parent, bindings
+        self.fns = getattr(parent, "fns", {})
+        self._fn_stack = getattr(parent, "_fn_stack", set())
+
+    def resolve(self, ref: A.Ref) -> Qty | None:
+        if len(ref.parts) == 1 and ref.parts[0] in self.bindings:
+            return self.bindings[ref.parts[0]]
+        return self.parent.resolve(ref)
+
+
 def eval_expr(expr: A.Expr, env: Env) -> Qty | None:
     match expr:
         case A.QuantityLit():
@@ -202,6 +222,23 @@ def eval_expr(expr: A.Expr, env: Env) -> Qty | None:
             return Qty(Interval(expr.value, expr.value), DIMENSIONLESS)
         case A.Ref():
             return env.resolve(expr)
+        case A.Call() if expr.callee.dotted() in getattr(env, "fns", {}):
+            # user `fn` (ADR-012 E0): substitute evaluated args, positional only
+            fdef = env.fns[expr.callee.dotted()]
+            stack = getattr(env, "_fn_stack", None)
+            if stack is None:
+                stack = env._fn_stack = set()
+            if (expr.kwargs or len(expr.args) != len(fdef.params)
+                    or fdef.name in stack):  # arity/recursion → unevaluable
+                return None
+            args = [eval_expr(a, env) for a in expr.args]
+            if any(a is None for a in args):
+                return None
+            stack.add(fdef.name)
+            try:
+                return eval_expr(fdef.expr, _FnEnv(env, dict(zip(fdef.params, args))))
+            finally:
+                stack.discard(fdef.name)
         case A.Call():
             fn = FUNCTIONS.get(expr.callee.dotted())
             if fn is None or expr.kwargs:

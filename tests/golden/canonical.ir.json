@@ -136,6 +136,7 @@
    }
   }
  ],
+ "fns": [],
  "interfaces": [
   {
    "__type__": "InterfaceDef",

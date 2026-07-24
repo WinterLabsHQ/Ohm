@@ -76,8 +76,17 @@ ohm build examples/led_bar.ohm -o out/  # emit netlist + KiCad + zen + constrain
 ohm fmt examples/led_bar.ohm            # canonical formatting
 ohm explain I005                        # what a diagnostic means and how to fix it
 ohm signoff board.ohm routed.kicad_pcb  # verify a routed board against the source
+ohm check design.zen                    # lint a Zener design's flat netlist
+ohm convert design.zen -o design.ohm    # Zener design -> annotatable Ohm source
+ohm import-symbol Device.kicad_sym R    # real KiCad symbol -> Ohm component
 ohm lsp                                 # stdio LSP for editor red-squiggles
 ```
+
+The language stays deliberately small but composes: pure compile-time functions
+(`fn led_r(vcc, vf, i) = (vcc - vf) / i`), config-driven arrays and loops
+(`rs = n * Resistor(...)`, `for i in 0..n-1:`), and compile-time board variants
+(`if endpoint:` / `else:`) — everything folds at elaborate, so builds stay
+hermetic, terminating, and byte-identical.
 
 Authoring guide (self-contained, written for humans *and* LLM agents):
 [`docs/STYLE.md`](docs/STYLE.md). Agents: see [`AGENTS.md`](AGENTS.md).

@@ -227,3 +227,28 @@ to docs/blueprint/ (git mv, content untouched — immutability is about content)
 blueprint-pinned shared/ seam and ohm/ layout stay put (site-packages naming
 revisit stays parked with the license decision, as recorded in the audit).
 615 tests green, ruff+mypy clean. Remaining: license (legal) → then publish.
+
+
+## Milestone E0/X0/X1 — expressiveness + ecosystem leverage (2026-07-24, ADR-012)
+
+Owner decision: expressiveness and ecosystem leverage are non-negotiable (from
+the honest Zener comparison), and the framing must state field-validation
+status honestly. **Framing**: README now positions Ohm as an on-ramp/checking
+layer over the existing ecosystem and says plainly that claims are
+test-validated, not field-validated, until a first board is fabbed. **X0**:
+`ohm check design.zen` (flat lints Z007/Z008 + Z009 honesty notice) and
+`ohm convert design.zen` → annotatable Ohm skeleton (compiles as-is; preserves
+the net partition exactly; placeholder pads loudly never-for-fab; the TODOs are
+the annotation work list). **X1**: `ohm import-symbol` — real .kicad_sym
+symbols become components (pad = pin number, role = KiCad electrical type,
+extends resolved, multi-unit merged, +/- → _P/_N); validated on Device:R,
+LM2904, AMS1117-3.3. **E0**: config-driven counts/bounds (`n * R()`,
+`0..n-1`), pure `fn` functions folded by the closed-form engine everywhere
+expressions fold (values/kwargs/asserts/conditions; R023 purity/arity/cycle
+checks), compile-time `if`/`else` variants (definite-truth folding, R024;
+io/config must be unconditional; only the taken branch exists downstream).
+Override guard extends to counts and conditions — variant/count configs
+overridden by a parent are R022, never a silent stale elaboration. Golden IR
+snapshot regenerated (Design.fns schema addition). Recorded ceiling:
+per-instance re-elaboration (module generics) is the next expressiveness
+milestone if demand shows. **648 tests green, ruff+mypy clean.**

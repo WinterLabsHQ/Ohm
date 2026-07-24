@@ -173,12 +173,24 @@ class KindDef:
 
 
 @dataclass(frozen=True)
+class FnDef:
+    """A pure compile-time function (ADR-012 E0) — body kept as AST, folded by
+    the closed-form engine wherever expressions fold."""
+
+    name: str
+    params: tuple[str, ...]
+    expr: A.Expr  # folded like AssertRec.expr
+    span: Span | None = None
+
+
+@dataclass(frozen=True)
 class Design:
     interfaces: tuple[InterfaceDef, ...]
     components: tuple[ComponentDef, ...]
     modules: tuple[Module, ...]
     top: str | None  # ponytail: top = last-declared module; --top flag when needed
     kinds: tuple[KindDef, ...] = ()  # component-type taxonomy (ADR-008)
+    fns: tuple[FnDef, ...] = ()  # pure compile-time functions (ADR-012 E0)
 
 
 # ---------- IR-LOW (flat, emitter-ready; produced by P-LOWER) ----------

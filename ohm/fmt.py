@@ -63,7 +63,7 @@ def _item_line(item: A.ModuleItem) -> str:  # ForStmt handled by caller
         case A.Binding():
             return f"{item.name} = {A.to_src(item.call)}"
         case A.ArrayBinding():
-            return f"{item.name} = {item.count} * {A.to_src(item.call)}"
+            return f"{item.name} = {item.count.src()} * {A.to_src(item.call)}"
         case A.Connect():
             return f"{item.left.dotted()} ~ {item.right.dotted()}"
         case A.AssertStmt():
@@ -113,18 +113,35 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
         for p in decl.pins:
             attrs = ", ".join(_attr(a) for a in p.attrs)
             out.append((p.span.line, p.span.end_line, f"{_INDENT}pin {p.name}: {attrs}"))
+    elif isinstance(decl, A.FnDecl):
+        params = ", ".join(decl.params)
+        return [(decl.span.line, decl.span.end_line,
+                 f"fn {decl.name}({params}) = {A.to_src(decl.expr)}")]
     else:
         out.append((decl.span.line, decl.span.line, f"module {decl.name}:"))
-        for item in decl.items:
-            if isinstance(item, A.ForStmt):  # multi-line: header + indented body (ADR-010)
-                out.append((item.span.line, item.span.line,
-                            f"{_INDENT}for {item.var} in {int(item.lo)}..{int(item.hi)}:"))
-                for inner in item.items:
-                    out.append((inner.span.line, inner.span.end_line,
-                                f"{_INDENT}{_INDENT}{_item_line(inner)}"))
-            else:
-                out.append((item.span.line, item.span.end_line, f"{_INDENT}{_item_line(item)}"))
+        out += _module_items(decl.items, 1)
     return out[:1] + sorted(out[1:], key=lambda t: t[0])  # body in source order
+
+
+def _module_items(items: tuple[A.ModuleItem, ...], depth: int) -> list[tuple[int, int, str]]:
+    """Module items at one indent depth; for/if bodies recurse (ADR-010/012)."""
+    ind = _INDENT * depth
+    out: list[tuple[int, int, str]] = []
+    for item in items:
+        if isinstance(item, A.ForStmt):
+            out.append((item.span.line, item.span.line,
+                        f"{ind}for {item.var} in {item.lo.src()}..{item.hi.src()}:"))
+            out += _module_items(item.items, depth + 1)
+        elif isinstance(item, A.IfStmt):
+            out.append((item.span.line, item.span.line, f"{ind}if {A.to_src(item.cond)}:"))
+            out += _module_items(item.then, depth + 1)
+            if item.orelse:
+                else_line = item.orelse[0].span.line - 1  # the `else:` keyword's line
+                out.append((else_line, else_line, f"{ind}else:"))
+                out += _module_items(item.orelse, depth + 1)
+        else:
+            out.append((item.span.line, item.span.end_line, f"{ind}{_item_line(item)}"))
+    return out
 
 
 def format_source(source: str, path: str = "<string>") -> tuple[str, list[Diagnostic]]:

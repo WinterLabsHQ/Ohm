@@ -132,24 +132,61 @@ class Binding:
 
 
 @dataclass(frozen=True)
+class BoundE:
+    """A count/bound: literal, or a config name ± literal offset (ADR-012 E0)."""
+
+    var: str | None  # config name, or None for a pure literal
+    num: Decimal  # the literal, or the offset added to the config's value
+
+    def src(self) -> str:
+        if self.var is None:
+            return str(self.num)
+        if self.num == 0:
+            return self.var
+        return f"{self.var}+{self.num}" if self.num > 0 else f"{self.var}-{-self.num}"
+
+
+@dataclass(frozen=True)
 class ArrayBinding:
-    """`leds = 8 * LED(...)` — unrolled to leds[0..N-1] at elaborate (ADR-010)."""
+    """`leds = 8 * LED(...)` / `leds = n * LED(...)` — unrolled at elaborate."""
 
     name: str
-    count: Decimal
+    count: BoundE
     call: Call
     span: Span
 
 
 @dataclass(frozen=True)
 class ForStmt:
-    """`for i in 0..7:` — bounded, unrolled at elaborate (ADR-010)."""
+    """`for i in 0..7:` / `for i in 0..n-1:` — bounded, unrolled at elaborate."""
 
     var: str
-    lo: Decimal
-    hi: Decimal
+    lo: BoundE
+    hi: BoundE
     items: tuple["ModuleItem", ...]  # connects/asserts/constraints only
     span: Span
+
+
+@dataclass(frozen=True)
+class IfStmt:
+    """`if <expr>:` — the condition folds at elaborate; only the taken branch
+    exists downstream (ADR-012 E0). Board variants, not runtime control flow."""
+
+    cond: "Expr"
+    then: tuple["ModuleItem", ...]
+    orelse: tuple["ModuleItem", ...]
+    span: Span
+
+
+@dataclass(frozen=True)
+class FnDecl:
+    """`fn name(a, b) = expr` — a pure compile-time function (ADR-012 E0)."""
+
+    name: str
+    params: tuple[str, ...]
+    expr: "Expr"
+    span: Span
+    file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -179,7 +216,7 @@ class ConstraintStmt:
     span: Span
 
 
-ModuleItem = Binding | ArrayBinding | ForStmt | Connect | AssertStmt | ObligationStmt | ConstraintStmt
+ModuleItem = Binding | ArrayBinding | ForStmt | IfStmt | Connect | AssertStmt | ObligationStmt | ConstraintStmt
 
 
 @dataclass(frozen=True)
@@ -228,7 +265,7 @@ class KindDecl:
     file: str | None = None
 
 
-Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl | KindDecl
+Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl | KindDecl | FnDecl
 
 
 def to_src(e: Expr) -> str:
