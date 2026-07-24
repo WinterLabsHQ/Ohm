@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                          help="print the explanation for a diagnostic code and exit")
 
     p_conv = sub.add_parser("convert",
-                            help="convert a Zener .zen design to annotatable Ohm source")
+                            help="convert a .zen design to annotatable Ohm source")
     p_conv.add_argument("file", help="the .zen file")
     p_conv.add_argument("-o", "--out", help="write to a file instead of stdout")
 

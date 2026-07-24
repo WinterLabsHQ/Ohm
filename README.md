@@ -51,12 +51,12 @@ compile-time errors:
 Every check has a declared escape (`waive=` → an auditable note, never silence),
 and every code has an explanation: `ohm explain B001`.
 
-**Ohm is also an on-ramp from the existing ecosystem.** `ohm check design.zen`
-lints a Zener design's flat netlist directly; `ohm convert design.zen` turns it
-into annotatable Ohm source whose TODOs are exactly the intent `.zen` cannot
+**Ohm meets you where your designs already are.** `ohm check design.zen` lints
+a `.zen` design's flat netlist directly; `ohm convert design.zen` turns it into
+annotatable Ohm source whose TODOs are exactly the intent a flat netlist cannot
 express — fill them (or hand them to your agent) and the full tier stack lights
-up. Most of the table above is what other design languages list as explicitly
-unchecked; you don't have to start from scratch to get it.
+up. `ohm import-symbol` does the same for any installed KiCad symbol library.
+You don't have to start from scratch to get Ohm's checking.
 
 ## Install (from source)
 
@@ -76,8 +76,8 @@ ohm build examples/led_bar.ohm -o out/  # emit netlist + KiCad + zen + constrain
 ohm fmt examples/led_bar.ohm            # canonical formatting
 ohm explain I005                        # what a diagnostic means and how to fix it
 ohm signoff board.ohm routed.kicad_pcb  # verify a routed board against the source
-ohm check design.zen                    # lint a Zener design's flat netlist
-ohm convert design.zen -o design.ohm    # Zener design -> annotatable Ohm source
+ohm check design.zen                    # lint a .zen design's flat netlist
+ohm convert design.zen -o design.ohm    # .zen design -> annotatable Ohm source
 ohm import-symbol Device.kicad_sym R    # real KiCad symbol -> Ohm component
 ohm lsp                                 # stdio LSP for editor red-squiggles
 ```
@@ -99,10 +99,10 @@ ohm/std/        standard library (~106 blocks + honest templates, 17 domains)
 ohm/pkggen/     IPC-7351 footprint/symbol generation
 shared/         the constraints-schema seam consumed by routing/solver layers
 docs/STYLE.md   the authoring guide
-docs/adr/       11 architecture decision records
+docs/adr/       12 architecture decision records
 docs/blueprint/ the founding design docs (read-only, canonical)
 examples/       complete boards, CI-enforced to compile clean
-tests/          608 tests: golden netlists, adversarial suites, determinism gates
+tests/          648 tests: golden netlists, adversarial suites, determinism gates
 ```
 
 ## Design principles
