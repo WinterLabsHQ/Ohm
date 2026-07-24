@@ -33,8 +33,9 @@ component Capacitor(Capacitor):
     pin P2: role=passive, pad=2, is=b
 
 # A = anode = POSITIVE terminal (pad 1, the marked end on tantalum bodies),
-# K = cathode = negative. Default footprint: EIA-3216-18 / Kemet size A tantalum.
-component CapacitorPolarized(Capacitor):
+# K = cathode = negative — matches Polarized (a=positive, b=negative), which
+# enables B009 reverse-bias detection. Default footprint: EIA-3216-18 tantalum.
+component CapacitorPolarized(Capacitor, Polarized):
     package = "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
     designator_prefix = "C"
     value = 0F

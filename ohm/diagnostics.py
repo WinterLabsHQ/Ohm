@@ -131,4 +131,12 @@ EXPLAIN: dict[str, str] = {
     "B008": "An `expects loadcaps` crystal terminal has no load capacitor to ground — the oscillator may not start or runs off-frequency.",
     "B009": "A Polarized part is reverse-biased against the declared operating voltages (positive terminal below negative) — tantalum/electrolytic failure class.",
     "B010": "A bring-up finding was waived at instantiation (waive=\"...\") — suppressed but recorded here for review.",
+    "M001": "Parts with neither mpn= nor dnp= — the BOM line is not orderable. Declare the exact orderable part (mpn=) or mark it do-not-populate (dnp=). PCB features (TestPoint, Fiducial, MountingHole...) are exempt. One summary warning per design. All M-codes run only on wired, BOM-stage designs (at least one part with mpn=/dnp=).",
+    "M002": "One mpn= value is shared by parts with different value or package — an orderable part is exactly one value+footprint. Split the MPNs or align the parts.",
+    "M003": "A Resistor/Capacitor/Inductor-lineage passive has no value= — an incomplete BOM line. Declare the value. One summary warning per design.",
+    "M004": "A power rail (net with a power_out pin or a declared bidirectional voltage) has no TestPoint and no Connector-kind part — bring-up and ICT cannot probe it. Ground nets are exempt (probe anywhere).",
+    "M005": "0402 chip passives on the board — fine-pitch assembly note (placement accuracy, rework difficulty). Informational summary.",
+    "M006": "The board mixes SMT and through-hole parts — assembly needs two processes (reflow + wave/selective solder). Informational.",
+    "M007": "The board has SMT parts but no Fiducial — pick-and-place optical registration needs fiducial marks. Informational.",
+    "M008": "Generated packages with lead pitch <= 0.65mm (SSOP/TSSOP, or an explicit pitch=) — stencil/paste/inspection process care. Informational summary.",
 }

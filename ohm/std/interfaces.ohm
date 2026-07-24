@@ -19,6 +19,8 @@ interface I2C:
     scl: Signal, role=bidirectional
     sda: Signal, role=bidirectional
     require pair(sda, scl)
+    # bring-up (ADR-009): I2C is open-drain by spec — every wired bus needs pulls
+    expects pullup on sda, scl
 
 interface SPI4:
     sck:  Signal, role=output
@@ -42,11 +44,15 @@ interface CAN:
     canh: Signal, role=bidirectional
     canl: Signal, role=bidirectional
     require pair(canh, canl)
+    # bring-up (ADR-009): only declared bus ENDS terminate (mid-bus nodes stay quiet)
+    expects termination(100ohm, 130ohm) on canh, canl when endpoint
 
 interface RS485:
     a: Signal, role=bidirectional
     b: Signal, role=bidirectional
     require pair(a, b)
+    # bring-up (ADR-009): only declared bus ENDS terminate (mid-bus nodes stay quiet)
+    expects termination(100ohm, 130ohm) on a, b when endpoint
 
 interface SWD:
     swclk: Signal, role=output

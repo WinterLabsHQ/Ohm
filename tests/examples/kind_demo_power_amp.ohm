@@ -39,12 +39,23 @@ component MyEncoder(QuadratureEncoder):
     pin VCC: role=power_in, pad=4
     pin GND: role=ground, pad=5
 
+# local decoupling cap (B005 caught the original omission — dogfooding)
+component Cbypass:
+    package = generate(CHIP0603)
+    designator_prefix = "C"
+    value = 100nF
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
 module AmpStage:
     pwr = io(Power)
     u1 = OPA333()
     q1 = PWRFET()
+    c1 = Cbypass()
     pwr.v   ~ u1.VPOS
     pwr.gnd ~ u1.VNEG
     u1.OUT  ~ q1.GATE
     pwr.gnd ~ q1.SOURCE
+    c1.P1   ~ pwr.v
+    c1.P2   ~ pwr.gnd
     assert u1.VPOS.vmax >= 3.3V

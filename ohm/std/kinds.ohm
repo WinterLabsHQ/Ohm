@@ -31,7 +31,14 @@ kind Inductor(TwoTerminal):
     param value: inductance
 
 kind Crystal(TwoTerminal):
+    # a/b redeclared (same role as TwoTerminal — good diamond): `expects` may only
+    # name a kind's OWN members, and load caps hang off exactly these two nets.
+    requires a: passive
+    requires b: passive
     param freq: frequency
+    # bring-up (ADR-009): gated on a declared `cl` attr, so parts/MCUs with
+    # integrated load caps stay quiet by default. Declare cl= to opt in.
+    expects loadcaps(1pF, 100pF) on a, b when cl
 
 # ---------- diodes (polar two-terminal spine) ----------
 # Vf/Vz/Vbr vary in how they're specified and are often left to the datasheet, so
@@ -59,6 +66,9 @@ kind MOSFET:
     requires drain: passive
     requires source: passive
     optional body: passive        # brought out only on 4-terminal parts
+    # bring-up (ADR-009): a floating gate is a respin; any driver, rail, or
+    # gate resistor satisfies it (push-pull GPIO topologies pass as-is)
+    expects tie on gate
 
 kind JFET:
     requires gate: input
@@ -72,6 +82,8 @@ kind OpAmp:
     requires out: output
     requires vpos: power_in
     optional vneg: power_in       # single-supply parts omit — NOT required
+    # bring-up (ADR-009): supply decoupling is the universal rule — no gate
+    expects decoupling(10nF, 10uF) on vpos
 
 kind Comparator:
     requires inp: input
@@ -79,6 +91,7 @@ kind Comparator:
     requires out: output          # push-pull; open-collector parts override role=open_collector
     requires vpos: power_in
     optional vneg: power_in
+    expects decoupling(10nF, 10uF) on vpos
 
 kind VoltageReference:
     requires out: output          # shunt refs are 2-terminal + ref; supply is optional
@@ -90,17 +103,25 @@ kind LDO:
     requires vout: power_out
     optional gnd: ground          # floating adjustable regs (LM317, LT3080) have no GND
     optional en: input            # fixed 3-pin LDOs have none
+    # bring-up (ADR-009): gated — only checked when the author declares the part
+    # needs input/output caps (cin_min= / cout_min= attrs on their component)
+    expects cap(1uF) on vout when cout_min
+    expects cap(100nF) on vin when cin_min
 
 kind SwitchingConverter:
     requires vin: power_in
     requires gnd: ground
     optional sw: output           # integrated-inductor modules (Recom R-78) expose no SW node
+    # bring-up (ADR-009): gated as on LDO. No vout member on this kind (integrated
+    # modules vary), so only the input-cap expectation is expressible here.
+    expects cap(100nF) on vin when cin_min
 
 # ---------- logic / interface ----------
 kind LogicGate:
     requires out: output
     requires vcc: power_in
     requires gnd: ground
+    expects decoupling(10nF, 10uF) on vcc
 
 kind Buffer(LogicGate):
     requires inp: input
@@ -108,12 +129,14 @@ kind Buffer(LogicGate):
 kind Transceiver:
     requires vcc: power_in
     requires gnd: ground
+    expects decoupling(10nF, 10uF) on vcc
 
 # ---------- misc ----------
 kind Oscillator:
     requires out: output
     requires vcc: power_in
     requires gnd: ground
+    expects decoupling(10nF, 10uF) on vcc
 
 kind Optocoupler:
     requires led_anode: input      # the isolated LED (input) side

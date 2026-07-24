@@ -9,6 +9,7 @@
 use std.interfaces
 use std.connectivity
 use std.electromech
+use std.passives
 
 # Half-duplex direction control: DE and /RE tied together, driven by one
 # host GPIO (high = transmit, low = receive) — exposed as a typed port so
@@ -25,9 +26,12 @@ module Rs485Node:
     u  = RS485Transceiver_SOIC8()
     j1 = Header_1x04()
 
-    # supply
+    # supply + decoupling (B005 caught the original omission — dogfooding)
+    c1 = Capacitor(value=100nF)
     pwr.v   ~ u.VCC
     pwr.gnd ~ u.GND
+    c1.P1   ~ pwr.v
+    c1.P2   ~ pwr.gnd
 
     # host UART: MCU TX drives DI, RO drives MCU RX
     uart.tx ~ u.DI

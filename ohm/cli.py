@@ -223,8 +223,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.emit in ("netlist", "all"):
                 (outdir / f"{stem}.net").write_text(emit_netlist(low, args.file))
             if args.emit in ("kicad", "all"):
+                from ohm.emit_kicad_pro import emit_kicad_pro
+
                 (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(low, args.file))
                 (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(low, args.file))
+                (outdir / f"{stem}.kicad_pro").write_text(emit_kicad_pro(low, args.file))
                 _emit_generated_packages(result, outdir)
             if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
                 _emit_generated_packages(result, outdir)

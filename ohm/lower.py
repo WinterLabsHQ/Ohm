@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
+from shared.constraints_schema import PLACEMENT_KINDS
 
 _PIN, _PORT = "pin", "port"
 
@@ -131,6 +132,21 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         for con in module.constraints:
             labels: list[str] = []
             for parts_ in con.ref_args:
+                if con.kind in PLACEMENT_KINDS:
+                    # placement kinds reference INSTANCES: resolve the depth-1
+                    # ref to its flat part ref (stored in ConstraintLow.nets,
+                    # which holds part refs — not net names — for these kinds)
+                    target = inst_of[module.name].get(parts_[0])
+                    if len(parts_) == 1 and target is not None and target.def_ref in comps:
+                        labels.append(f"{prefix}{parts_[0]}")
+                    else:
+                        diags.append(Diagnostic(
+                            "warning", "I007",
+                            f"placement constraint '{con.kind}' references"
+                            f" '{'.'.join(parts_)}' which is not a component instance",
+                            con.span or Span(1, 1, 1, 1), file=path,
+                        ))
+                    continue
                 got = expand(parts_, module, prefix, create=False)
                 if not got:
                     diags.append(Diagnostic(
@@ -190,7 +206,11 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             net_of_label[lbl] = name
     nets.sort(key=lambda n: n.name)
     constraints = tuple(
-        ir.ConstraintLow(kind, tuple(net_of_label[lbl] for lbl in labels if lbl in net_of_label), params)
+        ir.ConstraintLow(
+            kind,
+            tuple(labels) if kind in PLACEMENT_KINDS  # already flat part refs
+            else tuple(net_of_label[lbl] for lbl in labels if lbl in net_of_label),
+            params)
         for kind, labels, params in raw_constraints
     )
     return ir.IRLow(tuple(parts_low), tuple(nets), constraints), diags
