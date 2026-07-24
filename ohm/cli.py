@@ -96,6 +96,12 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("file", help="the .zen file")
     p_conv.add_argument("-o", "--out", help="write to a file instead of stdout")
 
+    p_imp = sub.add_parser("import-symbol",
+                           help="generate an Ohm component from a KiCad .kicad_sym symbol")
+    p_imp.add_argument("file", help="the .kicad_sym library file")
+    p_imp.add_argument("symbol", nargs="?", help="symbol name (omit to list the library)")
+    p_imp.add_argument("-o", "--out", help="write/append to a file instead of stdout")
+
     p_sign = sub.add_parser("signoff",
                             help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
     p_sign.add_argument("file", help="the Ohm source")
@@ -207,6 +213,28 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(formatted, end="")
         return 0
+    if args.command == "import-symbol":
+        from ohm.import_symbol import SymbolError, import_symbol, list_symbols
+
+        lib_name = Path(args.file).stem
+        try:
+            if args.symbol is None:
+                for name in list_symbols(source):
+                    print(name)
+                return 0
+            text = import_symbol(source, args.symbol, lib_name)
+        except SymbolError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if args.out:
+            existing = Path(args.out).exists() and Path(args.out).stat().st_size > 0
+            with open(args.out, "a") as fh:
+                fh.write(("\n" if existing else "") + text)
+            print(f"appended component to {args.out}", file=sys.stderr)
+        else:
+            print(text, end="")
+        return 0
+
     # ---- .zen ecosystem paths (ADR-012 X0) ----
     if args.command == "convert" or (args.command == "check" and args.file.endswith(".zen")):
         from ohm.imp_zen import flat_lints, import_zen
