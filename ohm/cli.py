@@ -91,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--explain", metavar="CODE",
                          help="print the explanation for a diagnostic code and exit")
 
+    p_sign = sub.add_parser("signoff",
+                            help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
+    p_sign.add_argument("file", help="the Ohm source")
+    p_sign.add_argument("board", help="the routed .kicad_pcb")
+    p_sign.add_argument("--json-diagnostics", action="store_true")
+
     p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
     p_fmt.add_argument("file")
     p_fmt.add_argument("-w", "--write", action="store_true", help="rewrite the file in place")
@@ -196,6 +202,29 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(formatted, end="")
         return 0
+    if args.command == "signoff":
+        from ohm.signoff import signoff
+
+        result = compile_source(source, args.file, emit=True)
+        _report(result, source, args.json_diagnostics)
+        if not result.ok:
+            return 1
+        assert result.low is not None
+        try:
+            board_text = Path(args.board).read_text()
+        except OSError as exc:
+            print(f"error: cannot read '{args.board}': {exc.strerror or exc}", file=sys.stderr)
+            return 1
+        diags = signoff(result.low, board_text, args.board)
+        if args.json_diagnostics:
+            print(json.dumps([{
+                "severity": d.severity, "code": d.code, "message": d.message,
+                "file": d.file, "help": d.help} for d in diags]))
+        else:
+            for d in diags:
+                print(d.machine(), file=sys.stderr)
+        return 1 if any(d.severity == "error" for d in diags) else 0
+
     emit = args.command == "build"
     result = compile_source(source, args.file, emit=emit,
                             debug_passes=getattr(args, "debug_passes", False))

@@ -191,3 +191,23 @@ silently → now R004; (3) `N * io()` / `N * config()` accepted but half-broken 
 now R021 (arrays instantiate components/modules only). Documented minor: dimension-
 less folds collapse tolerance to midpoint. ADR-010 updated with the verify record.
 **596 tests green, ruff+mypy clean.**
+
+## Milestone V — `ohm signoff` (2026-07-24, ADR-011)
+
+Research-driven (PCBWorld arXiv 2607.05915: open-loop LLM agents fail on invalid
+KiCad syntax 34-51%, unconnected nets, floating traces; PCB-Bench ICLR 2026):
+the missing leg of the LLM→compile→route loop was verifying the ROUTED board
+against the SOURCE — board-local DRC only checks a board against itself. New
+`ohm signoff <src> <routed.kicad_pcb>`: pure hermetic S-expr reader + checks
+V001 (board≠source: missing/foreign footprint by ohm_path, pad on wrong net,
+diffpair renames applied), V002 (incomplete net via point-topology union-find:
+endpoint chaining, vias join layers, pad-catch within half-size+0.05mm),
+V003 (net-0 copper, foreign nets, floating trace islands — the PCBWorld failure
+verbatim), V004 (one point two nets: seg×seg, via×layer, copper-into-wrong-pad),
+V005 (info: zones/stubs/geometric DRC delegated to kicad-cli — honest scope),
+V006 (constraint fixed(...) drift). CLI subcommand with --json-diagnostics,
+exit 1 on errors — machine-iterable by the LLM layer like every tier. Validated
+against KiCad's own connectivity engine (pcbnew: unrouted divider = exactly 1
+unconnected item, our synthesized route = 0 — pins pad-position/rotation math to
+ground truth). 608 tests green, ruff+mypy clean. NEXT: repo structuring
+(Zener-style layout) + release signoff; OSS license (legal) still open.
