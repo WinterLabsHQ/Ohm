@@ -1,0 +1,61 @@
+# power_amp_stage.ohm — kind-system demo (K2 live-LLM fixture, ADR-008):
+# a self-declared op-amp, a multi-kind power MOSFET, and a user-defined kind.
+use std.kinds
+use std.interfaces
+
+# Rail-to-rail op-amp declared from the OPA333 datasheet (SOT-23-5):
+# 1=OUT 2=V- 3=IN+ 4=IN- 5=V+. Declared (OpAmp) — the compiler checks conformance.
+component OPA333(OpAmp):
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin OUT:  role=output, pad=1, is=out
+    pin VNEG: role=power_in, pad=2, vmax=5.5V, is=vneg
+    pin INP:  role=input, pad=3, is=inp
+    pin INN:  role=input, pad=4, is=inn
+    pin VPOS: role=power_in, pad=5, vmax=5.5V, is=vpos
+
+# Power MOSFET in SOT-223 (tab = exposed thermal pad, pad 4). MULTIPLE kinds:
+# it is a MOSFET AND a ThermalPad part — both contracts checked.
+component PWRFET(MOSFET, ThermalPad):
+    package = "Package_TO_SOT_SMD:SOT-223"
+    designator_prefix = "Q"
+    pin GATE:   role=input, pad=1, is=gate
+    pin DRAIN:  role=passive, pad=2, is=drain
+    pin SOURCE: role=passive, pad=3, is=source
+    pin TAB:    role=passive, pad=4, is=ep
+
+# The taxonomy has no quadrature encoder — DEFINE OUR OWN kind (extends the type system).
+kind QuadratureEncoder:
+    requires a: output
+    requires b: output
+    optional sw: input
+
+component MyEncoder(QuadratureEncoder):
+    package = generate(SOT23, pins=5)
+    designator_prefix = "U"
+    pin A:   role=output, pad=1, is=a
+    pin B:   role=output, pad=2, is=b
+    pin SW:  role=input, pad=3, is=sw
+    pin VCC: role=power_in, pad=4
+    pin GND: role=ground, pad=5
+
+# local decoupling cap (B005 caught the original omission — dogfooding)
+component Cbypass:
+    package = generate(CHIP0603)
+    designator_prefix = "C"
+    value = 100nF
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+module AmpStage:
+    pwr = io(Power)
+    u1 = OPA333()
+    q1 = PWRFET()
+    c1 = Cbypass()
+    pwr.v   ~ u1.VPOS
+    pwr.gnd ~ u1.VNEG
+    u1.OUT  ~ q1.GATE
+    pwr.gnd ~ q1.SOURCE
+    c1.P1   ~ pwr.v
+    c1.P2   ~ pwr.gnd
+    assert u1.VPOS.vmax >= 3.3V

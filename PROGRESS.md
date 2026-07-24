@@ -1,6 +1,7 @@
 # Ohm — Build Progress Log
 
-Blueprint docs (`OHM_*.md`) are read-only canonical. This file tracks execution.
+Blueprint docs (`docs/blueprint/OHM_*.md`) are read-only canonical. This file
+tracks execution.
 Plan: Milestone 1 = P0–P6 (approved 2026-07-23).
 
 | Phase | Status | Gate evidence |
@@ -211,3 +212,18 @@ against KiCad's own connectivity engine (pcbnew: unrouted divider = exactly 1
 unconnected item, our synthesized route = 0 — pins pad-position/rotation math to
 ground truth). 608 tests green, ruff+mypy clean. NEXT: repo structuring
 (Zener-style layout) + release signoff; OSS license (legal) still open.
+
+## Repo restructure — Zener-style layout (2026-07-24)
+
+Root now mirrors the professional layout of diodeinc/pcb (Zener): README.md
+(pitch, tier table, install, quickstart, layout, principles, honest
+license-pending status), CHANGELOG.md (0.1.0 milestone history), AGENTS.md
+(the 5-rule agent contract: STYLE.md first, iterate on --json-diagnostics,
+declare don't decorate, waive visibly, signoff after routing), examples/
+(6 curated boards incl. new led_bar.ohm showing repetition; CI-enforced clean
+by tests/test_examples.py so the showcase can never rot), blueprint docs moved
+to docs/blueprint/ (git mv, content untouched — immutability is about content),
+.gitignore += ruff/mypy caches. No package/module paths changed: the
+blueprint-pinned shared/ seam and ohm/ layout stay put (site-packages naming
+revisit stays parked with the license decision, as recorded in the audit).
+615 tests green, ruff+mypy clean. Remaining: license (legal) → then publish.

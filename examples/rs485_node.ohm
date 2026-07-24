@@ -1,0 +1,54 @@
+# RS-485 bus node: MAX485-class transceiver on a typed RS485 port, UART to
+# the host MCU, one 1x04 header carrying power + the bus, and the A/B pair
+# routed as a differential pair.
+#
+# NOTE the case split: the std.interfaces RS485 bundle has lowercase
+# members a/b (bus.a, bus.b); the transceiver's datasheet pin names are
+# uppercase A/B (u.A, u.B).
+
+use std.interfaces
+use std.connectivity
+use std.electromech
+use std.passives
+
+# Half-duplex direction control: DE and /RE tied together, driven by one
+# host GPIO (high = transmit, low = receive) — exposed as a typed port so
+# the net is never left floating.
+interface DirCtl:
+    txen: Signal, role=output
+
+module Rs485Node:
+    pwr  = io(Power)
+    uart = io(UART)
+    ctl  = io(DirCtl)
+    bus  = io(RS485)
+
+    u  = RS485Transceiver_SOIC8()
+    j1 = Header_1x04()
+
+    # supply + decoupling (B005 caught the original omission — dogfooding)
+    c1 = Capacitor(value=100nF)
+    pwr.v   ~ u.VCC
+    pwr.gnd ~ u.GND
+    c1.P1   ~ pwr.v
+    c1.P2   ~ pwr.gnd
+
+    # host UART: MCU TX drives DI, RO drives MCU RX
+    uart.tx ~ u.DI
+    uart.rx ~ u.RO
+
+    # direction: one GPIO drives DE and /RE together
+    ctl.txen ~ u.DE
+    ctl.txen ~ u.RE
+
+    # bus: interface members a/b onto pins A/B
+    bus.a ~ u.A
+    bus.b ~ u.B
+
+    # field connector: 1 = V+, 2 = GND, 3 = A, 4 = B
+    j1.P1 ~ pwr.v
+    j1.P2 ~ pwr.gnd
+    j1.P3 ~ bus.a
+    j1.P4 ~ bus.b
+
+    constraint diffpair(bus.a, bus.b)

@@ -1,0 +1,17 @@
+# 8-channel LED bar — shows repetition (ADR-010): arrays, bounded loops,
+# and computed values. The resistor value is DERIVED from the rail config
+# at compile time: (3.3V - 2V) / 10mA folds to 130ohm in the netlist.
+
+use std.interfaces
+use std.passives
+use std.discrete
+
+module LedBar:
+    pwr = io(Power)
+    vcc = config(Voltage, default=3.3V)
+    leds = 8 * LED()
+    rs = 8 * Resistor(value=(vcc - 2V) / 10mA)
+    for i in 0..7:
+        pwr.v ~ rs[i].P1
+        rs[i].P2 ~ leds[i].A
+        leds[i].K ~ pwr.gnd
