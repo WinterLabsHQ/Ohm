@@ -177,3 +177,17 @@ an honest "must be an integer" message instead of the loop-var one. Chain wiring
 structurally equals hand-written (netlist-identical modulo naming); fmt preserves
 `rs[i+1]` idempotently. General index expressions (`rs[2*i]`) still excluded until
 real demand. **591 tests green, ruff+mypy clean.**
+
+**Adversarial verify of Milestone G (2026-07-24)** — attack sweep over emitters
+(netlist/KiCad/zen), checkers (asserts, expects/bring-up both directions), module
+arrays, name collisions, config interactions, fmt-with-comments. Held: everything
+above. **Found + fixed 3 real defects** (regression-locked in test_repetition.py):
+(1) **CRITICAL silent wrong netlist** — computed values folded against config
+*defaults*, so `Child(vcc=5V)` was ignored (130ohm emitted where 300ohm belongs,
+zero diagnostics); fix = override guard: instantiation-overriding a config that
+feeds folded values is now R022 (fold-uses tracked per module, sites cross-checked
+at end of run so decl order doesn't matter); (2) plain `rs` + array `rs` coexisted
+silently → now R004; (3) `N * io()` / `N * config()` accepted but half-broken →
+now R021 (arrays instantiate components/modules only). Documented minor: dimension-
+less folds collapse tolerance to midpoint. ADR-010 updated with the verify record.
+**596 tests green, ruff+mypy clean.**

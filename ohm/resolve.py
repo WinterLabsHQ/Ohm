@@ -90,15 +90,19 @@ class _CfgEnv(_cf.Env):
 
     def __init__(self, cfgs: dict[str, "ir.Value"]):  # noqa: super-init not needed
         self.cfgs = cfgs
+        self.used: set[str] = set()  # configs the fold consumed (override guard)
 
     def resolve(self, ref: A.Ref):
         from ohm import closedform, units as U
 
         if len(ref.parts) == 1:
             v = self.cfgs.get(ref.parts[0])
+            if v is None:
+                return None
+            self.used.add(ref.parts[0])
             if isinstance(v, ir.Quantity):
                 v, _err_ = U.normalize(v)  # tol_raw -> tol_lo/hi (pre-annotation fold)
-            return closedform.value_qty(v) if v is not None else None
+            return closedform.value_qty(v)
         return None
 
 
@@ -124,6 +128,11 @@ class _Resolver:
         self.kinds_ns: dict[str, A.KindDecl] = {}  # kinds are a separate namespace (ADR-008)
         self._current_overrides: dict[str, set[str]] = {}  # per-module: inst -> override keys
         self._current_arrays: dict[str, int] = {}  # per-module: array name -> size (ADR-010)
+        # ADR-010 override guard: module -> configs consumed by computed-value folds,
+        # and every module-instantiation site that overrides configs (checked at end
+        # of run() so declaration order doesn't matter)
+        self._folded_cfg_uses: dict[str, set[str]] = {}
+        self._override_sites: list[tuple[str, set[str], Span, str]] = []
 
     # ---------- P-SYMBOLS ----------
     def build_symbols(self) -> None:
@@ -165,6 +174,16 @@ class _Resolver:
             else:
                 modules.append(self._module(decl))
         self._cur_path = self.path
+        # ADR-010 override guard: a folded computed value baked the config's default
+        # in at elaborate — an instantiation override would be silently ignored, so
+        # it is an error (v1; per-instance re-folding would need lower-time context)
+        for callee, keys, span, site_path in self._override_sites:
+            for cfg in sorted(keys & self._folded_cfg_uses.get(callee, set())):
+                self.diags.append(_err(
+                    "R022", f"config '{cfg}' of '{callee}' feeds computed values; "
+                    "overriding it is not supported (v1)", span, site_path,
+                    "computed values fold against the declared default at compile "
+                    "time — pass the final value directly instead"))
         top = modules[-1].name if modules else None
         return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top, tuple(kinds))
 
@@ -231,7 +250,7 @@ class _Resolver:
         return role
 
     def _fold_value(self, expr: A.Expr, cfgs: dict[str, ir.Value],
-                    span: Span) -> ir.Value | None:
+                    span: Span, module: str | None = None) -> ir.Value | None:
         """Fold a computed attr/override expression (ADR-010) to a concrete value.
 
         Reuses the closed-form engine; must resolve entirely at compile time
@@ -245,7 +264,10 @@ class _Resolver:
                 "R022", "attr expressions must be arithmetic, not comparisons",
                 span, self._cur_path))
             return None
-        qty = closedform.eval_expr(expr, _CfgEnv(cfgs))
+        env = _CfgEnv(cfgs)
+        qty = closedform.eval_expr(expr, env)
+        if module is not None and env.used:  # folds bake the default in — guard overrides
+            self._folded_cfg_uses.setdefault(module, set()).update(env.used)
         if qty is None:
             self.diags.append(_err(
                 "R022", f"attr expression does not fold at compile time: {A.to_src(expr)}",
@@ -388,6 +410,11 @@ class _Resolver:
             if name in scope:
                 self.diags.append(_err("R004", f"duplicate binding '{name}' in module '{decl.name}'", span, path))
                 return False
+            if "[" not in name and name in self._current_arrays:  # plain `rs` vs array `rs` (ADR-010)
+                self.diags.append(_err(
+                    "R004", f"duplicate binding '{name}' in module '{decl.name}': "
+                    f"'{name}' is also an array of {self._current_arrays[name]}", span, path))
+                return False
             scope[name] = target
             return True
 
@@ -452,6 +479,12 @@ class _Resolver:
         expanded: list[A.ModuleItem] = []
         for item in decl.items:
             if isinstance(item, A.ArrayBinding):
+                if item.call.callee.dotted() in ("io", "config"):
+                    self.diags.append(_err(
+                        "R021", f"arrays instantiate components or modules; "
+                        f"{item.call.callee.dotted()}() cannot be arrayed",
+                        item.span, path))
+                    continue
                 n = item.count
                 if n != n.to_integral_value() or not (1 <= int(n) <= 1024):
                     self.diags.append(_err(
@@ -529,9 +562,12 @@ class _Resolver:
                             waivers = tuple(w.strip() for w in str(wv).split(",") if w.strip())
                     # computed overrides fold against configs declared so far (ADR-010)
                     cfg_map = {c.name: c.default for c in configs if c.default is not None}
-                    folded = [(k, self._fold_value(v, cfg_map, item.span))
+                    folded = [(k, self._fold_value(v, cfg_map, item.span, decl.name))
                               for k, v in item.call.kwargs if k != "waive"]
                     overrides = tuple((k, v) for k, v in folded if v is not None)
+                    if isinstance(target, A.ModuleDecl) and overrides:
+                        self._override_sites.append(
+                            (callee, {k for k, _ in overrides}, item.span, path))
                     if bind(item.name, callee, item.span):
                         instances.append(ir.Instance(item.name, callee, overrides, item.span,
                                                      waivers=waivers))

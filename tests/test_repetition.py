@@ -231,3 +231,60 @@ def test_fmt_preserves_index_arithmetic():
     assert "rs[i].P2 ~ rs[i+1].P1" in once
     twice, _ = format_source(once)
     assert once == twice
+
+
+# ---------- adversarial-verify regression locks (2026-07-24) ----------
+def test_r022_config_override_of_folded_value():
+    # THE silent-wrong-netlist bug: folds bake the default in; an override
+    # must be an error, never a 130ohm resistor on a 5V rail.
+    src = ("use std.interfaces\nuse std.passives\n"
+           "module Child:\n    pwr = io(Power)\n"
+           "    vcc = config(Voltage, default=3.3V)\n"
+           "    r = Resistor(value=(vcc - 2V) / 10mA)\n"
+           "    pwr.v ~ r.P1\n    r.P2 ~ pwr.gnd\n"
+           "module Top:\n    pwr = io(Power)\n    c = Child(vcc=5V)\n"
+           "    pwr.v ~ c.pwr.v\n    pwr.gnd ~ c.pwr.gnd\n")
+    diags = result_of(src).diagnostics
+    assert any(d.code == "R022" and "overriding" in d.message for d in diags)
+
+
+def test_config_override_without_folded_use_is_fine():
+    src = ("use std.interfaces\nuse std.passives\n"
+           "module Child:\n    pwr = io(Power)\n"
+           "    vcc = config(Voltage, default=3.3V)\n"
+           "    r = Resistor(value=1kohm)\n"
+           "    assert vcc < 6V\n"
+           "    pwr.v ~ r.P1\n    r.P2 ~ pwr.gnd\n"
+           "module Top:\n    pwr = io(Power)\n    c = Child(vcc=5V)\n"
+           "    pwr.v ~ c.pwr.v\n    pwr.gnd ~ c.pwr.gnd\n")
+    r = result_of(src)
+    assert r.ok, [d.machine() for d in r.diagnostics]
+
+
+def test_r004_plain_binding_vs_array_same_name():
+    src = ("use std.passives\nmodule M:\n"
+           "    rs = Resistor(value=1kohm)\n"
+           "    rs = 3 * Resistor(value=2kohm)\n")
+    diags = result_of(src).diagnostics
+    assert any(d.code == "R004" and "array" in d.message for d in diags)
+
+
+def test_r021_io_and_config_cannot_be_arrayed():
+    src_io = ("use std.interfaces\nmodule M:\n    ps = 2 * io(Power)\n"
+              "    ps[0].v ~ ps[1].v\n")
+    src_cfg = ("use std.passives\nmodule M:\n    vs = 2 * config(Voltage, default=3.3V)\n"
+               "    r = Resistor(value=1kohm)\n")
+    assert "R021" in codes(src_io)
+    assert "R021" in codes(src_cfg)
+
+
+def test_module_arrays_lower_correctly():
+    src = ("use std.interfaces\nuse std.passives\n"
+           "module Leg:\n    pwr = io(Power)\n    r = Resistor(value=1kohm)\n"
+           "    pwr.v ~ r.P1\n    r.P2 ~ pwr.gnd\n"
+           "module Top:\n    pwr = io(Power)\n    legs = 2 * Leg()\n"
+           "    for i in 0..1:\n        pwr.v ~ legs[i].pwr.v\n"
+           "        pwr.gnd ~ legs[i].pwr.gnd\n")
+    r = result_of(src)
+    assert r.ok
+    assert sorted(p.ref for p in r.low.parts) == ["legs[0].r", "legs[1].r"]

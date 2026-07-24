@@ -49,6 +49,29 @@ for i in 0..7:                          # bounded loop, inclusive range
 - fmt preserves source forms (`8 * LED()`, the `for` block, unfolded expressions) —
   the *author's* intent is the artifact; unrolling is the compiler's business.
 
+## Adversarial verification (2026-07-24)
+The verify pass confirmed emitters (netlist, KiCad pcb/sch, `.zen` with identifier
+sanitization), per-element asserts/expects (C001 and B001 fire and stay quiet
+correctly over loop-built topologies), module arrays, and fmt-with-comments — and
+found **3 real defects**, all fixed + regression-locked:
+
+1. **Silent config-override lie (critical)**: computed values fold against the
+   config's *default* at elaborate; `Child(vcc=5V)` was silently ignored — the
+   netlist carried the 3.3V-derived value with zero diagnostics. v1 fix: folding a
+   config bakes the default in, so *overriding* such a config at instantiation is
+   now **R022** (per-instance re-folding needs lower-time context — future work if
+   demanded). Overrides of configs not consumed by folds stay legal.
+2. **Plain/array name collision**: `rs = Resistor(...)` and `rs = 3 * Resistor(...)`
+   coexisted silently (separate scope keys `rs` vs `rs[0..]`). Now **R004**.
+3. **`N * io(...)` / `N * config(...)` accepted**: half-broken (an arrayed config
+   `vs[0]` cannot even be overridden — kwargs are plain NAMEs). Now **R021**:
+   arrays instantiate components or modules only.
+
+Known minor (documented, accepted): dimensionless computed values collapse a
+tolerance interval to its midpoint (`5V±10% / 1V` → `5`); dimensioned results keep
+the interval. Plain `Decimal` attrs have no tolerance slots — revisit if a real
+design needs toleranced dimensionless attrs.
+
 ## Determinism & honesty
 Unrolling is order-preserving and index-ordered → double-build byte-identical netlists
 (tested). Loop-wiring vs hand-written equivalence is tested structurally (identical
