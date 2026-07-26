@@ -8,7 +8,7 @@ already frozen in the source by authoring time (N1).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from ohm import ir, units
@@ -37,6 +37,9 @@ class PackageModel:
     pads: tuple[PadSpec, ...]
     courtyard_w: Decimal
     courtyard_h: Decimal
+    # (x, y, z) body envelope in mm, when the datasheet dimensions were supplied.
+    # Drives the STEP solid; None means no 3D model is emitted (never inferred).
+    body: tuple[Decimal, Decimal, Decimal] | None = None
 
 
 # density -> (toe, heel, side) fillet goals, mm (IPC-7351B)
@@ -396,7 +399,45 @@ def _build_qfp(package_type: str, kwargs: dict[str, ir.Value], density: str,
     return PackageModel(name or f"{package_type}-{pins}", tuple(pads), cw, ch)
 
 
+_BODY_KWARGS = {"body_x", "body_y", "height"}
+
+
+def _body_dims(kwargs: dict[str, ir.Value]) -> tuple[Decimal, Decimal, Decimal] | None:
+    """The 3D envelope, or None. All three or nothing — a partial body is a
+    mistake, not something to fill in with an assumption."""
+    given = {k: _mm(kwargs.get(k), k) for k in sorted(_BODY_KWARGS)}
+    present = {k: v for k, v in given.items() if v is not None}
+    if not present:
+        return None
+    if len(present) != len(_BODY_KWARGS):
+        missing = ", ".join(sorted(_BODY_KWARGS - set(present)))
+        raise PkgError(f"a 3D body needs body_x, body_y and height — missing {missing}")
+    for key, value in present.items():
+        if value <= 0:
+            raise PkgError(f"{key} must be positive, got {value}")
+    return present["body_x"], present["body_y"], present["height"]
+
+
+def _fmt(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
 def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = None) -> PackageModel:
+    """Land pattern, plus the 3D envelope when body_x/body_y/height are supplied."""
+    body = _body_dims(kwargs)
+    model = _build_land_pattern(package_type,
+                                {k: v for k, v in kwargs.items()
+                                 if k not in _BODY_KWARGS}, name)
+    if body is None:
+        return model
+    # the body is part of the package identity: two parts of different heights must
+    # not collapse onto one shared footprint file
+    suffix = f"_{_fmt(body[0])}x{_fmt(body[1])}x{_fmt(body[2])}mm"
+    return replace(model, name=name or model.name + suffix, body=body)
+
+
+def _build_land_pattern(package_type: str, kwargs: dict[str, ir.Value],
+                        name: str | None = None) -> PackageModel:
     # chip packages have fixed 2-pad geometry: pins/pitch are not accepted there
     if package_type in _CHIP:
         allowed = {"density"}
@@ -412,6 +453,7 @@ def build(package_type: str, kwargs: dict[str, ir.Value], name: str | None = Non
         allowed = set()
     else:
         allowed = {"pins", "pitch", "density"}
+    allowed = allowed | _BODY_KWARGS
     unknown = sorted(set(kwargs) - allowed)
     if unknown:
         raise PkgError(f"unrecognized generate() argument(s): {', '.join(unknown)} "

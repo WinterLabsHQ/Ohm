@@ -51,6 +51,12 @@ def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
             model = build_from_spec(spec, fp_name)  # S006 already gated errors
             (outdir / f"{fp_name}.kicad_mod").write_text(
                 emit_footprint(model), encoding="utf-8", newline="\n")
+            if model.body is not None:
+                from ohm.pkggen.step import emit_step_box
+
+                (outdir / f"{fp_name}.step").write_text(
+                    emit_step_box(fp_name, *model.body),
+                    encoding="utf-8", newline="\n")
         if comp.name not in symbols_done:
             symbols_done.add(comp.name)
             pins = DeclaredPinData().pin_table(comp)

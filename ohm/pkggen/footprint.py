@@ -51,5 +51,11 @@ def emit_footprint(model: PackageModel) -> str:
                 f'  (pad "{pad.id}" smd roundrect (at {pad.x} {pad.y}) (size {pad.w} {pad.h})'
                 ' (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25))'
             )
+    if model.body is not None:
+        # KIPRJMOD keeps the reference project-relative, so the .step ships next to
+        # the footprint and resolves wherever the library is installed
+        out.append(f'  (model "${{KIPRJMOD}}/{model.name}.step"')
+        out.append("    (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0))")
+        out.append("  )")
     out.append(")")
     return "\n".join(out) + "\n"
