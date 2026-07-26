@@ -62,8 +62,16 @@ drives its net to), `current=` on a `power_in` pin (what it draws).
 
 `package = generate(<Type>, pins=<N>[, pitch=<mm>][, density=nominal])`
 generates the KiCad footprint + symbol deterministically (IPC-7351).
-v1 catalog: `SOIC`, `SSOP`, `TSSOP`, `SOT23` (pins=3/5/6),
-`CHIP0402/0603/0805/1206`. Every pin must have `pad=` mapping to `1..N`; the
+catalog: `SOIC`, `SSOP`, `TSSOP`, `SOT23` (pins=3/5/6),
+`CHIP0402/0603/0805/1206`, `QFN` (pins=multiple of 4, `body=<mm>`, optional
+`thermal_pad=<mm>`), `QFP` (pins=multiple of 4, `span=<mm>` lead tip-to-tip),
+`DFN`/`SON` (even pins, `body=<mm>`, optional `thermal_pad=<mm>`),
+`BGA`/`LGA` (`rows=<n>, cols=<n>, pitch=<mm>`, `ball`/`pad=<mm>`, optional
+`border=<n>` for perimeter/depopulated grids; pads named A1.., JEDEC letters),
+`PLCC` (J-lead, `pins`=multiple of 4 with an odd count per side; pin 1 centered
+on the top edge), and the fixed tab packages `SOT223`/`SOT89`/`TO252`/`TO263`
+(three leads + a solid tab pad 4, no arguments). Every pin must have `pad=`
+mapping to its pad id; the
 compiler verifies the pin↔pad loop both ways (errors S002/S003).
 
 ## Modules

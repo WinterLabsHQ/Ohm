@@ -41,9 +41,15 @@ def emit_footprint(model: PackageModel) -> str:
             ' (stroke (width 0.12) (type solid)) (fill none) (layer "F.SilkS"))'
         )
     for pad in model.pads:
-        out.append(
-            f'  (pad "{pad.id}" smd roundrect (at {pad.x} {pad.y}) (size {pad.w} {pad.h})'
-            ' (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25))'
-        )
+        if pad.shape == "circle":
+            out.append(
+                f'  (pad "{pad.id}" smd circle (at {pad.x} {pad.y}) (size {pad.w} {pad.h})'
+                ' (layers "F.Cu" "F.Paste" "F.Mask"))'
+            )
+        else:
+            out.append(
+                f'  (pad "{pad.id}" smd roundrect (at {pad.x} {pad.y}) (size {pad.w} {pad.h})'
+                ' (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25))'
+            )
     out.append(")")
     return "\n".join(out) + "\n"

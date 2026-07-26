@@ -30,6 +30,20 @@ Initial development, complete through signoff. Milestones (details in
   (all folding at elaborate, override-guarded); `.zen` designs as check input
   + `ohm convert` to annotatable Ohm source; `ohm import-symbol` turns real
   KiCad symbols into Ohm components with true pads and roles.
+- **pkggen catalog expansion**: extended from gull-wing + chip to the common
+  modern packages (ADR-006's extensible-catalog path, each validated against a
+  KiCad 7 reference land pattern before shipping): `QFN` (four-side no-lead +
+  optional thermal pad), `QFP` (four-side gull-wing, per-part lead `span`),
+  `DFN`/`SON` (two-side no-lead), `BGA` (rows×cols grid of circular pads, JEDEC
+  A1.. naming, `ball`/`pad` diameter, optional `border=<n>` for perimeter /
+  depopulated grids), `LGA` (rectangular-land grid, same options), `PLCC`
+  (J-lead, pin 1 centered on the top edge, counterclockwise), and the fixed tab
+  packages `SOT223`/`SOT89`/`TO252`/`TO263` (three signal leads + a solid tab
+  pad, no arguments). Shared 4-/2-side placement helpers back the perimeter
+  families; the footprint emitter gained a `circle` pad shape for BGA balls.
+  QFN/BGA/PLCC (vs 20/28)/SOT-223 and the power-package signal leads reproduce
+  their KiCad references exactly; QFP/DFN match within 0.05 mm; power-package
+  tabs are solid-rectangle simplifications of KiCad's paste-subdivided lands.
 
-648 tests; ruff + mypy clean; deterministic double-build byte-identity and
+669 tests; ruff + mypy clean; deterministic double-build byte-identity and
 hermeticity enforced in CI.
