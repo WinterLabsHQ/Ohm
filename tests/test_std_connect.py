@@ -9,6 +9,8 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
+from tests.conftest import requires_kicad_fp
+
 STD = Path(ohm.__file__).parent / "std"
 ELECTROMECH_SRC = (STD / "electromech.ohm").read_text()
 CONNECTIVITY_SRC = (STD / "connectivity.ohm").read_text()
@@ -81,6 +83,7 @@ def test_every_connectivity_block_instantiates_clean(tmp_path):
 
 
 # ---------- footprints on disk + pad-id truth ----------
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     ids = re.findall(r'package = "([^"]+)"', ELECTROMECH_SRC + CONNECTIVITY_SRC)
     assert len(ids) >= 15  # 13 electromech + 2 connector footprints
@@ -90,6 +93,7 @@ def test_all_string_footprints_exist_on_disk():
         assert path.is_file(), f"{fid} -> {path} missing"
 
 
+@requires_kicad_fp
 def test_declared_pads_exist_in_footprints():
     # every pad= declared on a string-footprint component exists in its .kicad_mod
     for src in (ELECTROMECH_SRC, CONNECTIVITY_SRC):
@@ -104,17 +108,20 @@ def test_declared_pads_exist_in_footprints():
                 assert pad in on_disk, f"{name}: declared pad {pad} not in {sorted(on_disk)}"
 
 
+@requires_kicad_fp
 def test_microb_pad_ids_spot_check():
     pads = pad_ids("Connector_USB", "USB_Micro-B_Amphenol_10118193-0001LF_Horizontal")
     assert {"1", "2", "3", "4", "5", "6"} <= set(pads)  # signals 1..5 + shield 6
     assert pads.count("6") > 1  # the shield is multiple physical pads, all id 6
 
 
+@requires_kicad_fp
 def test_relay_pad_ids_spot_check():
     pads = pad_ids("Relay_THT", "Relay_SPDT_SANYOU_SRD_Series_Form_C")
     assert sorted(pads) == ["1", "2", "3", "4", "5"]  # exactly the 5 mapped pads
 
 
+@requires_kicad_fp
 def test_usbc_pad_ids_spot_check():
     pads = set(pad_ids("Connector_USB",
                        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal"))

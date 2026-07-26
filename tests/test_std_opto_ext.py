@@ -11,6 +11,8 @@ import pytest
 from ohm.driver import compile_source
 from ohm.emit_netlist import emit_netlist
 
+from tests.conftest import requires_kicad_fp
+
 OPTO = Path(__file__).parent.parent / "ohm" / "std" / "opto.ohm"
 EXAMPLE = Path(__file__).parent / "examples" / "led_panel.ohm"
 KICAD_FP = Path("/usr/share/kicad/footprints")
@@ -41,6 +43,7 @@ def test_new_block_instantiates_clean(tmp_path, block):
     ("Display_7Segment", "CC56-12GWA",
      [str(n) for n in range(1, 13)]),
 ])
+@requires_kicad_fp
 def test_footprint_and_pads_exist_on_disk(lib, fp, pads):
     mod = KICAD_FP / f"{lib}.pretty" / f"{fp}.kicad_mod"
     assert mod.is_file(), f"missing footprint {mod}"

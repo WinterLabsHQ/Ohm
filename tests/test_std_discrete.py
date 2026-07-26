@@ -9,6 +9,8 @@ import pytest
 from ohm.driver import compile_source
 from ohm.emit_netlist import emit_netlist
 
+from tests.conftest import requires_kicad_fp
+
 STD = Path(__file__).parent.parent / "ohm" / "std"
 EXAMPLE = Path(__file__).parent / "examples" / "mosfet_switch.ohm"
 KICAD_FP = Path("/usr/share/kicad/footprints")
@@ -39,6 +41,7 @@ def test_every_block_instantiates_clean(tmp_path, mod, block):
     assert result.ok and not result.diagnostics, [d.machine() for d in result.diagnostics]
 
 
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     pat = re.compile(r'package\s*=\s*"([^":]+):([^"]+)"')
     checked = 0

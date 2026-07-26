@@ -10,6 +10,8 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
+from tests.conftest import requires_kicad_fp
+
 MAG_SRC = (Path(ohm.__file__).parent / "std" / "magnetics.ohm").read_text()
 RF_SRC = (Path(ohm.__file__).parent / "std" / "rf.ohm").read_text()
 EXAMPLE = Path(__file__).parent / "examples" / "usb_emc_frontend.ohm"
@@ -58,6 +60,7 @@ def test_every_rf_block_instantiates_clean(tmp_path):
     assert not result.diagnostics, [d.machine() for d in result.diagnostics]
 
 
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     ids = re.findall(r'package = "([^"]+)"', MAG_SRC) + re.findall(r'package = "([^"]+)"', RF_SRC)
     # keep only concrete "Lib:Name" ids; TEMPLATE comment blocks carry

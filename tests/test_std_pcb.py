@@ -9,6 +9,8 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
+from tests.conftest import requires_kicad_fp
+
 STD_DIR = Path(ohm.__file__).parent / "std"
 PCB_SRC = (STD_DIR / "pcb.ohm").read_text()
 CLOCK_SRC = (STD_DIR / "clock.ohm").read_text()
@@ -78,6 +80,7 @@ def test_zero_pin_parts_build_and_emit(tmp_path):
     assert "MountingHole" in net and "Fiducial" in net
 
 
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     ids = re.findall(r'package = "([^"]+)"', PCB_SRC + "\n" + CLOCK_SRC)
     assert ids, "expected string footprints in std.pcb / std.clock"

@@ -8,6 +8,8 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
+from tests.conftest import requires_kicad_fp
+
 STD_SRC = (Path(ohm.__file__).parent / "std" / "passives.ohm").read_text()
 EXAMPLE = Path(__file__).parent / "examples" / "divider_led.ohm"
 
@@ -62,6 +64,7 @@ def test_resistor_pmax_rating_fires_q003(tmp_path):
     assert any(d.code == "Q003" for d in result.diagnostics)  # 1.44W > 100mW
 
 
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     ids = re.findall(r'package = "([^"]+)"', STD_SRC)
     assert ids, "expected at least one string footprint in std.passives"

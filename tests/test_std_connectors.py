@@ -12,6 +12,8 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
+from tests.conftest import requires_kicad_fp
+
 STD_SRC = (Path(ohm.__file__).parent / "std" / "connectors.ohm").read_text()
 EXAMPLE = Path(__file__).parent / "examples" / "power_input.ohm"
 FP_ROOT = Path("/usr/share/kicad/footprints")
@@ -58,6 +60,7 @@ def test_every_block_instantiates_clean(tmp_path):
     assert not result.diagnostics, [d.machine() for d in result.diagnostics]
 
 
+@requires_kicad_fp
 def test_all_string_footprints_exist_on_disk():
     ids = re.findall(r'package = "([^"]+)"', STD_SRC)
     assert len(ids) == len(BLOCKS), "every connector block uses a string footprint"
@@ -65,6 +68,7 @@ def test_all_string_footprints_exist_on_disk():
         assert _fp_path(fid).is_file(), f"{fid} -> {_fp_path(fid)} missing"
 
 
+@requires_kicad_fp
 def test_every_declared_pad_exists_in_its_footprint():
     """Exhaustive: every pad= on every block is a real pad id in the .kicad_mod."""
     comps = {c.name: c for c in _design().design.components}
@@ -78,6 +82,7 @@ def test_every_declared_pad_exists_in_its_footprint():
             )
 
 
+@requires_kicad_fp
 def test_pad_ids_spot_checks():
     """Explicit checks for the tricky footprints called out in the task:
     numeric, named, and repeated-id shell pads."""
