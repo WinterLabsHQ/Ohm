@@ -41,6 +41,101 @@ def _emit_generated_packages(result, outdir: Path) -> None:
             (outdir / f"{comp.name}.kicad_sym").write_text(emit_symbol(comp.name, pins))
 
 
+def _module_name(project: str) -> str:
+    """Derive a valid Ohm module identifier ([A-Za-z_][A-Za-z0-9_]*) from a
+    project name: split on non-alphanumerics, PascalCase the parts."""
+    parts = [p for p in "".join(c if c.isalnum() else " " for c in project).split() if p]
+    ident = "".join(p[:1].upper() + p[1:] for p in parts) or "Board"
+    if not (ident[0].isalpha() or ident[0] == "_"):
+        ident = "Board" + ident
+    return ident
+
+
+def _cmd_init(args) -> int:
+    """Scaffold a new Ohm project directory with a starter module that
+    compiles clean, plus lib/, out/, .gitignore and a README."""
+    target = Path(args.name) if args.name else Path.cwd()
+    project = target.resolve().name
+    module = _module_name(project)
+    stem = "".join(c if (c.isalnum() or c in "._-") else "_" for c in project) or "board"
+
+    entry = target / f"{stem}.ohm"
+    if entry.exists():
+        print(f"error: '{entry}' already exists — refusing to overwrite", file=sys.stderr)
+        return 1
+
+    starter = f"""\
+# {project} — a starter Ohm design. Runs clean through `ohm check`.
+# Edit freely; see docs/STYLE.md for the full authoring guide.
+
+use std.interfaces      # Power
+use std.passives        # Resistor, Capacitor
+use std.discrete        # LED
+
+module {module}:
+    pwr = io(Power)
+    vcc = config(Voltage, default=5.0V)
+
+    # current-limiting resistor for a ~2V-forward LED at ~9mA on a 5V rail
+    r_led = Resistor(value=330ohm +/- 5%)
+    d1    = LED()
+    c_dec = Capacitor(value=100nF)         # rail decoupling
+
+    pwr.v    ~ r_led.P1
+    r_led.P2 ~ d1.A
+    d1.K     ~ pwr.gnd
+    pwr.v    ~ c_dec.P1
+    pwr.gnd  ~ c_dec.P2
+
+    # keep the LED current sane at the nominal rail (approx 2V LED drop)
+    assert (vcc - 2.0V) / r_led.value <= 15mA
+
+    constraint netclass(pwr.v, "power")
+"""
+
+    gitignore = "# Ohm build output\n/out/\n\n# Python\n.venv/\n__pycache__/\n*.pyc\n"
+
+    readme = f"""\
+# {project}
+
+An [Ohm](https://) hardware design.
+
+## Build
+
+```sh
+ohm check {stem}.ohm            # all checks, no output files (fast inner loop)
+ohm build {stem}.ohm -o out/    # emit netlist + KiCad project + zen + constraints
+ohm explain <CODE>              # explain any diagnostic, e.g. ohm explain C001
+```
+
+## Layout
+
+- `{stem}.ohm` — the top-level design (the module you build)
+- `lib/`       — your own reusable component blocks: `use "./lib/parts.ohm"`
+- `out/`       — build artifacts (git-ignored)
+"""
+
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "lib").mkdir(exist_ok=True)
+        (target / "out").mkdir(exist_ok=True)
+        (target / "lib" / ".gitkeep").write_text("", encoding="utf-8", newline="\n")
+        entry.write_text(starter, encoding="utf-8", newline="\n")
+        (target / ".gitignore").write_text(gitignore, encoding="utf-8", newline="\n")
+        (target / "README.md").write_text(readme, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        print(f"error: cannot scaffold '{target}': {exc.strerror or exc}", file=sys.stderr)
+        return 1
+
+    where = "." if args.name is None else str(target)
+    print(f"created Ohm project '{project}' in {where}")
+    print("next:")
+    if args.name is not None:
+        print(f"  cd {args.name}")
+    print(f"  ohm check {stem}.ohm")
+    return 0
+
+
 def _report(result, source: str, as_json: bool) -> None:
     if as_json:
         print(json.dumps([{
@@ -60,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ohm", description="Ohm HDL compiler")
     parser.add_argument("--version", action="version", version=f"ohm {__version__}")
     sub = parser.add_subparsers(dest="command")
+
+    p_init = sub.add_parser("init", help="scaffold a new Ohm project directory")
+    p_init.add_argument("name", nargs="?",
+                        help="project directory to create (default: current directory)")
 
     p_build = sub.add_parser("build", help="compile and emit outputs")
     p_build.add_argument("file")
@@ -148,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build" and args.target_kicad != "7":
         print("error: only KiCad 7 is supported in v1", file=sys.stderr)
         return 1
+
+    if args.command == "init":
+        return _cmd_init(args)
 
     if args.command == "lsp":
         from ohm.lsp import serve
