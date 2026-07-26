@@ -41,6 +41,31 @@ def test_s003_reports_both_directions():
     assert any("no pin mapped" in m for m in msgs)  # pad 4 unmapped
 
 
+def test_grid_unmapped_pads_do_not_crash():
+    """BGA/LGA pad ids are alphanumeric — the unmapped-pad report used to sort
+    them with int() and raise ValueError, taking the compiler down."""
+    result = run("s003_grid_unmapped.ohm")
+    unmapped = [d.message for d in result.diagnostics
+                if d.code == "S003" and "no pin mapped" in d.message]
+    assert len(unmapped) == 1
+    assert "B1" in unmapped[0]  # 16 balls, 2 mapped, 1 bogus -> 14 reported
+    # S002 must describe an alphanumeric pad set, not claim "pads 1..16"
+    s002 = [d.message for d in result.diagnostics if d.code == "S002"]
+    assert s002 and "Z9" in s002[0] and "1..16" not in s002[0]
+    assert "16 pads" in s002[0]
+
+
+def test_unmapped_pad_list_is_truncated():
+    """A large grid must not emit a multi-KB diagnostic."""
+    src = ("component C:\n"
+           "    package = generate(BGA, rows=16, cols=16, pitch=0.8mm, ball=0.4mm)\n"
+           "    pin VDD: role=power_in, pad=A1\n")
+    result = compile_source(src, "<t>")
+    msg = next(d.message for d in result.diagnostics
+               if d.code == "S003" and "no pin mapped" in d.message)
+    assert "more)" in msg and len(msg) < 300
+
+
 def test_warning_does_not_block_emit():
     result = run("s004_partial_padmap.ohm")
     assert result.ok and result.low is not None

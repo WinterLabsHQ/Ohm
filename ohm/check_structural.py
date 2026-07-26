@@ -26,6 +26,29 @@ def _d(sev: str, code: str, msg: str, span: Span | None, path: str, help_: str |
     return Diagnostic(sev, code, msg, span or _NO_SPAN, file=path, help=help_)
 
 
+def _pad_key(pad: str) -> tuple[int, str]:
+    """Total order over pad ids. BGA/LGA ids are alphanumeric (A1, B2), so int()
+    is not available; length-then-lexical sorts 1..9,10 and never raises."""
+    return (len(pad), pad)
+
+
+def _join(pads: list[str], limit: int = 12) -> str:
+    """Join a pad list for a diagnostic, truncated — a 256-ball BGA must not
+    produce a multi-KB message."""
+    if len(pads) <= limit:
+        return ", ".join(pads)
+    return ", ".join(pads[:limit]) + f", … ({len(pads) - limit} more)"
+
+
+def _describe(valid: set[str]) -> str:
+    """Describe a generated pad set for S002. Perimeter packages are 1..n;
+    grids (A1, B2) and any gap are listed instead."""
+    n = len(valid)
+    if {str(i) for i in range(1, n + 1)} == valid:
+        return f"pads 1..{n}"
+    return f"{n} pads ({_join(sorted(valid, key=_pad_key), 4)})"
+
+
 def _check_pad_loop(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
                     span: Span | None, path: str, diags: list[Diagnostic]) -> None:
     """Validate comp's pin↔pad map against `package` (default or override)."""
@@ -51,22 +74,22 @@ def _check_pad_loop(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
             if not (isinstance(pins_kw, Decimal) and pins_kw == pins_kw.to_integral_value()):
                 return
             valid = {str(i) for i in range(1, int(pins_kw) + 1)}
-        n = len(valid)
+        produces = _describe(valid)
         for pin in comp.pins:
             if pin.pad is not None and pin.pad not in valid:
                 diags.append(_d("error", "S002",
                                 f"pin '{pin.name}' maps to pad '{pin.pad}' but the "
-                                f"generated package of {owner} produces pads 1..{n}",
+                                f"generated package of {owner} produces {produces}",
                                 pin.span or span, path))
             elif pin.pad is None:
                 diags.append(_d("error", "S003",
                                 f"pin '{pin.name}' of {owner} has no pad= mapping "
                                 f"to its generated package", pin.span or span, path))
-        unmapped = sorted(valid - set(seen), key=int)
+        unmapped = sorted(valid - set(seen), key=_pad_key)
         if unmapped:
             diags.append(_d("error", "S003",
                             f"generated pads with no pin mapped on {owner}: "
-                            f"{', '.join(unmapped)}", span, path))
+                            f"{_join(unmapped)}", span, path))
     elif isinstance(package, str):
         # external footprint: only internal consistency is checkable; any pin
         # without pad= would ship its pin name into the netlist (unconnected in KiCad)

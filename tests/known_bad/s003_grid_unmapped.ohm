@@ -1,0 +1,7 @@
+# S003: BGA grid with unmapped balls. Pad ids are alphanumeric (A1..), so the
+# unmapped-pad report must not assume numeric ids.
+component C:
+    package = generate(BGA, rows=4, cols=4, pitch=0.8mm, ball=0.4mm)
+    pin VDD: role=power_in, pad=A1
+    pin GND: role=ground, pad=A2
+    pin IO: role=bidir, pad=Z9

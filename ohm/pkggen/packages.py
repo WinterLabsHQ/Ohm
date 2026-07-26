@@ -111,6 +111,10 @@ _BGA_ALPHABET = "ABCDEFGHJKLMNPRTUVWY"
 _PLCC = ("PLCC",)
 _PLCC_PITCH = _D("1.27")
 _PLCC_CORNER_GAP = _D("1.5125")
+# ponytail: JEDEC defines exactly one rectangular PLCC, so a lookup beats new
+# kwargs. (top/bottom count, left/right count) — add explicit per-side kwargs if
+# a second rectangular count ever shows up.
+_PLCC_SIDES = {32: (7, 9)}
 _PLCC_PAD_LEN = _D("1.925")  # radial (J-lead)
 _PLCC_PAD_WID = _D("0.7")    # tangential
 
@@ -317,17 +321,25 @@ def _build_plcc(kwargs: dict[str, ir.Value], name: str | None) -> PackageModel:
     """PLCC: J-leaded, four sides, pin 1 centered on the top edge, counterclockwise.
 
     Body is standardized per pin count (always P1.27), so only `pins` is needed.
+    Square counts (20/28/44/52/68/84) put pins//4 on each side; PLCC-32 is the one
+    JEDEC rectangular count and comes from _PLCC_SIDES.
     """
     pins = _pins(kwargs)
     if pins < 4 or pins % 4:
         raise PkgError(f"PLCC needs a pin count that is a multiple of 4, got {pins}")
-    per_side = pins // 4
-    if per_side % 2 == 0:
-        raise PkgError("PLCC needs an odd number of pins per side (pin 1 is centered on "
-                       "the top edge); standard PLCC = 20, 28, 44, 52, 68, 84")
+    if pins in _PLCC_SIDES:
+        n_tb, n_lr = _PLCC_SIDES[pins]
+    else:
+        n_tb = n_lr = pins // 4
+        if n_tb % 2 == 0:
+            raise PkgError("PLCC needs an odd number of pins per side (pin 1 is centered "
+                           "on the top edge); standard PLCC = 20, 28, 32, 44, 52, 68, 84")
     pitch = _mm(kwargs.get("pitch"), "pitch") or _PLCC_PITCH
-    half = (per_side - 1) // 2
-    center = (_D(half) * pitch + _PLCC_CORNER_GAP).quantize(_GRID)
+    half_tb, half_lr = (n_tb - 1) // 2, (n_lr - 1) // 2
+    # each edge clears the extent of the perpendicular edges, so the top/bottom
+    # offset comes from the left/right count and vice versa
+    center_y = (_D(half_lr) * pitch + _PLCC_CORNER_GAP).quantize(_GRID)
+    center_x = (_D(half_tb) * pitch + _PLCC_CORNER_GAP).quantize(_GRID)
     length, width = _PLCC_PAD_LEN, _PLCC_PAD_WID
 
     pads: list[PadSpec] = []
@@ -336,18 +348,19 @@ def _build_plcc(kwargs: dict[str, ir.Value], name: str | None) -> PackageModel:
         w, h = (width, length) if radial_y else (length, width)
         pads.append(PadSpec(str(len(pads) + 1), x, y, w, h))
 
-    for k in range(half + 1):  # top edge, center -> left (pin 1 at x=0)
-        add(_D(-k) * pitch, -center, True)
-    for k in range(per_side):  # left edge, top -> bottom
-        add(-center, _D(k - half) * pitch, False)
-    for k in range(per_side):  # bottom edge, left -> right
-        add(_D(k - half) * pitch, center, True)
-    for k in range(per_side):  # right edge, bottom -> top
-        add(center, _D(half - k) * pitch, False)
-    for k in range(half, 0, -1):  # top edge, right half -> back toward center
-        add(_D(k) * pitch, -center, True)
+    for k in range(half_tb + 1):  # top edge, center -> left (pin 1 at x=0)
+        add(_D(-k) * pitch, -center_y, True)
+    for k in range(n_lr):  # left edge, top -> bottom
+        add(-center_x, _D(k - half_lr) * pitch, False)
+    for k in range(n_tb):  # bottom edge, left -> right
+        add(_D(k - half_tb) * pitch, center_y, True)
+    for k in range(n_lr):  # right edge, bottom -> top
+        add(center_x, _D(half_lr - k) * pitch, False)
+    for k in range(half_tb, 0, -1):  # top edge, right half -> back toward center
+        add(_D(k) * pitch, -center_y, True)
 
-    cw = ch = (2 * center + length + _D("0.5")).quantize(_GRID)
+    cw = (2 * center_x + length + _D("0.5")).quantize(_GRID)
+    ch = (2 * center_y + length + _D("0.5")).quantize(_GRID)
     return PackageModel(name or f"PLCC-{pins}", tuple(pads), cw, ch)
 
 

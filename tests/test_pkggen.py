@@ -275,9 +275,55 @@ def test_plcc_pin1_top_center_counterclockwise():
 
 def test_plcc_needs_odd_per_side():
     with pytest.raises(PkgError):
-        build("PLCC", {"pins": Decimal(32)})  # 8/side (even) — rectangular, unsupported
+        build("PLCC", {"pins": Decimal(24)})  # 6/side (even) and not a rectangular count
     with pytest.raises(PkgError):
         build("PLCC", {"pins": Decimal(30)})  # not a multiple of 4
+
+
+KICAD_PLCC32 = Path("/usr/share/kicad/footprints/Package_LCC.pretty/"
+                    "PLCC-32_11.4x14.0mm_P1.27mm.kicad_mod")
+
+
+@pytest.mark.skipif(not KICAD_PLCC32.exists(), reason="KiCad library not installed")
+def test_plcc32_rectangular_matches_kicad_topology():
+    """PLCC-32 is the one JEDEC rectangular PLCC: 7 pads top/bottom, 9 left/right.
+
+    KiCad ships no *generic* PLCC-32 (only the dimensioned 11.4x14.0mm variant, whose
+    land style differs from the generic PLCC-NN family Ohm reproduces), so this
+    asserts numbering, side split, pitch and pad orientation — not radial offset.
+    """
+    golden = {}
+    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
+                         KICAD_PLCC32.read_text()):
+        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    model = build("PLCC", {"pins": Decimal(32)})
+    assert len(model.pads) == 32
+    assert model.courtyard_w != model.courtyard_h  # rectangular courtyard
+
+    ours = {p.id: p for p in model.pads}
+    for pid, (gx, gy, gw, gh) in golden.items():
+        p = ours[pid]
+        # same side, same order along that side, same tall/wide orientation
+        assert (float(p.x) > 0) == (gx > 0) and (float(p.y) > 0) == (gy > 0)
+        assert (float(p.h) > float(p.w)) == (gh > gw)
+        on_tb = abs(gy) > abs(gx) if gw != gh else False
+        assert abs((float(p.x) if on_tb else float(p.y))
+                   - (gx if on_tb else gy)) <= 0.02  # tangential position is exact
+
+    tall = lambda p: float(p.h) > float(p.w)  # noqa: E731 — top/bottom pads are tall
+    top = {p.id for p in model.pads if tall(p) and float(p.y) < 0}
+    left = {p.id for p in model.pads if not tall(p) and float(p.x) < 0}
+    assert top == {"1", "2", "3", "4", "30", "31", "32"}
+    assert left == {str(i) for i in range(5, 14)}  # 9 on the left edge
+
+
+def test_plcc_square_counts_unchanged_by_rectangular_support():
+    """The 20/28/44/… path must be byte-identical after the generalisation."""
+    for pins, y1 in ((20, -4.05), (28, -5.32), (44, -7.86)):  # 0.01mm grid
+        m = build("PLCC", {"pins": Decimal(pins)})
+        assert len(m.pads) == pins and m.courtyard_w == m.courtyard_h
+        pad1 = next(p for p in m.pads if p.id == "1")
+        assert float(pad1.x) == 0 and float(pad1.y) == y1
 
 
 KICAD_SOT223 = Path("/usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/SOT-223.kicad_mod")
@@ -395,3 +441,104 @@ def test_generated_symbol_parses_in_kicad(tmp_path):
                                   "no such command", "usage:")):
             pytest.skip(f"kicad-cli 'sym upgrade' unsupported here: {out.strip()[:200]}")
         pytest.fail(out)
+
+
+# ---------- symbol: the fields DRC/ERC and BOM actually consume ----------
+def test_symbol_is_linked_to_its_footprint():
+    """An empty Footprint property means the part lands in the schematic
+    unassigned and cannot be pushed to a board — it must arrive linked."""
+    src = ("component U1:\n"
+           "    package = generate(SOIC, pins=8, pitch=1.27mm)\n"
+           + "".join(f"    pin P{i}: role=passive, pad={i}\n" for i in range(1, 9))
+           + "module M:\n    u = U1()\n")
+    result = compile_source(src, "u1.ohm")
+    assert result.ok, [d.machine() for d in result.diagnostics]
+    import tempfile
+
+    from ohm.cli import _emit_generated_packages
+
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        _emit_generated_packages(result, out)
+        sym = (out / "U1.kicad_sym").read_text()
+        mods = [p.stem for p in out.glob("*.kicad_mod")]
+    assert mods == ["SOIC-8"]
+    assert '(property "Footprint" "ohm:SOIC-8"' in sym
+    assert '(property "Footprint" ""' not in sym
+
+
+def test_symbol_carries_bom_attrs():
+    src = ('component U1:\n'
+           '    package = generate(SOIC, pins=8, pitch=1.27mm)\n'
+           '    mpn = "MCP6002"\n'
+           '    manufacturer = "Microchip"\n'
+           '    datasheet = "https://example.com/ds.pdf"\n'
+           + "".join(f"    pin P{i}: role=passive, pad={i}\n" for i in range(1, 9))
+           + "module M:\n    u = U1()\n")
+    result = compile_source(src, "u1.ohm")
+    assert result.ok, [d.machine() for d in result.diagnostics]
+    import tempfile
+
+    from ohm.cli import _emit_generated_packages
+
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        _emit_generated_packages(result, out)
+        sym = (out / "U1.kicad_sym").read_text()
+    assert '(property "MPN" "MCP6002"' in sym
+    assert '(property "Manufacturer" "Microchip"' in sym
+    assert '(property "Datasheet" "https://example.com/ds.pdf"' in sym
+
+
+def test_every_role_maps_to_a_real_electrical_type():
+    """ERC is only as good as this map — a role falling through to `passive`
+    silently disables the checks the reviewer is relying on."""
+    from ohm.pkggen.symbol import _ETYPE
+    from ohm.resolve import VALID_ROLES
+
+    assert set(_ETYPE) >= VALID_ROLES, VALID_ROLES - set(_ETYPE)
+    # these three used to degrade to passive
+    assert _ETYPE["open_collector"] == "open_collector"
+    assert _ETYPE["open_drain"] == "open_collector"  # KiCad has no open_drain
+    assert _ETYPE["free"] == "free"
+
+
+def test_open_drain_pin_emits_open_collector():
+    pins = [("1", "SDA", "open_drain"), ("2", "SCL", "open_drain"),
+            ("3", "NC", "free"), ("4", "IRQ", "open_collector")]
+    sym = emit_symbol("X", pins, footprint="ohm:SOIC-4")
+    assert sym.count("(pin open_collector line") == 3
+    assert sym.count("(pin free line") == 1
+    assert "(pin passive line" not in sym
+
+
+@pytest.mark.skipif(not KICAD_SOIC8.exists(), reason="KiCad library not installed")
+def test_emitted_electrical_types_exist_in_kicad():
+    """Every type we emit must be one KiCad actually understands."""
+    import re as _re
+
+    real = set()
+    for lib in Path("/usr/share/kicad/symbols").glob("*.kicad_sym"):
+        real |= set(_re.findall(r"\(pin (\w+) (?:line|inverted|clock)", lib.read_text()))
+    assert real, "no KiCad symbol libraries parsed"
+    from ohm.pkggen.symbol import _ETYPE
+
+    assert set(_ETYPE.values()) <= real, set(_ETYPE.values()) - real
+
+
+def test_sim_attrs_become_kicad_sim_properties():
+    """Ohm never invents a SPICE model — it carries one through so ngspice can
+    find it. The Sim.* names are what KiCad's simulator reads."""
+    sym = emit_symbol("U1", [("1", "A", "input"), ("2", "B", "output")],
+                      footprint="ohm:SOIC-2",
+                      attrs={"sim_device": "SUBCKT", "sim_library": "MCP6002.lib",
+                             "sim_name": "MCP6002", "sim_pins": "1=1 2=2"})
+    assert '(property "Sim.Device" "SUBCKT"' in sym
+    assert '(property "Sim.Library" "MCP6002.lib"' in sym
+    assert '(property "Sim.Name" "MCP6002"' in sym
+    assert '(property "Sim.Pins" "1=1 2=2"' in sym
+
+
+def test_no_sim_properties_without_a_model():
+    sym = emit_symbol("U1", [("1", "A", "input")], footprint="ohm:X")
+    assert "Sim." not in sym

@@ -13,14 +13,17 @@ from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.emit_netlist import emit_netlist
 
 
-def _emit_generated_packages(result, outdir: Path) -> None:
+def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
     """P-GEN-PACKAGE: write one .kicad_mod per distinct generated package
-    (spec-named, shared across parts) and one .kicad_sym per component."""
+    (spec-named, shared across parts) and one .kicad_sym per component.
+
+    fmt="eagle" writes one self-contained .lbr per component instead — Eagle keeps
+    package, symbol and their pin<->pad connects in a single library file."""
     from ohm.ir import GenerateSpec
     from ohm.pkggen.footprint import emit_footprint
     from ohm.pkggen.packages import build_from_spec, spec_name
     from ohm.pkggen.pindata_iface import DeclaredPinData
-    from ohm.pkggen.symbol import emit_symbol
+    from ohm.pkggen.symbol import DEFAULT_FOOTPRINT_LIB, emit_symbol
 
     comps = {c.name: c for c in result.design.components}
     footprints_done: set[str] = set()
@@ -30,17 +33,34 @@ def _emit_generated_packages(result, outdir: Path) -> None:
         if not isinstance(spec, GenerateSpec):
             continue
         fp_name = spec_name(spec)
+        comp = comps[part.component]
+        if fmt == "eagle":
+            if comp.name in symbols_done:
+                continue
+            symbols_done.add(comp.name)
+            from ohm.pkggen.eagle import emit_eagle_library
+
+            model = build_from_spec(spec, fp_name)
+            (outdir / f"{comp.name}.lbr").write_text(emit_eagle_library(
+                model, comp.name, DeclaredPinData().pin_table(comp),
+                {k: str(v) for k, v in comp.attrs}),
+                encoding="utf-8", newline="\n")
+            continue
         if fp_name not in footprints_done:
             footprints_done.add(fp_name)
             model = build_from_spec(spec, fp_name)  # S006 already gated errors
             (outdir / f"{fp_name}.kicad_mod").write_text(
                 emit_footprint(model), encoding="utf-8", newline="\n")
-        comp = comps[part.component]
         if comp.name not in symbols_done:
             symbols_done.add(comp.name)
             pins = DeclaredPinData().pin_table(comp)
+            # link the symbol to the footprint we just wrote — without this the
+            # part lands in the schematic unassigned and cannot go to a board
             (outdir / f"{comp.name}.kicad_sym").write_text(
-                emit_symbol(comp.name, pins), encoding="utf-8", newline="\n")
+                emit_symbol(comp.name, pins,
+                            footprint=f"{DEFAULT_FOOTPRINT_LIB}:{fp_name}",
+                            attrs={k: str(v) for k, v in comp.attrs}),
+                encoding="utf-8", newline="\n")
 
 
 def _module_name(project: str) -> str:
@@ -174,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("file")
     p_build.add_argument("-o", "--out", default=".", help="output directory")
     p_build.add_argument("--emit",
-                         choices=["netlist", "kicad", "zen", "constraints", "package", "all"],
+                         choices=["netlist", "kicad", "zen", "constraints", "package",
+                                  "eagle", "all"],
                          default="all")
     p_build.add_argument("--dump-ir", choices=["high", "typed", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
@@ -271,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
 
         from ohm.pkggen.footprint import emit_footprint
         from ohm.pkggen.packages import PkgError, build
-        from ohm.pkggen.symbol import emit_symbol
+        from ohm.pkggen.symbol import DEFAULT_FOOTPRINT_LIB, emit_symbol
 
         kwargs: dict[str, ir.Value] = {}
         if args.pins:
@@ -299,7 +320,9 @@ def main(argv: list[str] | None = None) -> int:
             emit_footprint(model), encoding="utf-8", newline="\n")
         pins = [(p.id, f"P{p.id}", "passive") for p in model.pads]
         (outdir / f"{model.name}.kicad_sym").write_text(
-            emit_symbol(model.name, pins), encoding="utf-8", newline="\n")
+            emit_symbol(model.name, pins,
+                        footprint=f"{DEFAULT_FOOTPRINT_LIB}:{model.name}"),
+            encoding="utf-8", newline="\n")
         print(f"generated {model.name}.kicad_mod + {model.name}.kicad_sym in {outdir}")
         return 0
 
@@ -442,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_generated_packages(result, outdir)
             if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
                 _emit_generated_packages(result, outdir)
+            if args.emit in ("eagle",):  # the same part as an Eagle .lbr library
+                _emit_generated_packages(result, outdir, fmt="eagle")
             if args.emit in ("zen", "all"):
                 from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 
