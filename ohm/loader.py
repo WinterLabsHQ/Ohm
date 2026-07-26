@@ -69,11 +69,12 @@ def load(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnosti
             if tkey in decls_of:
                 continue  # already loaded once; shared imports are fine
             try:
-                ttext = target.read_text()
-            except OSError as exc:
+                ttext = target.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError) as exc:
+                detail = getattr(exc, "strerror", None) or exc
                 diags.append(Diagnostic(
                     "error", "R015", f"cannot read import '{decl.target}': "
-                    f"{exc.strerror or exc}", decl.span, file=file_label))
+                    f"{detail}", decl.span, file=file_label))
                 continue
             stack.append(tkey)
             process(ttext, str(target), tkey, target.parent)

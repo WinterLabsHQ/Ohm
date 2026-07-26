@@ -35,6 +35,12 @@ def test_microstrip_bit_identical_golden():
     assert z1 == z2
 
 
+def test_microstrip_zero_height_is_none_not_crash():
+    # regression: h=0 divided into w must degrade to None (→ C003 unevaluable),
+    # never raise ZeroDivisionError out of the checker.
+    assert microstrip_z0(q("0.2", "mm"), q("0", "mm"), num("4.5")) is None
+
+
 def test_divider_interval_exact():
     r = ir.Quantity(Decimal(10), "kohm", Decimal("9.9"), Decimal("10.1"))
     out = divider(q(5, "V"), quantity_qty(r), quantity_qty(r))

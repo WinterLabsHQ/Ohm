@@ -121,7 +121,7 @@ class _Ctx:
                 pin = self.pins_of[self.part_comp[node.part_ref].name].get(node.pin)
                 if pin is None:
                     continue
-                if pin.role in ("power_out", "bidirectional") and (v := _iv(pin.voltage)):
+                if pin.role in ("power_out", "output", "bidirectional") and (v := _iv(pin.voltage)):
                     declared.append(v)
                 elif pin.role == "ground":
                     declared.append(Interval(Decimal(0), Decimal(0)))

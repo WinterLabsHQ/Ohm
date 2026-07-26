@@ -33,12 +33,14 @@ def _emit_generated_packages(result, outdir: Path) -> None:
         if fp_name not in footprints_done:
             footprints_done.add(fp_name)
             model = build_from_spec(spec, fp_name)  # S006 already gated errors
-            (outdir / f"{fp_name}.kicad_mod").write_text(emit_footprint(model))
+            (outdir / f"{fp_name}.kicad_mod").write_text(
+                emit_footprint(model), encoding="utf-8", newline="\n")
         comp = comps[part.component]
         if comp.name not in symbols_done:
             symbols_done.add(comp.name)
             pins = DeclaredPinData().pin_table(comp)
-            (outdir / f"{comp.name}.kicad_sym").write_text(emit_symbol(comp.name, pins))
+            (outdir / f"{comp.name}.kicad_sym").write_text(
+                emit_symbol(comp.name, pins), encoding="utf-8", newline="\n")
 
 
 def _module_name(project: str) -> str:
@@ -60,9 +62,6 @@ def _cmd_init(args) -> int:
     stem = "".join(c if (c.isalnum() or c in "._-") else "_" for c in project) or "board"
 
     entry = target / f"{stem}.ohm"
-    if entry.exists():
-        print(f"error: '{entry}' already exists — refusing to overwrite", file=sys.stderr)
-        return 1
 
     starter = f"""\
 # {project} — a starter Ohm design. Runs clean through `ohm check`.
@@ -115,20 +114,31 @@ ohm explain <CODE>              # explain any diagnostic, e.g. ohm explain C001
 - `out/`       — build artifacts (git-ignored)
 """
 
+    files = {entry: starter, target / ".gitignore": gitignore,
+             target / "README.md": readme, target / "lib" / ".gitkeep": ""}
+    created: list[str] = []
+    kept: list[str] = []
     try:
         target.mkdir(parents=True, exist_ok=True)
         (target / "lib").mkdir(exist_ok=True)
         (target / "out").mkdir(exist_ok=True)
-        (target / "lib" / ".gitkeep").write_text("", encoding="utf-8", newline="\n")
-        entry.write_text(starter, encoding="utf-8", newline="\n")
-        (target / ".gitignore").write_text(gitignore, encoding="utf-8", newline="\n")
-        (target / "README.md").write_text(readme, encoding="utf-8", newline="\n")
+        for path, content in files.items():
+            if path.exists():  # strictly additive: never clobber existing files
+                kept.append(path.name)
+                continue
+            path.write_text(content, encoding="utf-8", newline="\n")
+            created.append(path.name)
     except OSError as exc:
         print(f"error: cannot scaffold '{target}': {exc.strerror or exc}", file=sys.stderr)
         return 1
 
     where = "." if args.name is None else str(target)
-    print(f"created Ohm project '{project}' in {where}")
+    if created:
+        print(f"initialized Ohm project '{project}' in {where}: {', '.join(created)}")
+    if kept:
+        print(f"kept existing (not overwritten): {', '.join(kept)}", file=sys.stderr)
+    if not created:
+        print(f"nothing to create — '{where}' already has all scaffold files")
     print("next:")
     if args.name is not None:
         print(f"  cd {args.name}")
@@ -285,16 +295,21 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         outdir = Path(args.out)
         outdir.mkdir(parents=True, exist_ok=True)
-        (outdir / f"{model.name}.kicad_mod").write_text(emit_footprint(model))
+        (outdir / f"{model.name}.kicad_mod").write_text(
+            emit_footprint(model), encoding="utf-8", newline="\n")
         pins = [(p.id, f"P{p.id}", "passive") for p in model.pads]
-        (outdir / f"{model.name}.kicad_sym").write_text(emit_symbol(model.name, pins))
+        (outdir / f"{model.name}.kicad_sym").write_text(
+            emit_symbol(model.name, pins), encoding="utf-8", newline="\n")
         print(f"generated {model.name}.kicad_mod + {model.name}.kicad_sym in {outdir}")
         return 0
 
     try:
-        source = Path(args.file).read_text()
-    except OSError as exc:
-        print(f"error: cannot read '{args.file}': {exc.strerror or exc}", file=sys.stderr)
+        # utf-8-sig tolerates an editor-inserted BOM; sources are UTF-8 on every
+        # platform (never the OS locale codepage, which crashes on non-ASCII)
+        source = Path(args.file).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        detail = getattr(exc, "strerror", None) or exc
+        print(f"error: cannot read '{args.file}': {detail}", file=sys.stderr)
         return 1
 
     if args.command == "fmt":
@@ -307,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.write:
             try:
-                Path(args.file).write_text(formatted)
+                Path(args.file).write_text(formatted, encoding="utf-8", newline="\n")
             except OSError as exc:
                 print(f"error: cannot write '{args.file}': {exc.strerror or exc}",
                       file=sys.stderr)
@@ -330,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.out:
             existing = Path(args.out).exists() and Path(args.out).stat().st_size > 0
-            with open(args.out, "a") as fh:
+            with open(args.out, "a", encoding="utf-8", newline="\n") as fh:
                 fh.write(("\n" if existing else "") + text)
             print(f"appended component to {args.out}", file=sys.stderr)
         else:
@@ -350,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
             for dg in zdiags:
                 print(dg.human(source), file=sys.stderr)
             if args.out:
-                Path(args.out).write_text(text)
+                Path(args.out).write_text(text, encoding="utf-8", newline="\n")
                 print(f"wrote {args.out} — fill the TODOs (or hand them to your agent) "
                       "to enable the checking tiers", file=sys.stderr)
             else:
@@ -373,9 +388,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         assert result.low is not None
         try:
-            board_text = Path(args.board).read_text()
-        except OSError as exc:
-            print(f"error: cannot read '{args.board}': {exc.strerror or exc}", file=sys.stderr)
+            board_text = Path(args.board).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as exc:
+            detail = getattr(exc, "strerror", None) or exc
+            print(f"error: cannot read '{args.board}': {detail}", file=sys.stderr)
             return 1
         diags = signoff(result.low, board_text, args.board)
         if args.json_diagnostics:
@@ -412,25 +428,30 @@ def main(argv: list[str] | None = None) -> int:
         try:
             outdir.mkdir(parents=True, exist_ok=True)
             if args.emit in ("netlist", "all"):
-                (outdir / f"{stem}.net").write_text(emit_netlist(low, args.file))
+                (outdir / f"{stem}.net").write_text(
+                    emit_netlist(low, args.file), encoding="utf-8", newline="\n")
             if args.emit in ("kicad", "all"):
                 from ohm.emit_kicad_pro import emit_kicad_pro
 
-                (outdir / f"{stem}.kicad_sch").write_text(emit_kicad_sch(low, args.file))
-                (outdir / f"{stem}.kicad_pcb").write_text(emit_kicad_pcb(low, args.file))
-                (outdir / f"{stem}.kicad_pro").write_text(emit_kicad_pro(low, args.file))
+                (outdir / f"{stem}.kicad_sch").write_text(
+                    emit_kicad_sch(low, args.file), encoding="utf-8", newline="\n")
+                (outdir / f"{stem}.kicad_pcb").write_text(
+                    emit_kicad_pcb(low, args.file), encoding="utf-8", newline="\n")
+                (outdir / f"{stem}.kicad_pro").write_text(
+                    emit_kicad_pro(low, args.file), encoding="utf-8", newline="\n")
                 _emit_generated_packages(result, outdir)
             if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
                 _emit_generated_packages(result, outdir)
             if args.emit in ("zen", "all"):
                 from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 
-                (outdir / f"{stem}.zen").write_text(emit_zen(low, args.file))
+                (outdir / f"{stem}.zen").write_text(
+                    emit_zen(low, args.file), encoding="utf-8", newline="\n")
             if args.emit in ("constraints", "all"):
                 from ohm.emit_constraints import emit_constraints
 
                 (outdir / f"{stem}.constraints.json").write_text(
-                    emit_constraints(low, args.file))
+                    emit_constraints(low, args.file), encoding="utf-8", newline="\n")
         except OSError as exc:
             print(f"error: cannot write outputs to '{outdir}': {exc.strerror or exc}",
                   file=sys.stderr)

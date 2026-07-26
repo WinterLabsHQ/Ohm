@@ -38,7 +38,9 @@ def _err(code: str, msg: str, span: Span, path: str, help_: str | None = None) -
 
 
 def _suggest(name: str, candidates) -> str | None:
-    close = difflib.get_close_matches(name, list(candidates), n=1)
+    # sort first: difflib's tie-break is stable in input order, so a bare set
+    # (hash-seed-dependent iteration) would make the suggestion non-deterministic
+    close = difflib.get_close_matches(name, sorted(candidates), n=1)
     return f"did you mean '{close[0]}'?" if close else None
 
 
@@ -802,7 +804,9 @@ class _Resolver:
             for k, _ in item.call.kwargs:
                 if k in declared:
                     continue
-                close = min(declared, key=lambda n: _edit_distance(k, n), default=None)
+                # sorted(): min()'s tie-break returns the first-iterated element,
+                # so a bare set would pick hash-seed-dependently (non-deterministic)
+                close = min(sorted(declared), key=lambda n: _edit_distance(k, n), default=None)
                 if close is not None and _edit_distance(k, close) <= 2:
                     self.diags.append(_err(
                         "R012", f"unknown attr '{k}' on component '{target.name}'",

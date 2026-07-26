@@ -18,7 +18,7 @@ from lark.indenter import Indenter
 from ohm import ast_nodes as A
 from ohm.diagnostics import Diagnostic, Span
 
-_GRAMMAR = (Path(__file__).parent / "ohm.lark").read_text()
+_GRAMMAR = (Path(__file__).parent / "ohm.lark").read_text(encoding="utf-8")
 
 
 class _Conforms:
@@ -435,4 +435,4 @@ def parse(source: str, path: str = "<string>") -> tuple[A.Program, list[Diagnost
 
 
 def parse_file(path: str) -> tuple[A.Program, list[Diagnostic]]:
-    return parse(Path(path).read_text(), path)
+    return parse(Path(path).read_text(encoding="utf-8-sig"), path)

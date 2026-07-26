@@ -10,7 +10,7 @@ json.dumps(sort_keys=True), class list name-sorted after "Default".
 from __future__ import annotations
 
 import json
-from pathlib import PurePosixPath
+from pathlib import Path
 
 from ohm import ir
 from ohm.emit_kicad import diffpair_renames
@@ -59,7 +59,7 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>") -> str:
         "board": {"3dviewports": [], "design_settings": {}, "layer_presets": []},
         "boards": [],
         "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
-        "meta": {"filename": f"{PurePosixPath(source).stem}.kicad_pro", "version": 1},
+        "meta": {"filename": f"{Path(source).stem}.kicad_pro", "version": 1},
         "net_settings": {
             "classes": [_class("Default")]
             + [classes[k] for k in sorted(classes)],

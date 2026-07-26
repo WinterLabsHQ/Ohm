@@ -132,6 +132,8 @@ def microstrip_z0(w: Qty, h: Qty, er: Qty) -> Qty | None:
     4 decimal places so the value is identical across machines (design §6.4)."""
     if w.dim != "length" or h.dim != "length" or er.dim != DIMENSIONLESS:
         return None
+    if _mid(h) == 0:  # zero substrate height: not evaluable (C003), never a crash
+        return None
     u = _mid(w) / _mid(h)
     e = _mid(er)
     if u <= 0 or e < 1:
@@ -248,7 +250,9 @@ def eval_expr(expr: A.Expr, env: Env) -> Qty | None:
                 return None
             try:
                 return fn(*args)
-            except TypeError:  # wrong arity → unevaluable, surfaces as C003
+            except (TypeError, ArithmeticError, ValueError):
+                # wrong arity / domain error (div-by-zero, sqrt of negative, …)
+                # → unevaluable, surfaces as C003 rather than a raw traceback
                 return None
         case A.BinOp() if expr.op in ("+", "-", "*", "/"):
             left, right = eval_expr(expr.left, env), eval_expr(expr.right, env)

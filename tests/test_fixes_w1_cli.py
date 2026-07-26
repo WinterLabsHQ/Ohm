@@ -57,3 +57,40 @@ def test_emit_package_writes_only_mod_and_sym(tmp_path):
     assert main(["build", GENERATED, "-o", str(tmp_path), "--emit", "package"]) == 0
     suffixes = {p.suffix for p in tmp_path.iterdir()}
     assert suffixes == {".kicad_mod", ".kicad_sym"}
+
+
+def test_init_scaffolds_a_compiling_project(tmp_path):
+    proj = tmp_path / "myboard"
+    assert main(["init", str(proj)]) == 0
+    entry = proj / "myboard.ohm"
+    assert entry.is_file()
+    assert (proj / ".gitignore").is_file()
+    assert (proj / "README.md").is_file()
+    assert (proj / "lib" / ".gitkeep").is_file()
+    assert (proj / "out").is_dir()
+    # the generated starter must pass every check tier clean
+    assert main(["check", str(entry)]) == 0
+
+
+def test_build_outputs_are_utf8_with_lf_newlines(tmp_path):
+    # hermetic guarantee: emitted files are UTF-8 with LF regardless of the OS
+    # locale codepage / newline convention (no cp1252, no CRLF on Windows).
+    assert main(["build", CANONICAL, "-o", str(tmp_path), "--emit", "all"]) == 0
+    for f in tmp_path.iterdir():
+        if f.is_file():
+            raw = f.read_bytes()
+            f.read_text(encoding="utf-8")  # decodes as UTF-8 or the test errors
+            assert b"\r\n" not in raw, f"{f.name} has CRLF"
+
+
+def test_init_never_overwrites_existing_files(tmp_path):
+    # regression: bare `ohm init` in an existing dir must NOT clobber a real
+    # .gitignore / README.md — the scaffolder is strictly additive.
+    proj = tmp_path / "existing"
+    proj.mkdir()
+    (proj / ".gitignore").write_text("SENTINEL-GITIGNORE\n", encoding="utf-8")
+    (proj / "README.md").write_text("SENTINEL-README\n", encoding="utf-8")
+    assert main(["init", str(proj)]) == 0
+    assert (proj / ".gitignore").read_text(encoding="utf-8") == "SENTINEL-GITIGNORE\n"
+    assert (proj / "README.md").read_text(encoding="utf-8") == "SENTINEL-README\n"
+    assert (proj / "existing.ohm").is_file()  # the missing entry is still created
