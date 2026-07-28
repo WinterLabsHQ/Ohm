@@ -1,6 +1,6 @@
 [project]
 name = "ohm-hdl"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ohm — AI-native, physics-aware hardware description language and hermetic compiler"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.1.0 (unreleased) — 2026-07
+## 0.1.1 — 2026-07
+
+- **fix(init)**: the interactive `ohm init` / `ohm create-project` wizard now
+  prompts for a project *name* and creates a new subfolder by default; a blank
+  answer scaffolds `./my-board` (not the current directory, which previously
+  surprised users into scaffolding their parent folder). Use `.` to scaffold in
+  place. An explicit name argument was always correct and is unchanged.
+
+## 0.1.0 — 2026-07 (first PyPI release)
 
 Initial development, complete through signoff. Milestones (details in
 `PROGRESS.md`, decisions in `docs/adr/`):
