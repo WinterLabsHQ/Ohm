@@ -153,4 +153,7 @@ Until a first spin comes back from a fab and boots, treat the bring-up tier as
 *test-validated, not field-validated*. That first board is the next gate, and
 this line will change when it happens.
 
-The license is being finalized — **all rights reserved until it lands**.
+Licensed under the [Apache License 2.0](LICENSE) — free to use, modify, and
+distribute, with an explicit patent grant. The Ohm language, compiler, checks,
+and emitters in this repository are open source; the routing (Meridian) and
+convergence-solver products that consume the `shared/` seam are separate.

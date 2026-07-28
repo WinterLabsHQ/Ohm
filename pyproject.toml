@@ -2,8 +2,26 @@
 name = "ohm-hdl"
 version = "0.1.0"
 description = "Ohm — AI-native, physics-aware hardware description language and hermetic compiler"
+readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "WinterLabs", email = "admin@upcheck.in" }]
+keywords = ["hdl", "eda", "electronics", "kicad", "hardware", "netlist", "pcb", "compiler"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
 dependencies = ["lark>=1.1"]
+
+[project.urls]
+Homepage = "https://github.com/WinterLabsHQ/Ohm"
+Repository = "https://github.com/WinterLabsHQ/Ohm"
+Changelog = "https://github.com/WinterLabsHQ/Ohm/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 # linters pinned exactly: their rulesets drift release-to-release, and the CI
@@ -19,6 +37,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["ohm", "ohm.pkggen", "shared"]
+license-files = ["LICENSE", "NOTICE"]
 
 [tool.setuptools.package-data]
 ohm = ["*.lark", "std/*.ohm", "templates/*"]
