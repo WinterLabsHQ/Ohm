@@ -106,15 +106,50 @@ def _write_scaffold(dirs: list[Path],
     return created, kept
 
 
+def _ask(prompt: str, default: str = "") -> str:
+    try:
+        resp = input(prompt).strip()
+    except EOFError:
+        return default
+    return resp or default
+
+
+def _ask_yes_no(prompt: str, *, default: bool) -> bool:
+    resp = _ask(f"{prompt} [{'Y/n' if default else 'y/N'}]: ")
+    return default if not resp else resp[:1].lower() == "y"
+
+
+def _want_git(args, interactive: bool) -> bool:
+    """Resolve whether to `git init`: --no-git wins, then --git, then (only on a
+    terminal) an interactive prompt; non-interactive with no flag means no git."""
+    if getattr(args, "no_git", False):
+        return False
+    if getattr(args, "git", False):
+        return True
+    return interactive and _ask_yes_no("  Initialize a git repository?", default=True)
+
+
 def _cmd_init(args) -> int:
     """Scaffold a full Ohm project directory: a starter module that compiles
     clean, plus ohm.toml, README, AGENTS.md, docs/LANGUAGE.md, lib/, out/ and a
-    .gitignore. Strictly additive — never overwrites an existing file."""
+    .gitignore. Strictly additive — never overwrites an existing file.
+
+    On a terminal with no arguments this runs an interactive wizard (project
+    directory, git); it is fully scriptable with a name argument plus
+    --git/--no-git/--yes."""
     from ohm import scaffold
 
-    target = Path(args.name) if args.name else Path.cwd()
+    interactive = sys.stdin.isatty() and not args.yes
+    name = args.name
+    if name is None and interactive:
+        print("Creating a new Ohm project.")
+        name = _ask("  Project directory (blank = current directory): ") or None
+
+    target = Path(name) if name else Path.cwd()
     project = target.resolve().name
     entry_file = f"{scaffold.safe_stem(project)}.ohm"
+    do_git = _want_git(args, interactive)
+
     dirs, plan = scaffold.build_plan(target, entry_file=entry_file, include_starter=True)
     try:
         created, kept = _write_scaffold(dirs, plan)
@@ -122,7 +157,13 @@ def _cmd_init(args) -> int:
         print(f"error: cannot scaffold '{target}': {exc.strerror or exc}", file=sys.stderr)
         return 1
 
-    where = "." if args.name is None else str(target)
+    git_status = None
+    if do_git:
+        from ohm.gitutil import git_init  # setup-only; never on the build path
+
+        git_status = git_init(target)
+
+    where = "." if name is None else str(target)
     if created:
         print(f"initialized Ohm project '{project}' in {where}:")
         for p in sorted(created):
@@ -132,9 +173,12 @@ def _cmd_init(args) -> int:
     if kept:
         names = ", ".join(sorted(_rel(p, target) for p in kept))
         print(f"kept (already present, not overwritten): {names}", file=sys.stderr)
+    if git_status is not None:
+        ok, msg = git_status
+        print(f"  {msg}", file=sys.stdout if ok else sys.stderr)
     print("next:")
-    if args.name is not None:
-        print(f"  cd {args.name}")
+    if name is not None:
+        print(f"  cd {name}")
     print("  ohm check          # or: ohm check " + entry_file)
     print("  ohm build          # emits to out/")
     return 0
@@ -321,9 +365,16 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     p_init = sub.add_parser("init", aliases=["create-project"],
-                            help="scaffold a new Ohm project directory")
+                            help="scaffold a new Ohm project directory (interactive wizard "
+                                 "with no args on a terminal)")
     p_init.add_argument("name", nargs="?",
                         help="project directory to create (default: current directory)")
+    p_init.add_argument("--git", action="store_true",
+                        help="initialize a git repository in the project")
+    p_init.add_argument("--no-git", action="store_true",
+                        help="do not initialize a git repository")
+    p_init.add_argument("-y", "--yes", action="store_true",
+                        help="non-interactive: accept defaults, never prompt")
 
     sub.add_parser("doctor", help="diagnose the Ohm install & project environment")
 

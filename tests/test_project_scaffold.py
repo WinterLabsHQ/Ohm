@@ -2,7 +2,12 @@
 `ohm refactor`. Scaffolding is strictly additive; discovery is framework-style
 (bare commands inside a project); explicit file/`-o` always win."""
 
+import shutil
+import sys
+
 from ohm.cli import main
+
+HAVE_GIT = shutil.which("git") is not None
 
 
 def test_init_scaffolds_full_project_that_compiles(tmp_path):
@@ -16,6 +21,44 @@ def test_init_scaffolds_full_project_that_compiles(tmp_path):
     assert 'entry = "myboard.ohm"' in (proj / "ohm.toml").read_text(encoding="utf-8")
     # the starter passes every check tier clean
     assert main(["check", str(proj / "myboard.ohm")]) == 0
+
+
+def test_init_default_does_not_init_git(tmp_path):
+    proj = tmp_path / "nogit"
+    assert main(["init", str(proj)]) == 0     # non-interactive, no --git
+    assert not (proj / ".git").exists()
+
+
+def test_init_git_flag_creates_repo(tmp_path):
+    if not HAVE_GIT:
+        import pytest
+        pytest.skip("git not on PATH")
+    proj = tmp_path / "withgit"
+    assert main(["init", str(proj), "--git"]) == 0
+    assert (proj / ".git").is_dir()
+
+
+def test_init_interactive_wizard(tmp_path, monkeypatch):
+    # simulate a terminal: wizard asks for the directory, then git (answer no)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    answers = iter(["wiz", "n"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    assert (tmp_path / "wiz" / "wiz.ohm").is_file()
+    assert (tmp_path / "wiz" / "ohm.toml").is_file()
+    assert not (tmp_path / "wiz" / ".git").exists()   # answered "n"
+
+
+def test_yes_flag_suppresses_wizard(tmp_path, monkeypatch):
+    # --yes must never prompt even on a terminal (input() would raise StopIteration)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    def _boom(prompt=""):
+        raise AssertionError("prompted despite --yes")
+    monkeypatch.setattr("builtins.input", _boom)
+    proj = tmp_path / "quiet"
+    assert main(["init", str(proj), "--yes"]) == 0
+    assert (proj / "quiet.ohm").is_file()
 
 
 def test_create_project_is_an_alias_for_init(tmp_path):

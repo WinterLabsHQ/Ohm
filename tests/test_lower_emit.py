@@ -70,6 +70,12 @@ def test_double_build_byte_identical():
 FORBIDDEN = {"socket", "requests", "urllib", "http", "subprocess",
              "time", "random", "datetime"}
 
+# gitutil.py is the sole exception: `ohm init --git` is a project-bootstrap
+# command, not compilation, so it may shell out to `git init`. It is quarantined
+# in its own module (imported only by _cmd_init, never on the parse→emit build
+# path), so the gate stays strict for every other file, including cli.py.
+_SETUP_ONLY = {"gitutil.py"}
+
 
 def test_no_forbidden_imports_in_build_path():
     """Real import statements only (ast-based) — prose mentioning a module name
@@ -77,6 +83,8 @@ def test_no_forbidden_imports_in_build_path():
     import ast as pyast
 
     for py in OHM_PKG.rglob("*.py"):
+        if py.name in _SETUP_ONLY:
+            continue
         tree = pyast.parse(py.read_text())
         for node in pyast.walk(tree):
             names = []
@@ -88,6 +96,25 @@ def test_no_forbidden_imports_in_build_path():
                 root = name.split(".")[0]
                 assert root not in FORBIDDEN, \
                     f"{py.name} imports forbidden module '{name}' (breaks hermeticity N1)"
+
+
+def test_setup_only_module_is_not_reachable_from_build():
+    """Justify the gitutil exemption: only cli.py (the init command) may import
+    the quarantined setup module — never a parse→emit build-path file."""
+    import ast as pyast
+
+    for py in OHM_PKG.rglob("*.py"):
+        if py.name in ("gitutil.py", "cli.py"):
+            continue
+        tree = pyast.parse(py.read_text())
+        for node in pyast.walk(tree):
+            mods = []
+            if isinstance(node, pyast.Import):
+                mods = [a.name for a in node.names]
+            elif isinstance(node, pyast.ImportFrom) and node.module:
+                mods = [node.module]
+            assert not any("gitutil" in m for m in mods), \
+                f"{py.name} imports gitutil (setup-only module must stay off the build path)"
 
 
 # ---------- no output from an errored design (design invariant 4) ----------
