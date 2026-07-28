@@ -39,15 +39,37 @@ def test_init_git_flag_creates_repo(tmp_path):
 
 
 def test_init_interactive_wizard(tmp_path, monkeypatch):
-    # simulate a terminal: wizard asks for the directory, then git (answer no)
+    # simulate a terminal: wizard asks for a name, then git (answer no)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     answers = iter(["wiz", "n"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
-    assert (tmp_path / "wiz" / "wiz.ohm").is_file()
+    assert (tmp_path / "wiz" / "wiz.ohm").is_file()      # a NEW subfolder
     assert (tmp_path / "wiz" / "ohm.toml").is_file()
-    assert not (tmp_path / "wiz" / ".git").exists()   # answered "n"
+    assert not (tmp_path / "wiz" / ".git").exists()      # answered "n"
+
+
+def test_init_wizard_blank_name_makes_subfolder_not_cwd(tmp_path, monkeypatch):
+    # regression: a blank name must create the default ./my-board subfolder and
+    # must NOT scaffold into (pollute) the current directory.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    answers = iter(["", "n"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    assert (tmp_path / "my-board" / "my-board.ohm").is_file()
+    assert not (tmp_path / "ohm.toml").exists()          # cwd untouched
+
+
+def test_init_wizard_dot_targets_current_dir(tmp_path, monkeypatch):
+    # explicit "." is the escape hatch for scaffolding in place
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    answers = iter([".", "n"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    assert (tmp_path / "ohm.toml").is_file()
 
 
 def test_yes_flag_suppresses_wizard(tmp_path, monkeypatch):

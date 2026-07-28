@@ -135,7 +135,7 @@ def _cmd_init(args) -> int:
     .gitignore. Strictly additive — never overwrites an existing file.
 
     On a terminal with no arguments this runs an interactive wizard (project
-    directory, git); it is fully scriptable with a name argument plus
+    name, git); it is fully scriptable with a name argument plus
     --git/--no-git/--yes."""
     from ohm import scaffold
 
@@ -143,7 +143,12 @@ def _cmd_init(args) -> int:
     name = args.name
     if name is None and interactive:
         print("Creating a new Ohm project.")
-        name = _ask("  Project directory (blank = current directory): ") or None
+        # default to a NEW named subfolder (create-app style), never the current
+        # directory — that surprised users into scaffolding their parent folder.
+        # Use "." explicitly to scaffold into the current directory.
+        entered = _ask('  Project name [my-board] (use "." for the current dir): ',
+                       "my-board")
+        name = None if entered == "." else entered
 
     target = Path(name) if name else Path.cwd()
     project = target.resolve().name
