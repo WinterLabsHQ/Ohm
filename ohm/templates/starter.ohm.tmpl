@@ -1,0 +1,26 @@
+# {{PROJECT}} — a starter Ohm design. Runs clean through `ohm check`.
+# Edit freely; see docs/LANGUAGE.md for the full authoring guide.
+
+use std.interfaces      # Power
+use std.passives        # Resistor, Capacitor
+use std.discrete        # LED
+
+module {{MODULE}}:
+    pwr = io(Power)
+    vcc = config(Voltage, default=5.0V)
+
+    # current-limiting resistor for a ~2V-forward LED at ~9mA on a 5V rail
+    r_led = Resistor(value=330ohm +/- 5%)
+    d1    = LED()
+    c_dec = Capacitor(value=100nF)         # rail decoupling
+
+    pwr.v    ~ r_led.P1
+    r_led.P2 ~ d1.A
+    d1.K     ~ pwr.gnd
+    pwr.v    ~ c_dec.P1
+    pwr.gnd  ~ c_dec.P2
+
+    # keep the LED current sane at the nominal rail (approx 2V LED drop)
+    assert (vcc - 2.0V) / r_led.value <= 15mA
+
+    constraint netclass(pwr.v, "power")

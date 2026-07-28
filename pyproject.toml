@@ -21,7 +21,7 @@ build-backend = "setuptools.build_meta"
 packages = ["ohm", "ohm.pkggen", "shared"]
 
 [tool.setuptools.package-data]
-ohm = ["*.lark", "std/*.ohm"]
+ohm = ["*.lark", "std/*.ohm", "templates/*"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -12,6 +12,10 @@ from ohm.driver import compile_source
 from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.emit_netlist import emit_netlist
 
+# The real console encoding at process start, captured before main() forces the
+# streams to UTF-8. `ohm doctor` reports this so a non-UTF-8 console is visible.
+_CONSOLE_ENCODING = getattr(sys.stdout, "encoding", None)
+
 
 def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
     """P-GEN-PACKAGE: write one .kicad_mod per distinct generated package
@@ -69,106 +73,222 @@ def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
                 encoding="utf-8", newline="\n")
 
 
-def _module_name(project: str) -> str:
-    """Derive a valid Ohm module identifier ([A-Za-z_][A-Za-z0-9_]*) from a
-    project name: split on non-alphanumerics, PascalCase the parts."""
-    parts = [p for p in "".join(c if c.isalnum() else " " for c in project).split() if p]
-    ident = "".join(p[:1].upper() + p[1:] for p in parts) or "Board"
-    if not (ident[0].isalpha() or ident[0] == "_"):
-        ident = "Board" + ident
-    return ident
+def _target_major(target: str) -> str:
+    """Normalize an ohm.toml `target` ("kicad7") or a --target-kicad value ("7")
+    to the bare KiCad major version string the build path validates ("7")."""
+    t = target.strip().lower()
+    return t[len("kicad"):] if t.startswith("kicad") else t
+
+
+def _rel(path: Path, base: Path) -> str:
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
+
+
+def _write_scaffold(dirs: list[Path],
+                    plan: dict[Path, str]) -> tuple[list[Path], list[Path]]:
+    """Create `dirs` and write every file in `plan` that does not already exist.
+    Strictly additive — existing files are kept, never clobbered. Returns
+    (created, kept)."""
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    kept: list[Path] = []
+    for path, content in plan.items():
+        if path.exists():
+            kept.append(path)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8", newline="\n")
+        created.append(path)
+    return created, kept
 
 
 def _cmd_init(args) -> int:
-    """Scaffold a new Ohm project directory with a starter module that
-    compiles clean, plus lib/, out/, .gitignore and a README."""
+    """Scaffold a full Ohm project directory: a starter module that compiles
+    clean, plus ohm.toml, README, AGENTS.md, docs/LANGUAGE.md, lib/, out/ and a
+    .gitignore. Strictly additive — never overwrites an existing file."""
+    from ohm import scaffold
+
     target = Path(args.name) if args.name else Path.cwd()
     project = target.resolve().name
-    module = _module_name(project)
-    stem = "".join(c if (c.isalnum() or c in "._-") else "_" for c in project) or "board"
-
-    entry = target / f"{stem}.ohm"
-
-    starter = f"""\
-# {project} — a starter Ohm design. Runs clean through `ohm check`.
-# Edit freely; see docs/STYLE.md for the full authoring guide.
-
-use std.interfaces      # Power
-use std.passives        # Resistor, Capacitor
-use std.discrete        # LED
-
-module {module}:
-    pwr = io(Power)
-    vcc = config(Voltage, default=5.0V)
-
-    # current-limiting resistor for a ~2V-forward LED at ~9mA on a 5V rail
-    r_led = Resistor(value=330ohm +/- 5%)
-    d1    = LED()
-    c_dec = Capacitor(value=100nF)         # rail decoupling
-
-    pwr.v    ~ r_led.P1
-    r_led.P2 ~ d1.A
-    d1.K     ~ pwr.gnd
-    pwr.v    ~ c_dec.P1
-    pwr.gnd  ~ c_dec.P2
-
-    # keep the LED current sane at the nominal rail (approx 2V LED drop)
-    assert (vcc - 2.0V) / r_led.value <= 15mA
-
-    constraint netclass(pwr.v, "power")
-"""
-
-    gitignore = "# Ohm build output\n/out/\n\n# Python\n.venv/\n__pycache__/\n*.pyc\n"
-
-    readme = f"""\
-# {project}
-
-An [Ohm](https://) hardware design.
-
-## Build
-
-```sh
-ohm check {stem}.ohm            # all checks, no output files (fast inner loop)
-ohm build {stem}.ohm -o out/    # emit netlist + KiCad project + zen + constraints
-ohm explain <CODE>              # explain any diagnostic, e.g. ohm explain C001
-```
-
-## Layout
-
-- `{stem}.ohm` — the top-level design (the module you build)
-- `lib/`       — your own reusable component blocks: `use "./lib/parts.ohm"`
-- `out/`       — build artifacts (git-ignored)
-"""
-
-    files = {entry: starter, target / ".gitignore": gitignore,
-             target / "README.md": readme, target / "lib" / ".gitkeep": ""}
-    created: list[str] = []
-    kept: list[str] = []
+    entry_file = f"{scaffold.safe_stem(project)}.ohm"
+    dirs, plan = scaffold.build_plan(target, entry_file=entry_file, include_starter=True)
     try:
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "lib").mkdir(exist_ok=True)
-        (target / "out").mkdir(exist_ok=True)
-        for path, content in files.items():
-            if path.exists():  # strictly additive: never clobber existing files
-                kept.append(path.name)
-                continue
-            path.write_text(content, encoding="utf-8", newline="\n")
-            created.append(path.name)
+        created, kept = _write_scaffold(dirs, plan)
     except OSError as exc:
         print(f"error: cannot scaffold '{target}': {exc.strerror or exc}", file=sys.stderr)
         return 1
 
     where = "." if args.name is None else str(target)
     if created:
-        print(f"initialized Ohm project '{project}' in {where}: {', '.join(created)}")
-    if kept:
-        print(f"kept existing (not overwritten): {', '.join(kept)}", file=sys.stderr)
-    if not created:
+        print(f"initialized Ohm project '{project}' in {where}:")
+        for p in sorted(created):
+            print(f"  + {_rel(p, target)}")
+    else:
         print(f"nothing to create — '{where}' already has all scaffold files")
+    if kept:
+        names = ", ".join(sorted(_rel(p, target) for p in kept))
+        print(f"kept (already present, not overwritten): {names}", file=sys.stderr)
     print("next:")
     if args.name is not None:
         print(f"  cd {args.name}")
-    print(f"  ohm check {stem}.ohm")
+    print("  ohm check          # or: ohm check " + entry_file)
+    print("  ohm build          # emits to out/")
+    return 0
+
+
+def _find_kicad() -> str | None:
+    """Best-effort locate KiCad's installed footprint libraries (optional — only
+    needed to open an emitted .kicad_pcb, not to compile)."""
+    import os
+    import shutil
+
+    for var in ("KICAD9_FOOTPRINT_DIR", "KICAD8_FOOTPRINT_DIR",
+                "KICAD7_FOOTPRINT_DIR", "KICAD_FOOTPRINT_DIR"):
+        v = os.environ.get(var)
+        if v and Path(v).is_dir():
+            return v
+    candidates = [Path("/usr/share/kicad/footprints"),
+                  Path("/usr/local/share/kicad/footprints")]
+    candidates += [Path(f"C:/Program Files/KiCad/{maj}.0/share/kicad/footprints")
+                   for maj in ("7", "8", "9")]
+    for p in candidates:
+        if p.is_dir():
+            return str(p)
+    cli = shutil.which("kicad-cli")
+    return cli or None
+
+
+def _cmd_doctor(args) -> int:
+    """Diagnose the Ohm install and the current project environment."""
+    import platform
+    import shutil
+
+    from ohm import project
+
+    rows: list[tuple[str, str, str]] = []  # (status, label, detail)
+    py_ok = sys.version_info >= (3, 12)
+    rows.append(("ok" if py_ok else "fail", "Python",
+                 platform.python_version() + f"  ({sys.executable})"
+                 + ("" if py_ok else "  — Ohm needs 3.12+")))
+    rows.append(("ok", "Ohm version", __version__))
+    rows.append(("ok", "Ohm package", str(Path(__file__).resolve().parent)))
+
+    exe = shutil.which("ohm")
+    rows.append(("ok", "`ohm` on PATH", exe) if exe else
+                ("warn", "`ohm` on PATH",
+                 "not found — activate Ohm's venv, or `pipx install .` for a global command"))
+
+    try:
+        import lark
+        rows.append(("ok", "lark", getattr(lark, "__version__", "installed")))
+    except ImportError:
+        rows.append(("fail", "lark", "missing — pip install 'lark>=1.1'"))
+
+    enc = (_CONSOLE_ENCODING or "unknown")
+    enc_ok = "utf-8" in enc.lower() or "utf8" in enc.lower()
+    rows.append(("ok" if enc_ok else "warn", "Console encoding",
+                 enc + ("" if enc_ok else
+                        "  — non-UTF-8; Ohm forces UTF-8 on its own output, but "
+                        "set PYTHONUTF8=1 so other tools agree")))
+
+    kicad = _find_kicad()
+    rows.append(("ok", "KiCad libraries", kicad) if kicad else
+                ("warn", "KiCad libraries",
+                 "not detected (optional) — needed only to open emitted .kicad_pcb"))
+
+    proj, perr = project.discover()
+    if perr:
+        rows.append(("warn", "Project", perr))
+    elif proj:
+        rows.append(("ok", "Project",
+                     f"{proj.name}  (root: {proj.root}, entry: {proj.entry})"))
+    else:
+        rows.append(("ok", "Project", "not inside one — run `ohm init <name>` to start"))
+
+    mark = {"ok": "[ OK ]", "warn": "[WARN]", "fail": "[FAIL]"}
+    print("ohm doctor")
+    for status, label, detail in rows:
+        print(f"  {mark[status]}  {label:<16} {detail}")
+    fails = sum(1 for r in rows if r[0] == "fail")
+    warns = sum(1 for r in rows if r[0] == "warn")
+    print()
+    if fails:
+        print(f"{fails} problem(s) must be fixed for Ohm to run.")
+        return 1
+    print(f"ready — {warns} optional warning(s) above." if warns else "all good.")
+    return 0
+
+
+def _cmd_refactor(args) -> int:
+    """Restructure an existing folder into a standard Ohm project. Dry-run by
+    default (prints the plan, changes nothing); --apply executes it. Strictly
+    additive — never overwrites a file; moves only stray root .ohm files whose
+    destination is free."""
+    from ohm import scaffold
+
+    target = Path(args.dir)
+    if not target.is_dir():
+        print(f"error: '{target}' is not a directory", file=sys.stderr)
+        return 1
+
+    entry_file, err = scaffold.resolve_entry(target, args.entry)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
+        cands = sorted(p.name for p in target.glob("*.ohm"))
+        if cands:
+            print("       candidates: " + ", ".join(cands), file=sys.stderr)
+        return 1
+    assert entry_file is not None
+    include_starter = not (target / entry_file).exists()
+    dirs, plan = scaffold.build_plan(target, entry_file=entry_file,
+                                     include_starter=include_starter)
+    moves = scaffold.plan_moves(target, entry_file)
+    would_create = sorted(p for p in plan if not p.exists())
+    already = sorted(p for p in plan if p.exists())
+
+    if not args.apply:
+        print(f"ohm refactor (dry-run) — {target.resolve()}")
+        note = "  (will be created)" if include_starter else "  (existing)"
+        print(f"  entry: {entry_file}{note}")
+        for p in would_create:
+            print(f"  would create  {_rel(p, target)}")
+        for src, dest in moves:
+            print(f"  would move    {_rel(src, target)} -> {_rel(dest, target)}")
+        if already:
+            print("  keep as-is    " + ", ".join(_rel(p, target) for p in already))
+        if not would_create and not moves:
+            print("  already a well-formed Ohm project — nothing to do")
+        else:
+            print("\nre-run with --apply to execute (nothing was changed).")
+        return 0
+
+    try:
+        created, kept = _write_scaffold(dirs, plan)
+        done: list[tuple[Path, Path]] = []
+        for src, dest in moves:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():  # additive: never clobber
+                continue
+            src.rename(dest)
+            done.append((src, dest))
+    except OSError as exc:
+        print(f"error: refactor failed: {exc.strerror or exc}", file=sys.stderr)
+        return 1
+
+    print(f"refactored {target.resolve()} into a standard Ohm project:")
+    for p in sorted(created):
+        print(f"  + {_rel(p, target)}")
+    for src, dest in done:
+        print(f"  moved {_rel(src, target)} -> {_rel(dest, target)}")
+    if not created and not done:
+        print("  (already well-formed — no changes)")
+    if kept:
+        print("  kept " + ", ".join(sorted(_rel(p, target) for p in kept)), file=sys.stderr)
+    print("next: ohm check")
     return 0
 
 
@@ -188,17 +308,38 @@ def _report(result, source: str, as_json: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Ohm's output is UTF-8 on every platform; force it so a non-UTF-8 console
+    # (Windows cp1252, Git Bash) never crashes on a diagnostic like Q003's "ΔV=".
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass  # captured/replaced stream (e.g. pytest) — nothing to reconfigure
+
     parser = argparse.ArgumentParser(prog="ohm", description="Ohm HDL compiler")
     parser.add_argument("--version", action="version", version=f"ohm {__version__}")
     sub = parser.add_subparsers(dest="command")
 
-    p_init = sub.add_parser("init", help="scaffold a new Ohm project directory")
+    p_init = sub.add_parser("init", aliases=["create-project"],
+                            help="scaffold a new Ohm project directory")
     p_init.add_argument("name", nargs="?",
                         help="project directory to create (default: current directory)")
 
+    sub.add_parser("doctor", help="diagnose the Ohm install & project environment")
+
+    p_ref = sub.add_parser("refactor",
+                           help="restructure an existing folder into a standard Ohm project")
+    p_ref.add_argument("dir", nargs="?", default=".",
+                       help="the directory to restructure (default: current directory)")
+    p_ref.add_argument("--entry", help="the top-level .ohm file (when several exist)")
+    p_ref.add_argument("--apply", action="store_true",
+                       help="execute the plan (default: dry-run, changes nothing)")
+
     p_build = sub.add_parser("build", help="compile and emit outputs")
-    p_build.add_argument("file")
-    p_build.add_argument("-o", "--out", default=".", help="output directory")
+    p_build.add_argument("file", nargs="?",
+                         help="the .ohm file (omit to use the project entry from ohm.toml)")
+    p_build.add_argument("-o", "--out", default=None,
+                         help="output directory (default: ohm.toml 'out', else '.')")
     p_build.add_argument("--emit",
                          choices=["netlist", "kicad", "zen", "constraints", "package",
                                   "eagle", "all"],
@@ -209,8 +350,9 @@ def main(argv: list[str] | None = None) -> int:
                          help="exit 1 (and emit nothing) on any warning or worse")
     p_build.add_argument("--debug-passes", action="store_true",
                          help="verify checkers do not mutate the IR (asserts on violation)")
-    p_build.add_argument("--target-kicad", default="7",
-                         help="KiCad major version to target (v1 supports: 7)")
+    p_build.add_argument("--target-kicad", default=None,
+                         help="KiCad major version to target (default: ohm.toml 'target', "
+                              "else 7; v1 supports: 7)")
     # ponytail: single 'declared' provider today; the flag is the provider seam
     p_build.add_argument("--ratings", choices=["declared"], default="declared",
                          help="pin-ratings provider")
@@ -277,16 +419,50 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{code.upper()}: {text}")
         return 0
 
-    if args.command == "check" and args.file is None:
-        print("error: ohm check needs a file (or --explain CODE)", file=sys.stderr)
-        return 1
-
-    if args.command == "build" and args.target_kicad != "7":
-        print("error: only KiCad 7 is supported in v1", file=sys.stderr)
-        return 1
-
-    if args.command == "init":
+    if args.command in ("init", "create-project"):
         return _cmd_init(args)
+
+    if args.command == "doctor":
+        return _cmd_doctor(args)
+
+    if args.command == "refactor":
+        return _cmd_refactor(args)
+
+    # framework-style discovery: bare `ohm build`/`ohm check` inside a project
+    # use ohm.toml's entry/out/target. An explicit file, -o, or --target-kicad
+    # always wins, and stays independent of ohm.toml when all are given.
+    if args.command in ("build", "check"):
+        from ohm import project
+
+        need_entry = args.file is None
+        need_out = args.command == "build" and args.out is None
+        if need_entry or need_out:
+            proj, perr = project.discover()
+            if perr:
+                print(f"error: {perr}", file=sys.stderr)
+                return 1
+            if need_entry:
+                if proj is None:
+                    print(f"error: `ohm {args.command}` needs a FILE, or run it inside "
+                          "an Ohm project (a directory with ohm.toml — create one with "
+                          "`ohm init`)", file=sys.stderr)
+                    if args.command == "check":
+                        print("       (or explain a code: ohm check --explain CODE)",
+                              file=sys.stderr)
+                    return 1
+                args.file = str(proj.root / proj.entry)
+            if need_out:
+                args.out = str(proj.root / proj.out) if proj else "."
+            # honor ohm.toml's target only when already relying on the project
+            if args.command == "build" and args.target_kicad is None and proj is not None:
+                args.target_kicad = _target_major(proj.target)
+
+    if args.command == "build":
+        if args.target_kicad is None:
+            args.target_kicad = "7"
+        if args.target_kicad != "7":
+            print("error: only KiCad 7 is supported in v1", file=sys.stderr)
+            return 1
 
     if args.command == "lsp":
         from ohm.lsp import serve

@@ -45,5 +45,19 @@ Initial development, complete through signoff. Milestones (details in
   their KiCad references exactly; QFP/DFN match within 0.05 mm; power-package
   tabs are solid-rectangle simplifications of KiCad's paste-subdivided lands.
 
-669 tests; ruff + mypy clean; deterministic double-build byte-identity and
+- **project UX**: `ohm init [name]` / `ohm create-project [name]` scaffold a
+  full project (starter design, `ohm.toml`, README, `AGENTS.md`,
+  `docs/LANGUAGE.md`, `lib/`, `out/`, `.gitignore`) from bundled templates —
+  strictly additive, never clobbering existing files. `ohm.toml` makes the CLI
+  framework-aware: bare `ohm build` / `ohm check` walk up to the project root
+  and use the configured entry, out dir, and KiCad target (an explicit file,
+  `-o`, or `--target-kicad` always wins).
+  `ohm refactor <dir>` restructures a messy folder into that layout (dry-run by
+  default; `--apply` to execute; stray root `.ohm` files move to `lib/`).
+  `ohm doctor` diagnoses the install (Python, PATH, encoding, KiCad libs,
+  project). The CLI now forces UTF-8 on its own stdout/stderr, so a non-UTF-8
+  console (Windows cp1252 / Git Bash) no longer crashes on non-ASCII
+  diagnostics. Global install is documented via `pipx install .`.
+
+680 tests; ruff + mypy clean; deterministic double-build byte-identity and
 hermeticity enforced in CI.

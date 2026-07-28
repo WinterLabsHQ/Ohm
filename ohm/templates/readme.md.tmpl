@@ -1,0 +1,43 @@
+# {{PROJECT}}
+
+An [Ohm](https://) hardware design — typed, physics-aware, compiled.
+
+## Prerequisites
+
+`ohm` must be on your PATH. From the Ohm source tree, `pipx install .` puts it
+there globally (no venv to activate); or activate Ohm's virtualenv. Verify your
+environment any time:
+
+```sh
+ohm doctor
+```
+
+## Workflow
+
+```sh
+ohm check                    # all checks, no output files (fast inner loop)
+ohm build                    # netlist + KiCad project + zen + constraints -> out/
+ohm explain <CODE>           # explain any diagnostic, e.g. ohm explain C001
+ohm fmt {{STEM}}.ohm --write   # canonical formatting
+```
+
+`ohm.toml` lets the commands above run with no file argument from anywhere in
+this project. You can always be explicit: `ohm build {{STEM}}.ohm -o out/`.
+
+## Layout
+
+```
+{{STEM}}.ohm       the top-level design (the module `ohm build` compiles)
+ohm.toml           project config (entry file, out dir, target)
+lib/               your reusable component blocks — use "./lib/parts.ohm"
+out/               build artifacts (git-ignored)
+docs/LANGUAGE.md   the Ohm language reference for this project
+AGENTS.md          contract for LLM agents authoring this design
+```
+
+## Authoring
+
+The language is small and declarative — start with
+[`docs/LANGUAGE.md`](docs/LANGUAGE.md). Working with an AI agent? Point it at
+[`AGENTS.md`](AGENTS.md) first, then let it iterate against `ohm check
+--json-diagnostics`.

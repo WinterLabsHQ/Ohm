@@ -1,0 +1,12 @@
+# Ohm project configuration — read by the `ohm` CLI.
+#
+# With this file present you can run bare `ohm build` / `ohm check` from
+# anywhere inside the project: Ohm walks up the directory tree to find this
+# file and builds the entry below. An explicit file argument always wins
+# (`ohm build other.ohm`), and an explicit `-o DIR` overrides `out`.
+
+[project]
+name = "{{PROJECT}}"
+entry = "{{STEM}}.ohm"     # the top-level module `ohm build` compiles
+out = "out"                # build artifacts land here (git-ignored)
+target = "kicad7"          # emit target `ohm build` honors (v1 supports: kicad7)

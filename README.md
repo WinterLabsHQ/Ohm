@@ -58,17 +58,43 @@ express — fill them (or hand them to your agent) and the full tier stack light
 up. `ohm import-symbol` does the same for any installed KiCad symbol library.
 You don't have to start from scratch to get Ohm's checking.
 
-## Install (from source)
+## Install
 
 Requires Python 3.12+.
 
+**Global (recommended)** — `ohm` on your PATH everywhere, no venv to activate.
+[pipx](https://pipx.pypa.io) installs it in its own isolated environment:
+
 ```sh
-git clone <this repo> && cd MaishaReloaded
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/ohm --version
+git clone <this repo> && cd Ohm
+pipx install .              # or, from anywhere: pipx install /path/to/Ohm
+ohm --version
+ohm doctor                  # verify Python, install, encoding, KiCad libs
+```
+
+**From source (for development)** — an editable install in a virtualenv:
+
+```sh
+# POSIX
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/ohm --version
+# Windows PowerShell
+py -3.12 -m venv .venv; .venv\Scripts\pip install -e ".[dev]"; .venv\Scripts\ohm --version
 ```
 
 ## Quick start
+
+Scaffold a project, then work inside it — commands find the entry via `ohm.toml`:
+
+```sh
+ohm init myboard            # scaffold a project (ohm.toml, starter design, docs, lib/)
+cd myboard
+ohm check                   # all checks, no emit (uses the entry from ohm.toml)
+ohm build                   # emit netlist + KiCad + zen + constraints -> out/
+ohm doctor                  # diagnose the environment (install, PATH, encoding)
+ohm refactor .              # restructure an existing folder (dry-run; --apply to commit)
+```
+
+Every command also takes an explicit file, no project required:
 
 ```sh
 ohm check examples/led_bar.ohm          # all checks, no emit (fast inner loop)
