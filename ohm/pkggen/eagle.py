@@ -19,7 +19,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from ohm.pkggen.packages import PackageModel
-from ohm.pkggen.symbol import BOX_HALF_W, symbol_layout
+from ohm.pkggen.symbol import box_half_w, symbol_layout
 
 _EAGLE_VERSION = "6.3"  # the schema revision that introduced XML libraries
 
@@ -90,6 +90,7 @@ def _package(model: PackageModel) -> list[str]:
 
 def _symbol(name: str, pins: list[tuple[str, str, str]]) -> list[str]:
     box_h, placed = symbol_layout(pins)
+    BOX_HALF_W = box_half_w(pins)
     body = [f'<symbol name="{_esc(name)}">']
     body += _rect(-BOX_HALF_W, -box_h, BOX_HALF_W, box_h, _L_SYMBOL, Decimal("0.254"))
     for number, pin_name, role, x, y, side in placed:

@@ -3,7 +3,7 @@ first half of the pins down the left side, second half up the right."""
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 _SYM_VERSION = 20220914  # KiCad 7 symbol format
 
@@ -44,8 +44,28 @@ def _escape(value: str) -> str:
 
 
 # box half-width; pins stand off by one grid step beyond it
-BOX_HALF_W = Decimal("7.62")
+BOX_HALF_W = Decimal("7.62")  # minimum; widened per part by box_half_w()
 PIN_LEN = _GRID
+# Pin names are drawn INSIDE the box, left names growing right and right names
+# growing left. At the 1.27mm text size KiCad renders roughly 0.85mm per glyph,
+# so a fixed-width box lets a long pair collide in the middle: MPU-6000 rendered
+# "AD0_MISO"/"SCL_SCLK" as "ADO_SCL_SCLK". Width now follows the longest pair.
+# Measured off a KiCad render at the 1.27mm text size: 8 glyphs span ~10.8mm,
+# i.e. ~1.35mm each including inter-character spacing.
+_CHAR_W = Decimal("1.4")
+_NAME_GAP = _GRID * 2  # clear space between the two columns of names
+
+
+def box_half_w(pins: list[tuple[str, str, str]]) -> Decimal:
+    """Half-width that fits the widest left name plus the widest right name."""
+    half = (len(pins) + 1) // 2
+    left, right = pins[:half], pins[half:]
+    widest = max((len(n) for _, n, _ in left), default=0) + \
+        max((len(n) for _, n, _ in right), default=0)
+    need = (Decimal(widest) * _CHAR_W + _NAME_GAP) / 2
+    if need <= BOX_HALF_W:
+        return BOX_HALF_W
+    return (need / _GRID).quantize(Decimal(1), rounding=ROUND_CEILING) * _GRID
 
 
 def symbol_layout(pins: list[tuple[str, str, str]]):
@@ -59,7 +79,7 @@ def symbol_layout(pins: list[tuple[str, str, str]]):
     left, right = pins[:half], pins[half:]
     rows = max(len(left), len(right), 1)
     box_h = (_GRID * (rows + 1)) / 2  # half-height, keeps pins on the 2.54 grid
-    stand_off = BOX_HALF_W + PIN_LEN
+    stand_off = box_half_w(pins) + PIN_LEN
 
     placed = []
     for column, x, side in ((left, -stand_off, "left"), (right, stand_off, "right")):
@@ -79,6 +99,7 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]],
     properties (see _BOM_PROPS); unknown keys are ignored.
     """
     box_h, placed = symbol_layout(pins)
+    half_w = box_half_w(pins)
     prop_y = box_h + _GRID
 
     pin_lines = [
@@ -106,7 +127,7 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]],
         *[f'    (property "{label}" "{_escape(value)}" (at 0 0 0)'
           " (effects (font (size 1.27 1.27)) hide))" for label, value in extra],
         f'    (symbol "{name}_0_1"',
-        f"      (rectangle (start -{BOX_HALF_W} {box_h}) (end {BOX_HALF_W} -{box_h})"
+        f"      (rectangle (start -{half_w} {box_h}) (end {half_w} -{box_h})"
         " (stroke (width 0.254) (type default)) (fill (type background)))",
         "    )",
         f'    (symbol "{name}_1_1"',

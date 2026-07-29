@@ -214,6 +214,7 @@ _SCH_COL_GAP = _D("10.16")
 _SCH_ROW_GAP = _D("12.7")
 _SCH_MARGIN = _D("25.4")
 _SCH_MAX_W = _D("1200")  # wrap the flow layout past this, mm
+_SCH_TALL_FACTOR = _D("3")  # symbols this much taller than median get their own row
 
 
 def _snap(v: Decimal) -> Decimal:
@@ -281,15 +282,36 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
 
     # ---- flow layout, grouped by module, on grid ----
     stand_off = BOX_HALF_W + PIN_LEN
+    _group_index: dict[str, int] = {}
+    for part in low.parts:  # groups keep first-appearance order
+        _group_index.setdefault(_group_of(part.ref), len(_group_index))
     placed: list[tuple[ir.PartLow, Decimal, Decimal]] = []
     group_titles: list[tuple[str, Decimal, Decimal]] = []
     cx, cy, row_h = _SCH_MARGIN, _SCH_MARGIN, _D(0)
     last_group = None
-    for part in low.parts:
+    # Within a group, tallest first. A row is as tall as its tallest symbol, so
+    # mixing a 100-pin MCU with 0402 capacitors leaves most of that row empty;
+    # grouping like heights together packs the sheet without moving anything
+    # between groups. Ties break on ref, so placement stays deterministic.
+    ordered = sorted(low.parts,
+                     key=lambda p: (_group_index[_group_of(p.ref)],
+                                    -layouts[p.component][0], p.ref))
+    # A 100-pin MCU symbol is ~15x taller than a 0402 capacitor, and a row is as
+    # tall as its tallest member, so any row mixing the two wastes that whole
+    # difference across its full width. Oversized symbols get a row to themselves.
+    heights = sorted(layouts[p.component][0] for p in low.parts)
+    median_h = heights[len(heights) // 2] if heights else _D(1)
+    tall_cut = median_h * _SCH_TALL_FACTOR
+
+    for part in ordered:
         box_h, _ = layouts[part.component]
         cell_w = _snap(stand_off * 2 + _SCH_LABEL_W * 2 + _SCH_COL_GAP)
         cell_h = _snap(box_h * 2 + _SCH_ROW_GAP)
         group = _group_of(part.ref)
+        solo = box_h > tall_cut
+        if solo and cx > _SCH_MARGIN and group == last_group:
+            cx, cy = _SCH_MARGIN, _snap(cy + row_h + _SCH_ROW_GAP)
+            row_h = _D(0)
         if group != last_group or cx + cell_w > _SCH_MAX_W:
             if last_group is not None:
                 cx, cy = _SCH_MARGIN, _snap(cy + row_h + _SCH_ROW_GAP)
@@ -299,8 +321,11 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 cy = _snap(cy + _SCH_ROW_GAP)
                 last_group = group
         placed.append((part, _snap(cx + cell_w / 2), _snap(cy + cell_h / 2)))
-        cx = _snap(cx + cell_w)
         row_h = max(row_h, cell_h)
+        if solo:  # close the row behind it so nothing shares the empty space
+            cx, cy, row_h = _SCH_MARGIN, _snap(cy + cell_h + _SCH_ROW_GAP), _D(0)
+        else:
+            cx = _snap(cx + cell_w)
 
     page_w = _snap(_SCH_MAX_W + _SCH_MARGIN * 2)
     page_h = _snap(cy + row_h + _SCH_MARGIN * 2)
