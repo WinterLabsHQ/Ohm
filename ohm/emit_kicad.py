@@ -215,6 +215,12 @@ _SCH_ROW_GAP = _D("12.7")
 _SCH_MARGIN = _D("25.4")
 _SCH_MAX_W = _D("1200")  # wrap the flow layout past this, mm
 _SCH_TALL_FACTOR = _D("3")  # symbols this much taller than median get their own row
+# A rail touching this many pins is drawn as a power symbol at every pin instead of
+# a repeated text label. That is how a human draws a supply: on this board GND.gnd
+# alone appears on 96 pins, and 96 identical labels read as noise where 96 ground
+# symbols read as a rail. Smaller nets keep labels — a power symbol on a two-pin
+# local net would be misleading.
+_PWR_MIN_PINS = 4
 
 
 def _snap(v: Decimal) -> Decimal:
@@ -246,6 +252,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     # pad *called* "C1" on the same part (real case: LSM303D pin C1 sits on pad
     # E1 while pad C1 carries INT2) and hang a label on an unconnected pin.
     net_at: dict[tuple[str, str], str] = {}
+    part_component = {p.ref: p.component for p in low.parts}
     # fallback pin table when no design is supplied: every pin the netlist touches
     seen_pins: dict[str, dict[str, str]] = {}
     for net in low.nets:
@@ -253,12 +260,35 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         for node in net.nodes:
             net_at[(node.part_ref, node.pad or node.pin)] = shown
 
-    part_component = {p.ref: p.component for p in low.parts}
     for net in low.nets:
         for node in net.nodes:
             cname = part_component.get(node.part_ref)
             if cname is not None:
                 seen_pins.setdefault(cname, {}).setdefault(node.pad or node.pin, node.pin)
+
+    # Rail nets worth a power symbol: ground, or a declared supply, and wide enough
+    # that repeating the name at every pin is noise rather than information.
+    ground_nets, power_nets = set(), set()
+    for net in low.nets:
+        if len(net.nodes) < _PWR_MIN_PINS:
+            continue
+        roles = set()
+        for node in net.nodes:
+            comp = comps.get(part_component.get(node.part_ref, ""))
+            if comp is None:
+                continue
+            pin = next((p for p in comp.pins if p.name == node.pin), None)
+            if pin is not None:
+                roles.add(pin.role)
+        if "ground" in roles:
+            ground_nets.add(net.name)
+        elif roles & {"power_in", "power_out"}:
+            power_nets.add(net.name)
+    # Grounds become symbols; supplies stay labels. The triangle is unambiguous
+    # and carries no text, so it survives the 2.54mm pin pitch. A supply symbol
+    # must show its name to distinguish 3V3 from 5V, and that text collides with
+    # the neighbouring pin rows — a label in the margin reads better.
+    rail_nets = ground_nets
 
     for part in low.parts:
         if part.component in pin_tables:
@@ -279,6 +309,32 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         inner[0] = inner[0].replace(f'(symbol "{part.component}"',
                                     f'(symbol "ohm:{part.component}"', 1)
         lib_defs.extend("  " + line for line in inner)
+
+    def _pwr_id(net: str) -> str:
+        return "PWR_" + re.sub(r"\W", "_", net)
+
+    for rail_name in sorted(rail_nets):
+        # KiCad takes a power symbol's NET from its pin NAME, so there is one
+        # definition per rail rather than one shared symbol.
+        graphic = ("(polyline (pts (xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) "
+                   "(xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)) "
+                   "(stroke (width 0) (type default)) (fill (type none)))")
+        sid = _pwr_id(rail_name)
+        lib_defs.extend([
+            f'    (symbol "ohm:{sid}" (power) (pin_names (offset 0))'
+            " (in_bom no) (on_board no)",
+            '      (property "Reference" "#PWR" (at 0 -6.35 0)'
+            " (effects (font (size 1.27 1.27)) hide))",
+            f'      (property "Value" "{_q(rail_name)}" (at 0 -3.81 0)'
+            " (effects (font (size 1.27 1.27))))",
+            f'      (symbol "{sid}_0_1" {graphic})',
+            f'      (symbol "{sid}_1_1"',
+            f'        (pin power_in line (at 0 0 270) (length 0) hide'
+            f' (name "{_q(rail_name)}" (effects (font (size 1.27 1.27))))'
+            ' (number "1" (effects (font (size 1.27 1.27)))))',
+            "      )",
+            "    )",
+        ])
 
     # ---- flow layout, grouped by module, on grid ----
     stand_off = BOX_HALF_W + PIN_LEN
@@ -379,6 +435,24 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             out.append(f'  (wire (pts (xy {ax} {ay}) (xy {bx} {ay}))'
                        " (stroke (width 0) (type default))"
                        f' (uuid "{_uid(source, "w", part.ref, number)}"))')
+            if net_name in rail_nets:
+                sid = _pwr_id(net_name)
+                # graphic hangs below the pin for ground, above for a supply;
+                # the pin sits AT the symbol origin, so it meets the wire end
+                # whatever the rotation
+                out.append(f'  (symbol (lib_id "ohm:{sid}") (at {bx} {ay} 0)'
+                           " (unit 1) (in_bom no) (on_board no) (dnp no)")
+                out.append(f'    (uuid "{_uid(source, "pwr", part.ref, number)}")')
+                out.append(f'    (property "Reference" "#PWR" (at {bx} {ay} 0)'
+                           " (effects (font (size 1.27 1.27)) hide))")
+                out.append(f'    (property "Value" "{_q(net_name)}" (at {bx} {ay} 0)'
+                           " (effects (font (size 1.27 1.27)) hide))")
+                out.append('    (pin "1" (uuid "'
+                           f'{_uid(source, "pwrpin", part.ref, number)}"))')
+                out.append(f'    (instances (project "ohm" (path "/{sheet_uuid}"'
+                           ' (reference "#PWR") (unit 1))))')
+                out.append("  )")
+                continue
             just = "right" if side == "left" else "left"
             rot = 180 if side == "left" else 0
             out.append(f'  (label "{_q(net_name)}" (at {bx} {ay} {rot})'
