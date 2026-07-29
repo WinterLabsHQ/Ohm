@@ -193,8 +193,17 @@ def test_std_crystal_with_cl_fires_and_clears():
             "module M:\n    y = MyXtal()\n    u = Mcu()\n"
             "    y.P1 ~ u.XI\n    y.P2 ~ u.XO\n")
     assert codes(base).count("B008") == 2
+    # ADR-014: B008 now checks the VALUE, not just presence. A cl=18pF crystal
+    # needs 2 x (18 - 3) = 30pF per terminal, NOT 18pF — this test previously
+    # asserted 18pF was clean, which is the exact misconception the check exists
+    # to catch (18pF caps give the oscillator ~12pF of load, not 18pF).
     withcaps = (base +
-                "    c1 = Capacitor(value=18pF)\n    c2 = Capacitor(value=18pF)\n"
+                "    c1 = Capacitor(value=30pF)\n    c2 = Capacitor(value=30pF)\n"
                 "    c1.P1 ~ y.P1\n    c1.P2 ~ u.GND\n"
                 "    c2.P1 ~ y.P2\n    c2.P2 ~ u.GND\n")
     assert "B008" not in codes(withcaps)
+    wrongcaps = (base +
+                 "    c1 = Capacitor(value=18pF)\n    c2 = Capacitor(value=18pF)\n"
+                 "    c1.P1 ~ y.P1\n    c1.P2 ~ u.GND\n"
+                 "    c2.P1 ~ y.P2\n    c2.P2 ~ u.GND\n")
+    assert codes(wrongcaps).count("B008") == 2

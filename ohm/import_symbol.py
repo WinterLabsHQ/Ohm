@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 
+from ohm.provenance import digest_pairs
 from ohm.signoff import Sexpr, _kid, _kids, parse_sexpr
 
 # KiCad electrical type → Ohm role (VALID_ROLES in resolve.py)
@@ -94,6 +95,8 @@ def import_symbol(lib_text: str, symbol: str, lib_name: str = "") -> str:
         pin_src = syms[base]
 
     comp = re.sub(r"\W", "_", symbol)
+    if not re.match(r"^[A-Za-z_]", comp):
+        comp = f"P{comp}"  # 2N7002 -> P2N7002: identifiers may not start with a digit
     src_label = f"{lib_name}:{symbol}" if lib_name else symbol
     out = [f"# imported from KiCad symbol {src_label} by `ohm import-symbol`",
            f"component {comp}:"]
@@ -109,14 +112,24 @@ def import_symbol(lib_text: str, symbol: str, lib_name: str = "") -> str:
         raise SymbolError(f"'{symbol}' has no pins (graphic-only symbol?)")
     seen_nums: dict[str, str] = {}
     taken: set[str] = set()
+    pin_lines: list[str] = []
     for number, name, ktype in sorted(pins, key=lambda p: (len(p[0]), p[0])):
         if number in seen_nums:
-            out.append(f"    # pad {number} repeated in symbol (kept first: {seen_nums[number]})")
+            pin_lines.append(f"    # pad {number} repeated in symbol "
+                             f"(kept first: {seen_nums[number]})")
             continue
         role = _ROLE.get(ktype, "free")
         ohm_name = _pin_ohm_name(name, number, taken)
         taken.add(ohm_name)
         seen_nums[number] = ohm_name
         note = "" if ktype in _ROLE else f"  # unmapped KiCad type '{ktype}'"
-        out.append(f"    pin {ohm_name}: role={role}, pad={number}{note}")
+        pin_lines.append(f"    pin {ohm_name}: role={role}, pad={number}{note}")
+
+    # Provenance (ADR-014): this map came from a real library, so say so and freeze
+    # it. `ohm check` recomputes the digest from the declared pins alone, so any
+    # later edit to a pad is an S008 error instead of a silent transposition.
+    if lib_name:
+        out.append(f'    pinout_source = "kicad:{src_label}"')
+        out.append(f'    pinout_digest = "{digest_pairs([(n, p) for p, n in seen_nums.items()])}"')
+    out.extend(pin_lines)
     return "\n".join(out) + "\n"

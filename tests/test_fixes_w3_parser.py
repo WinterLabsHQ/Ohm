@@ -57,10 +57,13 @@ def test_tab_in_string_still_parses():
 
 # ---------- finding 4: kicad emitters escape names ----------
 def test_kicad_emitters_escape_quotes():
+    # the net needs a node: the schematic emits net names as labels AT PINS, so a
+    # node-less net has nowhere to appear and could not exercise the escaping
     low = ir.IRLow(
         parts=(ir.PartLow(ref="m.r1", designator="R1", component='We"ird',
                           package=None, attrs=()),),
-        nets=(ir.NetLow(name='NET"1', nodes=(), ports=()),),
+        nets=(ir.NetLow(name='NET"1',
+                        nodes=(ir.NetNode("m.r1", "R1", "P1", "1"),), ports=()),),
     )
     sch = emit_kicad_sch(low, "t.ohm")
     pcb = emit_kicad_pcb(low, "t.ohm")
@@ -124,7 +127,9 @@ def test_version_falls_back_when_not_installed():
 
     importlib.metadata.version = raiser
     try:
-        assert importlib.reload(ohm).__version__ == "0.1.0"
+        # must track the hardcoded fallback in ohm/__init__.py, which the release
+        # commit bumps — 0.1.1 shipped with this assertion still on 0.1.0
+        assert importlib.reload(ohm).__version__ == "0.1.1"
     finally:
         importlib.metadata.version = real
         importlib.reload(ohm)

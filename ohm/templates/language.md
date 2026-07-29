@@ -57,6 +57,34 @@ by design (crystal pins, regulator FB/ADJ, 555 TRIG/THRES) are `role=passive`;
 `role=input` is for digital logic inputs. This avoids false undriven-input
 warnings.
 
+### Never type a pinout by hand
+
+Ohm proves a pin↔pad map is **total**, never that it is **correct**. Two swapped
+pins pass every checker tier and reach copper. So take the map from a real
+library instead of transcribing it:
+
+```
+ohm import-symbol /usr/share/kicad/symbols/Sensor_Motion.kicad_sym MPU-6000
+```
+
+That emits the component with real pins and stamps two attrs:
+
+```ohm
+pinout_source = "kicad:Sensor_Motion:MPU-6000"
+pinout_digest = "sha256:0f8fcd36216097d0"
+```
+
+`ohm check` recomputes the digest from your declared pins, so if a pad is ever
+edited afterwards you get **S008**, not a dead board. Roles, ratings and
+`must_connect` are yours to change freely — the digest covers pads only.
+
+When no library has the part, attest it by hand and say where it came from:
+`pinout_source = "datasheet:DS9405 rev 9 Table 8"`. A specific part (one with
+`mpn=`) carrying four or more pads and no source at all gets **S009**.
+
+To audit a whole design against the installed libraries:
+`ohm verify-pinouts <src.ohm>`.
+
 ## Generated packages
 
 `package = generate(<Type>, pins=<N>[, pitch=<mm>][, density=nominal])`
@@ -160,12 +188,17 @@ fully-waived board.
 
 ## Workflow
 
-`ohm check` shows all diagnostics at once, none hidden; `--json-diagnostics` for
-the machine format. Fix errors until clean, then `ohm build`. After routing,
+`ohm import-symbol` every part you can before writing a line of wiring, then
+`ohm check` — it shows all diagnostics at once, none hidden; `--json-diagnostics`
+for the machine format. Fix errors until clean, then `ohm build`.
+`ohm verify-pinouts <src.ohm>` audits every pad map against the installed KiCad
+libraries; run it before you commit to a fab. After routing,
 `ohm signoff <src.ohm> <routed.kicad_pcb>` re-verifies the board.
 
 ## Style rules
 
+0. Never hand-type a pin↔pad map. `ohm import-symbol` it, or record where it
+   came from with `pinout_source=`.
 1. Declare every rating and role the datasheet states.
 2. Use typed interfaces + `require pair(...)` for any swappable signal pair.
 3. Name pins exactly as the datasheet does.

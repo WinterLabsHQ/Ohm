@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
+from ohm.provenance import parse_source, pinmap_digest
 
 _NO_SPAN = Span(1, 1, 1, 1)
 
@@ -104,6 +105,65 @@ def _check_pad_loop(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
                         span, path))
 
 
+# A pin↔pad map is only worth attesting on a part specific enough to order: a
+# generic stdlib shape block (no mpn=) is a template, not a claim about silicon.
+# Gating on mpn= mirrors the M-tier's own activation rule, so S009 stays silent
+# on the standard library and speaks up on exactly the parts PinForge mints.
+_PROVENANCE_MIN_PINS = 4
+
+
+def _check_provenance(comp: ir.ComponentDef, path: str, diags: list[Diagnostic]) -> None:
+    """S007/S008/S009 — where this pin↔pad map came from, and whether it moved.
+
+    Hermetic (N1): recomputes the digest from the declared pins. Reading the
+    library the source names is `ohm verify-pinouts`, never the build path.
+    """
+    attrs = dict(comp.attrs)
+    source = attrs.get("pinout_source")
+    digest = attrs.get("pinout_digest")
+    mapped = [p for p in comp.pins if p.pad is not None]
+
+    if source is not None:
+        parsed = parse_source(source) if isinstance(source, str) else None
+        if parsed is None:
+            diags.append(_d("error", "S007",
+                            f"'{comp.name}' has an unreadable pinout_source; expected "
+                            f'"kicad:<Lib>:<Symbol>" or "datasheet:<reference>"',
+                            comp.span, path,
+                            'e.g. pinout_source = "kicad:Sensor_Motion:MPU-6000"'))
+            return
+        if digest is None:
+            diags.append(_d("info", "S009",
+                            f"'{comp.name}' names a pinout_source but records no "
+                            f"pinout_digest, so drift in the pad map cannot be detected",
+                            comp.span, path,
+                            f'add pinout_digest = "{pinmap_digest(comp.pins)}" '
+                            "(or re-run `ohm import-symbol`, which stamps it)"))
+            return
+        actual = pinmap_digest(comp.pins)
+        if digest != actual:
+            kind, ref = parsed
+            diags.append(_d("error", "S008",
+                            f"'{comp.name}' pin↔pad map no longer matches the one taken "
+                            f"from {kind} '{ref}': recorded {digest}, now {actual}",
+                            comp.span, path,
+                            "a pad was moved, added or removed after this pinout was "
+                            "verified — re-verify against the source, then update "
+                            "pinout_digest. Roles and ratings are not covered by the "
+                            "digest and are free to change."))
+        return
+
+    if len(mapped) >= _PROVENANCE_MIN_PINS and "mpn" in attrs:
+        diags.append(_d("info", "S009",
+                        f"'{comp.name}' declares an mpn and {len(mapped)} mapped pads but "
+                        f"no pinout_source — S003 proves this map is total, never correct",
+                        comp.span, path,
+                        "record where the pinout came from: "
+                        '`ohm import-symbol <lib>.kicad_sym <Symbol>` stamps it '
+                        'automatically, or write pinout_source = "datasheet:<ref>" '
+                        "to attest it by hand"))
+
+
 def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     for comp in design.components:
@@ -123,6 +183,7 @@ def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnost
             else:
                 seen[pin.pad] = pin
         _check_pad_loop(comp, comp.package, f"'{comp.name}'", comp.span, path, diags)
+        _check_provenance(comp, path, diags)
 
     # per-instance package overrides (R9): re-close the pin↔pad loop against the
     # effective package, anchored at the instantiation site

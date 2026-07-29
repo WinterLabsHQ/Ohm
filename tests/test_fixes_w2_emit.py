@@ -36,8 +36,10 @@ def test_generated_package_footprint():
     net = emit_netlist(result.low, path.name)
     assert '(footprint "ohm:TSSOP-8")' in net
     assert '(footprint "")' not in net
-    sch = emit_kicad_sch(result.low, path.name)
-    assert "(ohm:TSSOP-8)" in sch
+    sch = emit_kicad_sch(result.low, path.name, result.design)
+    # the schematic now carries real symbols, so the footprint id rides on the
+    # Footprint property rather than in a text note
+    assert '(property "Footprint" "ohm:TSSOP-8"' in sch
 
 
 # ---------- finding 3: backslash escaped before quotes ----------

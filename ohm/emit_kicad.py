@@ -1,7 +1,11 @@
 """KiCad emitters — valid .kicad_sch / .kicad_pcb, format pinned to KiCad 7.
 
-The schematic carries the design as global labels + text notes; the board now
-carries real footprints (Milestone F Part D):
+The schematic carries real symbol bodies, pins, wire stubs and net labels — a
+diagram a human can review and KiCad can extract the same net graph from
+(`tests/test_schematic_roundtrip.py` makes KiCad itself the oracle). Connectivity
+is expressed as a labelled stub per pin rather than routed point-to-point wires:
+identical electrically, readable at hundreds of pins, and stable across
+re-generation. The board carries real footprints (Milestone F Part D):
 
 * generated packages (``package = generate(...)``) embed the full P11 footprint
   geometry with pads bound to board nets;
@@ -190,40 +194,172 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
 
 
 # ---------- schematic ----------
-def emit_kicad_sch(low: ir.IRLow, source: str = "<string>") -> str:
+def _footprint_id(package: ir.Value | None) -> str:
+    if isinstance(package, str):
+        return package
+    if isinstance(package, ir.GenerateSpec):
+        from ohm.pkggen.packages import spec_name
+
+        return f"ohm:{spec_name(package)}"  # sibling generated .kicad_mod (P11)
+    return ""
+
+
+# Schematic layout constants. Everything is a multiple of 1.27mm so symbols, wire
+# stubs and labels all land on KiCad's default grid — off-grid pins are the
+# classic way a generated schematic *looks* wired and is not.
+_SCH_GRID = _D("1.27")
+_SCH_STUB = _D("2.54")  # wire stub from pin to its label
+_SCH_LABEL_W = _D("30.48")  # room reserved for a net label either side
+_SCH_COL_GAP = _D("10.16")
+_SCH_ROW_GAP = _D("12.7")
+_SCH_MARGIN = _D("25.4")
+_SCH_MAX_W = _D("1200")  # wrap the flow layout past this, mm
+
+
+def _snap(v: Decimal) -> Decimal:
+    return (v / _SCH_GRID).quantize(_D(1), rounding=ROUND_CEILING) * _SCH_GRID
+
+
+def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
+                   design: ir.Design | None = None) -> str:
+    """A real, reviewable schematic: symbol bodies, pins, wires and net labels.
+
+    Connectivity is expressed as a short wire stub at every pin carrying a net
+    LABEL, rather than routed point-to-point wires. That is a deliberate choice,
+    not a shortcut: for a board with hundreds of pins, orthogonal net routing in
+    2-D produces a diagram no one can read, while labels give exactly the same
+    electrical graph, survive re-generation, and are what a human draws for dense
+    MCU/FPGA sheets anyway. KiCad's net highlighting makes them navigable.
+    """
+    from ohm.pkggen.pindata_iface import DeclaredPinData
+    from ohm.pkggen.symbol import BOX_HALF_W, PIN_LEN, emit_symbol, symbol_layout
+
     renames = diffpair_renames(low)
+    comps = {c.name: c for c in design.components} if design is not None else {}
+    pin_tables: dict[str, list[tuple[str, str, str]]] = {}
+    layouts: dict[str, tuple[Decimal, list]] = {}
+    lib_defs: list[str] = []
+
+    # Net lookup keyed by the SYMBOL PIN NUMBER, which is the pad wherever one is
+    # mapped. Keying by pin name as well would let a pin *named* "C1" shadow the
+    # pad *called* "C1" on the same part (real case: LSM303D pin C1 sits on pad
+    # E1 while pad C1 carries INT2) and hang a label on an unconnected pin.
+    net_at: dict[tuple[str, str], str] = {}
+    # fallback pin table when no design is supplied: every pin the netlist touches
+    seen_pins: dict[str, dict[str, str]] = {}
+    for net in low.nets:
+        shown = renames.get(net.name, net.name)
+        for node in net.nodes:
+            net_at[(node.part_ref, node.pad or node.pin)] = shown
+
+    part_component = {p.ref: p.component for p in low.parts}
+    for net in low.nets:
+        for node in net.nodes:
+            cname = part_component.get(node.part_ref)
+            if cname is not None:
+                seen_pins.setdefault(cname, {}).setdefault(node.pad or node.pin, node.pin)
+
+    for part in low.parts:
+        if part.component in pin_tables:
+            continue
+        comp = comps.get(part.component)
+        if comp is not None:
+            pins = DeclaredPinData().pin_table(comp)
+        else:  # degraded: reconstruct from the netlist, roles unknown
+            pins = [(pad, name, "passive") for pad, name
+                    in sorted(seen_pins.get(part.component, {}).items(),
+                              key=lambda kv: (len(kv[0]), kv[0]))]
+        if not pins:  # no declared pin table: a single anchor pin keeps it placeable
+            pins = [("1", part.component, "passive")]
+        pin_tables[part.component] = pins
+        layouts[part.component] = symbol_layout(pins)
+        body = emit_symbol(part.component, pins, footprint=_footprint_id(part.package))
+        inner = body.split("\n")[3:-2]  # strip the kicad_symbol_lib wrapper
+        inner[0] = inner[0].replace(f'(symbol "{part.component}"',
+                                    f'(symbol "ohm:{part.component}"', 1)
+        lib_defs.extend("  " + line for line in inner)
+
+    # ---- flow layout, grouped by module, on grid ----
+    stand_off = BOX_HALF_W + PIN_LEN
+    placed: list[tuple[ir.PartLow, Decimal, Decimal]] = []
+    group_titles: list[tuple[str, Decimal, Decimal]] = []
+    cx, cy, row_h = _SCH_MARGIN, _SCH_MARGIN, _D(0)
+    last_group = None
+    for part in low.parts:
+        box_h, _ = layouts[part.component]
+        cell_w = _snap(stand_off * 2 + _SCH_LABEL_W * 2 + _SCH_COL_GAP)
+        cell_h = _snap(box_h * 2 + _SCH_ROW_GAP)
+        group = _group_of(part.ref)
+        if group != last_group or cx + cell_w > _SCH_MAX_W:
+            if last_group is not None:
+                cx, cy = _SCH_MARGIN, _snap(cy + row_h + _SCH_ROW_GAP)
+                row_h = _D(0)
+            if group != last_group:
+                group_titles.append((group, _SCH_MARGIN, cy))
+                cy = _snap(cy + _SCH_ROW_GAP)
+                last_group = group
+        placed.append((part, _snap(cx + cell_w / 2), _snap(cy + cell_h / 2)))
+        cx = _snap(cx + cell_w)
+        row_h = max(row_h, cell_h)
+
+    page_w = _snap(_SCH_MAX_W + _SCH_MARGIN * 2)
+    page_h = _snap(cy + row_h + _SCH_MARGIN * 2)
+
     out = [
         "(kicad_sch",
         f"  (version {_SCH_VERSION})",
         '  (generator "ohm")',
         f'  (uuid "{_uid(source, "sch")}")',
-        '  (paper "A4")',
-        "  (lib_symbols)",
+        f'  (paper "User" {page_w} {page_h})',
+        "  (lib_symbols",
+        *lib_defs,
+        "  )",
     ]
-    y = 20
-    for p in low.parts:
-        if isinstance(p.package, str):
-            fp = p.package
-        elif isinstance(p.package, ir.GenerateSpec):
-            from ohm.pkggen.packages import spec_name
 
-            fp = f"ohm:{spec_name(p.package)}"  # sibling generated .kicad_mod (P11)
-        else:
-            fp = ""
-        out.append(
-            f'  (text "{_q(p.designator)}: {_q(p.component)} ({_q(fp)}) [{_q(p.ref)}]"'
-            f' (at 20 {y} 0) (effects (font (size 2 2)))'
-            f' (uuid "{_uid(source, "part", p.ref)}"))'
-        )
-        y += 10
-    for net in low.nets:
-        name = renames.get(net.name, net.name)
-        out.append(
-            f'  (global_label "{_q(name)}" (shape passive) (at 150 {y} 0)'
-            f' (effects (font (size 1.27 1.27)))'
-            f' (uuid "{_uid(source, "net", net.name)}"))'
-        )
-        y += 10
+    for title, tx, ty in group_titles:
+        out.append(f'  (text "{_q(title)}" (at {tx} {ty} 0)'
+                   ' (effects (font (size 3 3) bold) (justify left bottom))'
+                   f' (uuid "{_uid(source, "grp", title)}"))')
+
+    sheet_uuid = _uid(source, "sch")
+    for part, px, py in placed:
+        _, pin_geom = layouts[part.component]
+        ref_y, val_y = _snap(py - layouts[part.component][0] - _SCH_GRID * 2), \
+            _snap(py + layouts[part.component][0] + _SCH_GRID * 2)
+        out.append(f'  (symbol (lib_id "ohm:{_q(part.component)}") (at {px} {py} 0)'
+                   " (unit 1) (in_bom yes) (on_board yes) (dnp no)")
+        out.append(f'    (uuid "{_uid(source, "sym", part.ref)}")')
+        out.append(f'    (property "Reference" "{_q(part.designator)}" (at {px} {ref_y} 0)'
+                   " (effects (font (size 1.27 1.27))))")
+        out.append(f'    (property "Value" "{_q(part.component)}" (at {px} {val_y} 0)'
+                   " (effects (font (size 1.27 1.27))))")
+        out.append(f'    (property "Footprint" "{_q(_footprint_id(part.package))}"'
+                   " (at 0 0 0) (effects (font (size 1.27 1.27)) hide))")
+        out.append(f'    (property "Ohm" "{_q(part.ref)}" (at 0 0 0)'
+                   " (effects (font (size 1.27 1.27)) hide))")
+        for number, *_rest in pin_geom:
+            out.append(f'    (pin "{_q(number)}" (uuid "'
+                       f'{_uid(source, "pin", part.ref, number)}"))')
+        out.append(f'    (instances (project "ohm" (path "/{sheet_uuid}"'
+                   f' (reference "{_q(part.designator)}") (unit 1))))')
+        out.append("  )")
+
+        # wire stub + net label at every connected pin
+        for number, _name, _role, lx, ly, side in pin_geom:
+            net_name = net_at.get((part.ref, number))
+            if net_name is None:
+                continue
+            ax, ay = _snap(px + lx), _snap(py - ly)  # symbol coords are Y-up
+            bx = ax - _SCH_STUB if side == "left" else ax + _SCH_STUB
+            out.append(f'  (wire (pts (xy {ax} {ay}) (xy {bx} {ay}))'
+                       " (stroke (width 0) (type default))"
+                       f' (uuid "{_uid(source, "w", part.ref, number)}"))')
+            just = "right" if side == "left" else "left"
+            rot = 180 if side == "left" else 0
+            out.append(f'  (label "{_q(net_name)}" (at {bx} {ay} {rot})'
+                       f" (effects (font (size 1.27 1.27)) (justify {just} bottom))"
+                       f' (uuid "{_uid(source, "lbl", part.ref, number)}"))')
+
     out.append('  (sheet_instances (path "/" (page "1")))')
     out.append(")")
     return "\n".join(out) + "\n"

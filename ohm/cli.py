@@ -436,6 +436,12 @@ def main(argv: list[str] | None = None) -> int:
     p_imp.add_argument("symbol", nargs="?", help="symbol name (omit to list the library)")
     p_imp.add_argument("-o", "--out", help="write/append to a file instead of stdout")
 
+    p_ver = sub.add_parser("verify-pinouts",
+                           help="diff every pin↔pad map against real KiCad symbol libraries")
+    p_ver.add_argument("file", help="the Ohm source")
+    p_ver.add_argument("--lib-dir", default="/usr/share/kicad/symbols",
+                       help="directory of .kicad_sym libraries (default: %(default)s)")
+
     p_sign = sub.add_parser("signoff",
                             help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
     p_sign.add_argument("file", help="the Ohm source")
@@ -613,6 +619,41 @@ def main(argv: list[str] | None = None) -> int:
             print(text, end="")
         return 0
 
+    if args.command == "verify-pinouts":
+        from ohm.loader import load
+        from ohm.provenance import verify_against_libs
+        from ohm.resolve import resolve
+
+        program, load_diags = load(source, args.file)
+        design, res_diags = resolve(program, args.file)
+        if any(d.severity == "error" for d in load_diags + res_diags):
+            for d in load_diags + res_diags:
+                if d.severity == "error":
+                    print(d.machine(), file=sys.stderr)
+            return 1
+        rows = verify_against_libs(design, args.lib_dir)
+        bad = unver = 0
+        for name, status, detail, mismatches in rows:
+            if status == "ok":
+                print(f"ok           {name}  ({detail})")
+            elif status == "unverifiable":
+                unver += 1
+                print(f"UNVERIFIABLE {name}  — {detail}")
+            else:
+                bad += 1
+                print(f"MISMATCH     {name}  vs {detail}  "
+                      f"({len(mismatches)} finding{'s' if len(mismatches) != 1 else ''})")
+                for line in mismatches[:12]:
+                    print(f"                 {line}")
+                if len(mismatches) > 12:
+                    print(f"                 … {len(mismatches) - 12} more")
+        print(f"\n{len(rows)} attested components: {len(rows) - bad - unver} verified, "
+              f"{bad} MISMATCHED, {unver} unverifiable")
+        if unver:
+            print("unverifiable is not the same as correct — attest those by hand "
+                  'with pinout_source = "datasheet:<ref>"')
+        return 1 if bad else 0
+
     # ---- .zen ecosystem paths (ADR-012 X0) ----
     if args.command == "convert" or (args.command == "check" and args.file.endswith(".zen")):
         from ohm.imp_zen import flat_lints, import_zen
@@ -695,7 +736,8 @@ def main(argv: list[str] | None = None) -> int:
                 from ohm.emit_kicad_pro import emit_kicad_pro
 
                 (outdir / f"{stem}.kicad_sch").write_text(
-                    emit_kicad_sch(low, args.file), encoding="utf-8", newline="\n")
+                    emit_kicad_sch(low, args.file, result.design),
+                    encoding="utf-8", newline="\n")
                 (outdir / f"{stem}.kicad_pcb").write_text(
                     emit_kicad_pcb(low, args.file), encoding="utf-8", newline="\n")
                 (outdir / f"{stem}.kicad_pro").write_text(

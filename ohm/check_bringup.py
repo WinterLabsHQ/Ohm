@@ -41,6 +41,26 @@ _PATTERN_CODE = {"pullup": "B001", "tie": "B002", "decoupling": "B005",
 _PATTERN_SEV = {"pullup": "warning", "tie": "error", "decoupling": "warning",
                 "cap": "warning", "termination": "warning", "loadcaps": "warning"}
 
+# Board/pin parasitic assumed when a crystal declares `cl` but not `c_stray`.
+# 3pF is the conventional figure for a 2-layer SMD land plus MCU pin.
+_C_STRAY_DEFAULT = Decimal("3e-12")
+# Load caps are E-series parts and CL itself carries spread, so the check has to
+# be loose enough to accept a sane BOM. +/-30% still separates 10pF from 30pF.
+_LOADCAP_TOL_LO = Decimal("0.7")
+_LOADCAP_TOL_HI = Decimal("1.3")
+
+
+def _pf1(d: Decimal) -> str:
+    if d == d.to_integral_value():
+        return f"{d.quantize(Decimal(1)):f}"
+    return f"{d.quantize(Decimal('0.1')):f}"
+
+
+def _pf(iv: Interval) -> str:
+    """Render a capacitance interval in pF — farads print as 1E-11 otherwise."""
+    lo, hi = iv.lo * Decimal(10) ** 12, iv.hi * Decimal(10) ** 12
+    return f"{_pf1(lo)}pF" if lo == hi else f"{_pf1(lo)}..{_pf1(hi)}pF"
+
 
 def _iv(q: ir.Quantity | None) -> Interval | None:
     qty = quantity_qty(q) if q is not None else None
@@ -182,6 +202,19 @@ class _Ctx:
                    and (not args or _in_range(value, args, "capacitance"))
                    for _, value, other in self._two_pin_dim_parts(net, "capacitance"))
 
+    def cap_sum_to_ground(self, net: ir.NetLow) -> Interval | None:
+        """Total capacitance from `net` to ground. Caps in parallel add, so a
+        presence test ("is there *a* cap?") cannot answer what the oscillator
+        actually sees — this can."""
+        total: Interval | None = None
+        for _, value, other in self._two_pin_dim_parts(net, "capacitance"):
+            if other is None or not self.is_ground(other):
+                continue
+            iv = _iv(value) if isinstance(value, ir.Quantity) else None
+            if iv is not None:
+                total = iv if total is None else total + iv
+        return total
+
     def resistor_between(self, net_a: ir.NetLow, net_b: ir.NetLow, args=()) -> bool:
         return any(other is not None and other.name == net_b.name
                    and (not args or _in_range(value, args, "resistance"))
@@ -255,6 +288,47 @@ def check_bringup(design: ir.Design, path: str = "<string>",
                 emit(code, sev, f"{owner}: net '{net.name}' ('{member}') needs {what}",
                      span, waivers, exp.pattern)
 
+    def loadcaps_value(part_ref: str, attrs: dict[str, ir.Value],
+                       nets: dict[str, ir.NetLow], owner: str,
+                       span: Span | None, waivers: tuple[str, ...]) -> None:
+        """B008 second half: are the load caps the RIGHT SIZE for this crystal?
+
+        `expects loadcaps(1pF, 100pF)` only asks whether *a* capacitor is present
+        in a 100x window — every value in it passes, so a 10pF cap on an 18pF
+        crystal reads as green. The relation it should be testing is not a matter
+        of taste, it is the oscillator's:
+
+            C_each = 2 x (CL - C_stray)
+
+        with C_stray the board/pin parasitic (~3pF typical, overridable per part
+        via a `c_stray` attr). Caps in parallel add, so this compares the SUM on
+        each terminal, not the first one it finds.
+        """
+        cl_q, stray_q = attrs.get("cl"), attrs.get("c_stray")
+        cl = _iv(cl_q) if isinstance(cl_q, ir.Quantity) else None
+        if cl is None:
+            return
+        stray = _iv(stray_q) if isinstance(stray_q, ir.Quantity) \
+            else Interval(_C_STRAY_DEFAULT, _C_STRAY_DEFAULT)
+        if stray is None:
+            return
+        target = Interval(Decimal(2), Decimal(2)) * (cl - stray)
+        if target.hi <= 0:
+            return  # CL at or below stray: no discrete caps are correct, stay quiet
+        lo, hi = target.lo * _LOADCAP_TOL_LO, target.hi * _LOADCAP_TOL_HI
+        for member, net in nets.items():
+            if member not in ("a", "b"):
+                continue
+            total = ctx.cap_sum_to_ground(net)
+            if total is None or (total.hi >= lo and total.lo <= hi):
+                continue
+            emit("B008", "warning",
+                 f"{owner}: net '{net.name}' ('{member}') has {_pf(total)} of load "
+                 f"capacitance to ground, but cl={_pf(cl)} with c_stray={_pf(stray)} "
+                 f"needs about {_pf(target)} (2 x (cl - c_stray)) — the oscillator "
+                 f"will run off-frequency or fail to start",
+                 span, waivers, "loadcaps")
+
     def when_ok(exp: ir.ExpectationDef, attrs: dict[str, ir.Value]) -> bool:
         return exp.when is None or bool(attrs.get(exp.when))
 
@@ -276,6 +350,9 @@ def check_bringup(design: ir.Design, path: str = "<string>",
                 if member_nets:
                     run_pattern(exp, member_nets, f"'{part.ref}' ({kd.name})",
                                 comp.span, waivers)
+                    if exp.pattern == "loadcaps":
+                        loadcaps_value(part.ref, attrs, member_nets,
+                                       f"'{part.ref}' ({kd.name})", comp.span, waivers)
                 # a tie member on NO net at all is floating by definition — but only
                 # flag in wired modules (bare part-catalog instantiations stay quiet)
                 if exp.pattern == "tie" and ctx.wired.get(part.ref):
