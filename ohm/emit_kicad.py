@@ -284,11 +284,12 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             ground_nets.add(net.name)
         elif roles & {"power_in", "power_out"}:
             power_nets.add(net.name)
-    # Grounds become symbols; supplies stay labels. The triangle is unambiguous
-    # and carries no text, so it survives the 2.54mm pin pitch. A supply symbol
-    # must show its name to distinguish 3V3 from 5V, and that text collides with
-    # the neighbouring pin rows — a label in the margin reads better.
-    rail_nets = ground_nets
+    # Both grounds and supplies become power ports: ERC can then flag an undriven
+    # or single-pin rail, and a mistyped label stops being a silent open circuit.
+    # A supply must show its name to tell 3V3 from 5V; that name goes HORIZONTALLY
+    # outward at the pin's own y, never below the bar, because at 2.54mm pitch a
+    # name under the graphic overprints the next pin's row.
+    rail_nets = ground_nets | power_nets
 
     for part in low.parts:
         if part.component in pin_tables:
@@ -316,8 +317,14 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     for rail_name in sorted(rail_nets):
         # KiCad takes a power symbol's NET from its pin NAME, so there is one
         # definition per rail rather than one shared symbol.
+        is_gnd = rail_name in ground_nets
         graphic = ("(polyline (pts (xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) "
                    "(xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)) "
+                   "(stroke (width 0) (type default)) (fill (type none)))"
+                   if is_gnd else
+                   "(polyline (pts (xy 0 0) (xy 0 1.27)) "
+                   "(stroke (width 0) (type default)) (fill (type none)))"
+                   " (polyline (pts (xy -1.27 1.27) (xy 1.27 1.27)) "
                    "(stroke (width 0) (type default)) (fill (type none)))")
         sid = _pwr_id(rail_name)
         lib_defs.extend([
@@ -329,7 +336,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             " (effects (font (size 1.27 1.27))))",
             f'      (symbol "{sid}_0_1" {graphic})',
             f'      (symbol "{sid}_1_1"',
-            f'        (pin power_in line (at 0 0 270) (length 0) hide'
+            f'        (pin power_in line (at 0 0 {"270" if is_gnd else "90"}) (length 0) hide'
             f' (name "{_q(rail_name)}" (effects (font (size 1.27 1.27))))'
             ' (number "1" (effects (font (size 1.27 1.27)))))',
             "      )",
@@ -426,9 +433,22 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         out.append("  )")
 
         # wire stub + net label at every connected pin
+        comp_def = comps.get(part.component)
+        pin_by_pad = {p.pad: p for p in comp_def.pins} if comp_def else {}
         for number, _name, _role, lx, ly, side in pin_geom:
             net_name = net_at.get((part.ref, number))
             if net_name is None:
+                # An unconnected pin that the SOURCE says is deliberately open
+                # (role=nc, or must_connect=false under ADR-015) becomes a KiCad
+                # no-connect marker. Without this ERC flags every unused pin and
+                # the findings that matter are invisible; with it, anything left
+                # unflagged is a pin nobody has accounted for.
+                pin_def = pin_by_pad.get(number)
+                if pin_def is not None and (pin_def.role == "nc"
+                                            or pin_def.must_connect is False):
+                    nx, ny = _snap(px + lx), _snap(py - ly)
+                    out.append(f"  (no_connect (at {nx} {ny})"
+                               f' (uuid "{_uid(source, "nc", part.ref, number)}"))')
                 continue
             ax, ay = _snap(px + lx), _snap(py - ly)  # symbol coords are Y-up
             bx = ax - _SCH_STUB if side == "left" else ax + _SCH_STUB
@@ -445,8 +465,15 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 out.append(f'    (uuid "{_uid(source, "pwr", part.ref, number)}")')
                 out.append(f'    (property "Reference" "#PWR" (at {bx} {ay} 0)'
                            " (effects (font (size 1.27 1.27)) hide))")
-                out.append(f'    (property "Value" "{_q(net_name)}" (at {bx} {ay} 0)'
-                           " (effects (font (size 1.27 1.27)) hide))")
+                if net_name in ground_nets:  # the triangle needs no caption
+                    out.append(f'    (property "Value" "{_q(net_name)}" (at {bx} {ay} 0)'
+                               " (effects (font (size 1.27 1.27)) hide))")
+                else:
+                    tx = bx - _D("1.27") if side == "left" else bx + _D("1.27")
+                    tj = "right" if side == "left" else "left"
+                    out.append(f'    (property "Value" "{_q(net_name)}" (at {tx} {ay} 0)'
+                               " (effects (font (size 1.27 1.27))"
+                               f" (justify {tj})))")
                 out.append('    (pin "1" (uuid "'
                            f'{_uid(source, "pwrpin", part.ref, number)}"))')
                 out.append(f'    (instances (project "ohm" (path "/{sheet_uuid}"'
