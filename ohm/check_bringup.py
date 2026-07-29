@@ -17,6 +17,7 @@ instantiation) suppress a finding into an info note — visible, never silent.
   B008  `expects loadcaps` unsatisfied
   B009  Polarized part reverse-biased vs declared operating points
   B010  finding waived at instantiation (info note)
+  B011  unconnected pins with no declared connection intent (info)
 
 Pure, deterministic, O(nets×parts): no simulation, no layout data (N1).
 """
@@ -35,6 +36,10 @@ _NO_SPAN = Span(1, 1, 1, 1)
 _PUSHPULL = {"output", "power_out"}
 _OPENDRAIN = {"open_collector", "open_drain"}
 _RAILISH = {"power_in", "power_out"}
+# Roles where leaving a pin unconnected is a real choice worth recording. `nc` is
+# already an explicit statement, and output/bidirectional pins routinely and
+# legitimately go unused on an MCU, so B011 would be pure noise on those.
+_STRAPPABLE = {"passive", "input", "power_in", "ground", "open_drain", "open_collector"}
 
 _PATTERN_CODE = {"pullup": "B001", "tie": "B002", "decoupling": "B005",
                  "cap": "B006", "termination": "B007", "loadcaps": "B008"}
@@ -382,20 +387,53 @@ def check_bringup(design: ir.Design, path: str = "<string>",
                      f"'{part.ref}' is polarized but reverse-biased: positive terminal at "
                      f"{va.hi}V, negative at {vb.lo}V", comp.span, waivers)
 
-        # ---- B003 unconnected pins ----
+        # ---- B003 unconnected pins / pins on the wrong class of net ----
+        undeclared: list[str] = []
         for pin in comp.pins:
-            if pin.role == "nc" or (part.ref, pin.name) in ctx.net_of:
+            net = ctx.net_of.get((part.ref, pin.name))
+            if pin.role == "nc":
+                continue
+            if net is not None:
+                # A target says WHICH net class, not merely "some net". This is the
+                # only way to express what a datasheet means by "RES — connect to
+                # GND": wiring such a pin to a signal is as wrong as floating it.
+                if isinstance(pin.must_connect, str):
+                    ok = ctx.is_ground(net) if pin.must_connect == "ground" \
+                        else ctx.is_rail(net)
+                    if not ok:
+                        emit("B003", "error",
+                             f"pin '{pin.name}' of '{part.ref}' must connect to "
+                             f"{pin.must_connect} but is on net '{net.name}', which is "
+                             f"not a {pin.must_connect}", pin.span, waivers)
                 continue
             if pin.must_connect:
+                target = pin.must_connect if isinstance(pin.must_connect, str) else None
                 emit("B003", "error",
-                     f"pin '{pin.name}' of '{part.ref}' is declared must_connect but is "
-                     "on no net", pin.span, waivers)
+                     f"pin '{pin.name}' of '{part.ref}' must connect"
+                     + (f" to {target}" if target else "") + " but is on no net",
+                     pin.span, waivers)
             elif pin.role == "power_in" and ctx.wired.get(part.ref):
                 # ponytail: only in modules that wire anything — bare part-catalog
                 # instantiations (tests, examples-in-progress) stay quiet
                 emit("B003", "warning",
                      f"power pin '{pin.name}' of '{part.ref}' is on no net",
                      pin.span, waivers)
+            if pin.must_connect is None and pin.role in _STRAPPABLE:
+                undeclared.append(pin.name)
+
+        # ---- B011 undeclared connection intent ----
+        # A floating pin and a pin nobody thought about look identical to every
+        # other check. On a specific, orderable part (mpn=) that is worth one info
+        # per component: writing `must_connect=false` turns the omission into a
+        # decision, and `must_connect=ground` catches the reserved pins whose
+        # datasheets say "connect to GND" — 12 of which floated on the board that
+        # motivated this.
+        if undeclared and "mpn" in attrs and ctx.wired.get(part.ref):
+            shown = ", ".join(undeclared[:8])
+            more = f" and {len(undeclared) - 8} more" if len(undeclared) > 8 else ""
+            emit("B011", "info",
+                 f"'{part.ref}' ({comp.name}) leaves {len(undeclared)} unconnected pin(s) "
+                 f"with no declared intent: {shown}{more}", comp.span, waivers)
 
     # ---- interface expectations (per port: gather ALL member nets first, so
     # multi-member patterns like termination see the whole pair) ----

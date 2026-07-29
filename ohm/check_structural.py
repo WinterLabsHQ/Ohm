@@ -164,6 +164,45 @@ def _check_provenance(comp: ir.ComponentDef, path: str, diags: list[Diagnostic])
                         "to attest it by hand"))
 
 
+def _check_package_family(comp: ir.ComponentDef, path: str,
+                          diags: list[Diagnostic]) -> None:
+    """S010 — a grid family standing in for a perimeter-numbered part.
+
+    Ohm's LGA/BGA are GRID arrays: JEDEC alphanumeric pads, and `border=` keeps the
+    outer rings. Datasheets also say "LGA" for leadless PERIMETER packages whose
+    pads are numbered 1..N counterclockwise — those are QFN/DFN-shaped here.
+
+    Reaching for LGA on such a part produced, on the board that motivated this, a
+    5/3/3/5 ring for a device that is 4 pads per side, with the pin->pad map
+    zigzagging between opposite edges. Nothing caught it: the map was total, so
+    S003 passed. Detect the tell — a border ring whose sides are unequal, on a
+    component whose pins are otherwise sequentially named.
+    """
+    pkg = comp.package
+    if not isinstance(pkg, ir.GenerateSpec) or pkg.package_type not in ("LGA", "BGA"):
+        return
+    kw = dict(pkg.kwargs)
+    if not kw.get("border"):
+        return
+    try:
+        rows, cols = int(str(kw.get("rows", 0))), int(str(kw.get("cols", 0)))
+    except ValueError:
+        return
+    if rows < 2 or cols < 2 or rows == cols and rows % 2 == 0:
+        return
+    per_side = {rows, cols, rows - 2, cols - 2}
+    if len(per_side) <= 1:
+        return
+    diags.append(_d("info", "S010",
+                    f"'{comp.name}' uses generate({pkg.package_type}, border=...) with "
+                    f"rows={rows}, cols={cols}, giving a perimeter ring of unequal sides "
+                    f"({cols}/{rows - 2}/{rows - 2}/{cols}) and JEDEC grid pad names",
+                    comp.span, path,
+                    "if the datasheet numbers this part's pads 1..N around the outline "
+                    "rather than as a letter/number grid, it is a QFN/DFN here: "
+                    f"generate(QFN, pins={2 * rows + 2 * cols - 4}, pitch=..., body=...)"))
+
+
 def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     for comp in design.components:
@@ -184,6 +223,7 @@ def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnost
                 seen[pin.pad] = pin
         _check_pad_loop(comp, comp.package, f"'{comp.name}'", comp.span, path, diags)
         _check_provenance(comp, path, diags)
+        _check_package_family(comp, path, diags)
 
     # per-instance package overrides (R9): re-close the pin↔pad loop against the
     # effective package, anchored at the instantiation site

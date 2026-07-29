@@ -246,3 +246,112 @@ def test_b008_respects_a_declared_c_stray():
     """cl=18pF with c_stray=8pF needs 2x(18-8)=20pF, so 20pF caps are correct."""
     src = _xtal("20pF").replace("    cl = 18pF", "    cl = 18pF\n    c_stray = 8pF")
     assert not [x for x in compile_source(src, "t.ohm").diagnostics if x.code == "B008"]
+
+
+# ---------- ADR-015: connection intent (must_connect targets, B011) ----------
+
+_SENS = """use std.kinds
+
+interface G:
+    g: Signal, role=ground
+
+component Rail:
+    package = generate(SOIC, pins=4, pitch=1.27mm)
+    pin V:  role=power_out, pad=1, voltage=3.3V
+    pin G1: role=ground,    pad=2
+    pin G2: role=ground,    pad=3
+    pin G3: role=ground,    pad=4
+
+component Sens:
+    package = generate(SOIC, pins=8, pitch=1.27mm)
+    mpn = "S-1"
+    pinout_source = "datasheet:x"
+    pin VDD:  role=power_in, pad=1{vdd}
+    pin GND:  role=ground,   pad=2, must_connect=ground
+    pin RES1: role=passive,  pad=3, must_connect=ground
+    pin RES2: role=passive,  pad=4{res2}
+    pin SIG:  role=passive,  pad=5
+    pin SPARE: role=passive, pad=6{spare}
+    pin NC1:  role=nc,       pad=7
+    pin NC2:  role=nc,       pad=8
+
+module M:
+    gnd = io(G)
+    u = Sens()
+    r = Rail()
+    r.G1   ~ gnd.g
+    u.VDD  ~ r.V
+    u.GND  ~ gnd.g
+    u.RES1 ~ gnd.g
+    u.SIG  ~ gnd.g
+{extra}"""
+
+
+def _sens(vdd="", res2="", spare="", extra="    u.RES2 ~ gnd.g\n"):
+    return _SENS.format(vdd=vdd, res2=res2, spare=spare, extra=extra)
+
+
+def test_must_connect_false_no_longer_means_true():
+    """It was tested for PRESENCE, so writing the thing that means 'I checked,
+    this floats' produced a B003 error."""
+    assert "B003" not in codes(_sens(spare=", must_connect=false"))
+
+
+def test_must_connect_ground_rejects_a_signal_net():
+    """A datasheet 'RES — connect to GND' pin on a signal net is as wrong as
+    floating it, and no other check can see the difference."""
+    src = _sens(res2=", must_connect=ground", extra="    u.RES2 ~ u.SPARE\n")
+    d = next(x for x in compile_source(src, "t.ohm").diagnostics if x.code == "B003")
+    assert d.severity == "error" and "not a ground" in d.message
+
+
+def test_must_connect_ground_accepts_a_ground_net():
+    assert "B003" not in codes(_sens(res2=", must_connect=ground"))
+
+
+def test_must_connect_rail_names_the_target_when_unconnected():
+    src = _sens(vdd=", must_connect=rail").replace("    u.VDD  ~ r.V\n", "")
+    d = next(x for x in compile_source(src, "t.ohm").diagnostics
+             if x.code == "B003" and "VDD" in x.message)
+    assert "must connect to rail" in d.message
+
+
+def test_r025_rejects_an_unknown_target():
+    assert "R025" in codes(_sens(spare=", must_connect=maybe"))
+
+
+def test_b011_reports_undeclared_intent_only():
+    """SPARE is neither wired nor declared; nc pins and declared pins stay out."""
+    d = next(x for x in compile_source(_sens(), "t.ohm").diagnostics if x.code == "B011")
+    assert "SPARE" in d.message and "NC1" not in d.message and d.severity == "info"
+
+
+def test_b011_is_silenced_by_declaring_the_intent():
+    assert "B011" not in codes(_sens(spare=", must_connect=false"))
+
+
+def test_b011_stays_quiet_without_mpn():
+    assert "B011" not in codes(_sens().replace('    mpn = "S-1"\n', ""))
+
+
+# ---------- S010: grid family standing in for a perimeter part ----------
+
+def _lga(rows, cols, border=1):
+    pads = [f"{r}{c}" for r in "ABCDE"[:rows] for c in range(1, cols + 1)
+            if not (border <= "ABCDE".index(r) < rows - border
+                    and border <= c - 1 < cols - border)]
+    pins = "\n".join(f"    pin P{p}: role=passive, pad={p}" for p in pads)
+    return (f"component G:\n    package = generate(LGA, rows={rows}, cols={cols}, "
+            f"pitch=0.5mm, pad=0.3mm, border={border})\n    mpn = \"X\"\n"
+            f'    pinout_source = "datasheet:x"\n{pins}\n\nmodule M:\n    g = G()\n')
+
+
+def test_s010_flags_an_unequal_perimeter_ring():
+    """5x5 border=1 gives 5/3/3/5 for a part that is 4 pads per side — and the
+    pin<->pad map stays total, so S003 cannot see it."""
+    d = next(x for x in compile_source(_lga(5, 5), "t.ohm").diagnostics if x.code == "S010")
+    assert "5/3/3/5" in d.message and "QFN" in (d.help or "")
+
+
+def test_s010_silent_on_a_full_grid():
+    assert "S010" not in codes(_lga(4, 4, border=0).replace("border=0", "border=0"))

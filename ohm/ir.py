@@ -37,7 +37,15 @@ class Pin:
     current: Quantity | None = None  # declared draw (ADR-004)
     satisfies: str | None = None  # kind-member this pin binds via `is=` (ADR-008)
     span: Span | None = None
-    must_connect: bool = False  # pin may not be left netless (ADR-009)
+    # Connection intent (ADR-009; targets ADR-015).
+    #   None    = not declared — nobody has said whether this pin may float (B011)
+    #   False   = declared optional: someone checked, floating is correct
+    #   True    = must be on some net
+    #   "ground"/"rail" = must be on a net of that CLASS, which is what a datasheet
+    #             means by "RES — connect to GND"; a signal net is as wrong as none
+    # None and False are both falsy, so every `if pin.must_connect:` still reads
+    # correctly — only B011 distinguishes them.
+    must_connect: bool | str | None = None
     tolerant_to: Quantity | None = None  # abs-max input for domain checks (ADR-009)
 
 

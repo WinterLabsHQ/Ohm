@@ -312,6 +312,25 @@ class _Resolver:
                 stack.extend(kd.parents)
         return False
 
+    # Connection-intent targets (ADR-015). `must_connect=false` used to be read as
+    # TRUE, because the attr was tested for presence and never for value — writing
+    # the thing that means "I checked, this floats" produced a B003 error.
+    _MC_VALUES: dict[str, bool | str] = {
+        "true": True, "false": False, "ground": "ground", "rail": "rail"}
+
+    def _must_connect(self, amap: dict, pin_name: str, span: Span) -> bool | str | None:
+        if "must_connect" not in amap:
+            return None  # not declared, which B011 reports separately from `false`
+        raw = amap["must_connect"]
+        text = raw.dotted() if isinstance(raw, A.Ref) else str(_value(raw))
+        got = self._MC_VALUES.get(text.strip().strip('"').lower())
+        if got is None:
+            self.diags.append(_err(
+                "R025", f"pin '{pin_name}': must_connect must be one of "
+                f"{', '.join(self._MC_VALUES)} (got '{text}')", span, self._cur_path))
+            return True  # fail safe: an unreadable intent is not permission to float
+        return got
+
     def _role_attr(self, attrs: tuple[A.Attr, ...], owner: str, span: Span, required: bool) -> str | None:
         amap = {a.name: a for a in attrs}
         role_attr = amap.get("role")
@@ -497,7 +516,7 @@ class _Resolver:
 
             pins.append(ir.Pin(p.name, role or "passive", pad, qty("vmax"), qty("imax"),
                                qty("pmax"), qty("voltage"), qty("current"), satisfies, p.span,
-                               must_connect="must_connect" in amap,
+                               must_connect=self._must_connect(amap, p.name, p.span),
                                tolerant_to=qty("tolerant_to")))
         # validate declared kinds exist (R017); check_kinds does conformance
         for kname in decl.kinds:

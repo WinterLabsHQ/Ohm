@@ -178,7 +178,11 @@ interface RS485:
 
 Patterns: `pullup`, `decoupling(min, max)`, `loadcaps(min, max)`, `cap(min)`,
 `termination(min, max)`, `tie`. `when <attr>` gates on a truthy instance attr.
-Pin attrs: `must_connect=true` (B003), `tolerant_to=3.6V` (B004 if a rail
+Pin attrs: `must_connect=` (B003) — `true` (any net), `ground` / `rail` (a net of
+that CLASS, which is what a datasheet means by "RES — connect to GND"), or
+`false` to record that floating is correct. Leaving it off a specific part's pin
+gets **B011**: a pin that floats by design and a pin nobody considered look the
+same to every other check, so say which it is. `tolerant_to=3.6V` (B004 if a rail
 exceeds it — a damage class a series R does not fix). **DFM/DFT (M-codes)**
 activate once any part declares `mpn=`/`dnp=`.
 

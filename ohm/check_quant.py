@@ -9,6 +9,7 @@ through `ratings_iface` and are frozen in the source — hermetic by constructio
   Q003  worst-case (ΔV)²/R power in a 2-pin resistive part exceeds pmax
   Q004  conflicting declared voltages on one net (incl. driver-to-ground shorts)
   Q005  25degC ambient + P_hi x theta_ja exceeds tmax (coarse thermal, ADR-004)
+  Q006  a Q-check CLEARED against a rating nothing in the circuit derives (info)
 
 Bidirectional pins count only through their declarations: with `voltage=` they
 are declared sources (Q001/Q004), with `current=` they join the Q002 draw sum.
@@ -31,12 +32,34 @@ _NO_SPAN = Span(1, 1, 1, 1)
 _ZERO = Interval(Decimal(0), Decimal(0))
 _AMBIENT = Decimal(25)  # fixed 25 degC ambient for Q005 (ADR-004)
 _DRIVER_ROLES = {"power_out", "output"}
+# Ratings whose value is commonly set by an external component (a current-limit
+# programming resistor, a feedback divider) rather than being intrinsic to the
+# part. When one of these is the safe side of a comparison that PASSED, the pass
+# is only as good as the literal — and nothing in Ohm relates it to the circuit.
+_PROGRAMMABLE = ("imax",)
 _SINK_ROLES = {"power_in", "input"}
 
 
 def _iv(q: ir.Quantity | None) -> Interval | None:
     qty = quantity_qty(q) if q is not None else None
     return qty.iv if qty is not None else None
+
+
+def _has_programming_part(net, part_comp, pins_of) -> bool:
+    """Does the driver on this net expose a passive pin that programs its rating?
+
+    Deliberately coarse: a `passive` pin on a part that also declares `imax` is the
+    shape of every current-limit/feedback programming input. Ohm has no way to fold
+    the resistor into the rating (that is the `derives` work), so the honest move is
+    to say the pass rests on an unbacked number, not to guess a value.
+    """
+    for node in net.nodes:
+        comp = part_comp[node.part_ref]
+        has_rating = any(p.imax is not None for p in comp.pins)
+        has_prog = any(p.role == "passive" for p in comp.pins)
+        if has_rating and has_prog and len(comp.pins) >= 3:
+            return True
+    return False
 
 
 def check_quant(design: ir.Design, path: str = "<string>",
@@ -110,6 +133,19 @@ def check_quant(design: ir.Design, path: str = "<string>",
                         "error", "Q002",
                         f"net '{net.name}' draws up to {total.hi}A but driver "
                         f"{node.part_ref}.{pin.name} is rated imax={imax.lo}A",
+                        pin.span or span, file=path))
+                elif _has_programming_part(net, part_comp, pins_of):
+                    # Q006: the check passed, but the number it passed against is a
+                    # hand-typed literal on a part whose limit is programmed by an
+                    # external resistor. On the board that motivated this, a 10k on
+                    # ILIM set ~0.68A while the pin declared imax=1.5A and 1.05A of
+                    # load cleared. Saying nothing here reads as coverage.
+                    diags.append(Diagnostic(
+                        "info", "Q006",
+                        f"net '{net.name}' cleared {total.hi}A against imax={imax.lo}A "
+                        f"declared on {node.part_ref}.{pin.name}; that rating is a "
+                        f"literal, and this part has a passive programming pin whose "
+                        f"resistor Ohm cannot relate to it — verify by hand",
                         pin.span or span, file=path))
 
     # --- Q003: (ΔV)²/R vs pmax for 2-pin resistive parts with known net voltages ---
