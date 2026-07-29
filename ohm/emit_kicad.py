@@ -221,6 +221,9 @@ _SCH_TALL_FACTOR = _D("3")  # symbols this much taller than median get their own
 # symbols read as a rail. Smaller nets keep labels — a power symbol on a two-pin
 # local net would be misleading.
 _PWR_MIN_PINS = 4
+# Above this fan-out a net is a rail, not a local connection, so it never
+# makes one part the "satellite" of another.
+_SAT_MAX_FANOUT = 4
 
 
 def _snap(v: Decimal) -> Decimal:
@@ -352,13 +355,50 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     group_titles: list[tuple[str, Decimal, Decimal]] = []
     cx, cy, row_h = _SCH_MARGIN, _SCH_MARGIN, _D(0)
     last_group = None
-    # Within a group, tallest first. A row is as tall as its tallest symbol, so
-    # mixing a 100-pin MCU with 0402 capacitors leaves most of that row empty;
-    # grouping like heights together packs the sheet without moving anything
-    # between groups. Ties break on ref, so placement stays deterministic.
-    ordered = sorted(low.parts,
-                     key=lambda p: (_group_index[_group_of(p.ref)],
-                                    -layouts[p.component][0], p.ref))
+    # Each IC is followed immediately by ITS OWN satellites — the two-pin parts
+    # that share a net with it and nothing else of substance. That is the
+    # convention every reference schematic uses: the decoupling cap sits beside
+    # the pin it bypasses, not in a bank of capacitors three rows down, because
+    # the pairing is what a reviewer and the layout engineer need to see.
+    # Ordering is deterministic: ICs by (descending height, ref), satellites by ref.
+    pin_count = {p.ref: len(pin_tables[p.component]) for p in low.parts}
+    nets_of: dict[str, list[ir.NetLow]] = {}
+    for net in low.nets:
+        for node in net.nodes:
+            nets_of.setdefault(node.part_ref, []).append(net)
+
+    host_of: dict[str, str] = {}
+    for part in low.parts:
+        if pin_count[part.ref] != 2:
+            continue
+        hosts: list[tuple[int, str]] = []
+        for net in nets_of.get(part.ref, ()):
+            if len(net.nodes) > _SAT_MAX_FANOUT:
+                continue  # a rail is not a host; it touches everything
+            for node in net.nodes:
+                # Same subsystem only. A sensor's CS pull-up also touches the MCU,
+                # and the MCU has more pins, so an unconstrained "richest neighbour"
+                # rule drags the pull-up across the sheet into the FMU block and
+                # fragments both groups. The part belongs with its sensor.
+                if (node.part_ref != part.ref
+                        and pin_count.get(node.part_ref, 0) >= 4
+                        and _group_of(node.part_ref) == _group_of(part.ref)):
+                    hosts.append((-pin_count[node.part_ref], node.part_ref))
+        if hosts:  # richest-pinned neighbour wins, ties by ref
+            host_of[part.ref] = sorted(hosts)[0][1]
+
+    satellites: dict[str, list[ir.PartLow]] = {}
+    for part in low.parts:
+        if (h := host_of.get(part.ref)) is not None:
+            satellites.setdefault(h, []).append(part)
+
+    ordered: list[ir.PartLow] = []
+    for part in sorted(low.parts, key=lambda p: (_group_index[_group_of(p.ref)],
+                                                 -layouts[p.component][0], p.ref)):
+        if part.ref in host_of:
+            continue  # placed with its host
+        ordered.append(part)
+        ordered.extend(sorted(satellites.get(part.ref, ()), key=lambda p: p.ref))
     # A 100-pin MCU symbol is ~15x taller than a 0402 capacitor, and a row is as
     # tall as its tallest member, so any row mixing the two wastes that whole
     # difference across its full width. Oversized symbols get a row to themselves.
@@ -371,7 +411,8 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         cell_w = _snap(stand_off * 2 + _SCH_LABEL_W * 2 + _SCH_COL_GAP)
         cell_h = _snap(box_h * 2 + _SCH_ROW_GAP)
         group = _group_of(part.ref)
-        solo = box_h > tall_cut
+        # a host keeps its satellites alongside it, so it is not given a solo row
+        solo = box_h > tall_cut and not satellites.get(part.ref)
         if solo and cx > _SCH_MARGIN and group == last_group:
             cx, cy = _SCH_MARGIN, _snap(cy + row_h + _SCH_ROW_GAP)
             row_h = _D(0)
