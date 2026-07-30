@@ -68,13 +68,111 @@ def box_half_w(pins: list[tuple[str, str, str]]) -> Decimal:
     return (need / _GRID).quantize(Decimal(1), rounding=ROUND_CEILING) * _GRID
 
 
-def symbol_layout(pins: list[tuple[str, str, str]]):
+# ---------- two-terminal glyphs ----------
+# A resistor is not a box. Drawing every part as a labelled rectangle is what
+# makes a generated sheet read as a netlist dump: a 2-pin passive takes 20mm and
+# carries "P1"/"P2" text nobody needs, where the conventional glyph takes 7.62mm
+# and says what the part IS at a glance. Geometry is KiCad's own Device library,
+# transposed to horizontal (pins left/right) so it drops into the same placement
+# and wiring the box symbols use. Kind -> glyph, most specific kind winning.
+GLYPH_STAND = Decimal("3.81")  # pin connect point, ±x
+_GLYPH_HALF_H = Decimal("2.54")  # for reference/value text placement
+_GLYPH_ORDER = ("LED", "Zener", "Schottky", "TVS", "Diode", "Resistor",
+                "Capacitor", "Inductor", "Crystal", "Fuse")
+_GLYPH_OF_KIND = {
+    "LED": "led", "Zener": "zener", "Schottky": "schottky", "TVS": "diode",
+    "Diode": "diode", "Resistor": "resistor", "Capacitor": "capacitor",
+    "Inductor": "inductor", "Crystal": "crystal", "Fuse": "fuse",
+}
+_S = "(stroke (width {w}) (type default)) (fill (type {f}))"
+_GLYPH_BODY: dict[str, tuple[Decimal, list[str]]] = {
+    # glyph -> (pin length, body s-expressions)
+    "resistor": (Decimal("1.27"), [
+        f"(rectangle (start -2.54 -1.016) (end 2.54 1.016) {_S.format(w='0.254', f='none')})"]),
+    "capacitor": (Decimal("3.048"), [
+        f"(polyline (pts (xy -0.762 -2.032) (xy -0.762 2.032)) {_S.format(w='0.508', f='none')})",
+        f"(polyline (pts (xy 0.762 -2.032) (xy 0.762 2.032)) {_S.format(w='0.508', f='none')})"]),
+    "capacitor_polarized": (Decimal("3.048"), [
+        f"(rectangle (start -1.016 -2.286) (end -0.508 2.286) {_S.format(w='0', f='outline')})",
+        f"(polyline (pts (xy 0.762 -2.032) (xy 0.762 2.032)) {_S.format(w='0.508', f='none')})",
+        f"(polyline (pts (xy -2.286 1.778) (xy -2.286 0.762)) {_S.format(w='0', f='none')})",
+        f"(polyline (pts (xy -2.794 1.27) (xy -1.778 1.27)) {_S.format(w='0', f='none')})"]),
+    "inductor": (Decimal("1.27"), [
+        f"(arc (start -2.54 0) (mid -1.905 0.6323) (end -1.27 0) {_S.format(w='0', f='none')})",
+        f"(arc (start -1.27 0) (mid -0.635 0.6323) (end 0 0) {_S.format(w='0', f='none')})",
+        f"(arc (start 0 0) (mid 0.635 0.6323) (end 1.27 0) {_S.format(w='0', f='none')})",
+        f"(arc (start 1.27 0) (mid 1.905 0.6323) (end 2.54 0) {_S.format(w='0', f='none')})"]),
+    "crystal": (Decimal("1.27"), [
+        f"(rectangle (start -1.143 2.54) (end 1.143 -2.54) {_S.format(w='0.3048', f='none')})",
+        f"(polyline (pts (xy -1.905 -1.27) (xy -1.905 1.27)) {_S.format(w='0.508', f='none')})",
+        f"(polyline (pts (xy 1.905 -1.27) (xy 1.905 1.27)) {_S.format(w='0.508', f='none')})",
+        f"(polyline (pts (xy -2.54 0) (xy -1.905 0)) {_S.format(w='0', f='none')})",
+        f"(polyline (pts (xy 2.54 0) (xy 1.905 0)) {_S.format(w='0', f='none')})"]),
+    "diode": (Decimal("2.54"), [
+        f"(polyline (pts (xy 1.27 1.27) (xy 1.27 -1.27)) {_S.format(w='0.254', f='none')})",
+        f"(polyline (pts (xy 1.27 0) (xy -1.27 0)) {_S.format(w='0', f='none')})",
+        "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27) (xy 1.27 0) (xy -1.27 1.27)) "
+        f"{_S.format(w='0.254', f='none')})"]),
+    "zener": (Decimal("2.54"), [
+        f"(polyline (pts (xy 1.27 0) (xy -1.27 0)) {_S.format(w='0', f='none')})",
+        "(polyline (pts (xy 1.27 -1.27) (xy 1.27 1.27) (xy 0.762 1.27)) "
+        f"{_S.format(w='0.254', f='none')})",
+        "(polyline (pts (xy -1.27 -1.27) (xy -1.27 1.27) (xy 1.27 0) (xy -1.27 -1.27)) "
+        f"{_S.format(w='0.254', f='none')})"]),
+    "schottky": (Decimal("2.54"), [
+        f"(polyline (pts (xy 1.27 0) (xy -1.27 0)) {_S.format(w='0', f='none')})",
+        "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27) (xy 1.27 0) (xy -1.27 1.27)) "
+        f"{_S.format(w='0.254', f='none')})",
+        "(polyline (pts (xy 1.905 0.635) (xy 1.905 1.27) (xy 1.27 1.27) (xy 1.27 -1.27)"
+        f" (xy 0.635 -1.27) (xy 0.635 -0.635)) {_S.format(w='0.254', f='none')})"]),
+    "led": (Decimal("2.54"), [
+        f"(polyline (pts (xy 1.27 -1.27) (xy 1.27 1.27)) {_S.format(w='0.254', f='none')})",
+        f"(polyline (pts (xy 1.27 0) (xy -1.27 0)) {_S.format(w='0', f='none')})",
+        "(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27) (xy 1.27 0) (xy -1.27 1.27)) "
+        f"{_S.format(w='0.254', f='none')})",
+        "(polyline (pts (xy 0.762 -3.048) (xy 2.286 -4.572) (xy 1.27 -4.318)"
+        f" (xy 2.286 -4.572) (xy 2.032 -3.556)) {_S.format(w='0', f='none')})",
+        "(polyline (pts (xy -0.762 -3.048) (xy 0.762 -4.572) (xy -0.254 -4.318)"
+        f" (xy 0.762 -4.572) (xy 0.508 -3.556)) {_S.format(w='0', f='none')})"]),
+    "fuse": (Decimal("1.27"), [
+        f"(rectangle (start -2.54 -0.762) (end 2.54 0.762) {_S.format(w='0.254', f='none')})",
+        f"(polyline (pts (xy -2.54 0) (xy 2.54 0)) {_S.format(w='0', f='none')})"]),
+}
+# glyphs whose ends are not interchangeable: the named pin goes on the LEFT, so
+# a diode's triangle points at its cathode the way every schematic draws it
+_GLYPH_ANODE_LEFT = {"diode", "led", "zener", "schottky", "capacitor_polarized"}
+
+
+def glyph_for(kinds, pins: list[tuple[str, str, str]]) -> str | None:
+    """The conventional two-terminal glyph a component's kinds call for, if any."""
+    if len(pins) != 2:
+        return None
+    for kind in _GLYPH_ORDER:
+        if kind in kinds:
+            glyph = _GLYPH_OF_KIND[kind]
+            if glyph == "capacitor" and "Polarized" in kinds:
+                return "capacitor_polarized"
+            return glyph
+    return None
+
+
+def symbol_layout(pins: list[tuple[str, str, str]], glyph: str | None = None):
     """Shared box-symbol geometry: first half down the left, second half up the right.
 
     Returns (box_half_h, placed) where placed is
     [(number, pin_name, role, connect_x, connect_y, side)] and side is "left"/"right".
     Both the KiCad and Eagle emitters read this, so the two symbols cannot drift.
+
+    With `glyph` the part is a two-terminal symbol instead: one pin each side at
+    ±GLYPH_STAND, so it places and wires exactly like a box, only far smaller.
     """
+    if glyph is not None and len(pins) == 2:
+        first, second = pins
+        if glyph in _GLYPH_ANODE_LEFT and second[1][:1] in ("A", "+"):
+            first, second = second, first
+        return _GLYPH_HALF_H, [
+            (first[0], first[1], first[2], -GLYPH_STAND, Decimal(0), "left"),
+            (second[0], second[1], second[2], GLYPH_STAND, Decimal(0), "right")]
     half = (len(pins) + 1) // 2
     left, right = pins[:half], pins[half:]
     rows = max(len(left), len(right), 1)
@@ -90,7 +188,8 @@ def symbol_layout(pins: list[tuple[str, str, str]]):
 
 def emit_symbol(name: str, pins: list[tuple[str, str, str]],
                 footprint: str | None = None,
-                attrs: dict[str, str] | None = None) -> str:
+                attrs: dict[str, str] | None = None,
+                glyph: str | None = None) -> str:
     """pins: [(number, pin_name, role)] — one schematic unit, box style.
 
     `footprint` is the "<lib>:<name>" id written into the Footprint property. Without
@@ -98,17 +197,27 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]],
     also emit a footprint should always pass it. `attrs` supplies BOM/sourcing
     properties (see _BOM_PROPS); unknown keys are ignored.
     """
-    box_h, placed = symbol_layout(pins)
+    glyph = glyph if glyph in _GLYPH_BODY else None
+    box_h, placed = symbol_layout(pins, glyph)
     half_w = box_half_w(pins)
     prop_y = box_h + _GRID
+    pin_len, body = (_GLYPH_BODY[glyph] if glyph
+                     else (PIN_LEN, [f"(rectangle (start -{half_w} {box_h})"
+                                     f" (end {half_w} -{box_h})"
+                                     " (stroke (width 0.254) (type default))"
+                                     " (fill (type background)))"]))
 
     pin_lines = [
         f"      (pin {_ETYPE.get(role, 'passive')} line (at {x} {y}"
-        f" {0 if side == 'left' else 180}) (length {PIN_LEN})"
+        f" {0 if side == 'left' else 180}) (length {pin_len})"
         f' (name "{pin_name}" (effects (font (size 1.27 1.27))))'
         f' (number "{number}" (effects (font (size 1.27 1.27)))))'
         for number, pin_name, role, x, y, side in placed
     ]
+    # A glyph says what the part is; "P1"/"P2" and pad numbers on a 0402 are
+    # noise, and they are what made every passive 20mm wide.
+    hide = " (pin_numbers hide)" if glyph else ""
+    names = "(pin_names (offset 0) hide)" if glyph else "(pin_names (offset 1.016))"
 
     extra = [(label, str(attrs[key])) for key, label in _BOM_PROPS
              if attrs and attrs.get(key) not in (None, "")]
@@ -117,7 +226,7 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]],
         "(kicad_symbol_lib",
         f"  (version {_SYM_VERSION})",
         '  (generator "ohm")',
-        f'  (symbol "{name}" (pin_names (offset 1.016)) (in_bom yes) (on_board yes)',
+        f'  (symbol "{name}"{hide} {names} (in_bom yes) (on_board yes)',
         f'    (property "Reference" "U" (at 0 {prop_y} 0)'
         " (effects (font (size 1.27 1.27))))",
         f'    (property "Value" "{name}" (at 0 -{prop_y} 0)'
@@ -127,8 +236,7 @@ def emit_symbol(name: str, pins: list[tuple[str, str, str]],
         *[f'    (property "{label}" "{_escape(value)}" (at 0 0 0)'
           " (effects (font (size 1.27 1.27)) hide))" for label, value in extra],
         f'    (symbol "{name}_0_1"',
-        f"      (rectangle (start -{half_w} {box_h}) (end {half_w} -{box_h})"
-        " (stroke (width 0.254) (type default)) (fill (type background)))",
+        *[f"      {shape}" for shape in body],
         "    )",
         f'    (symbol "{name}_1_1"',
         *pin_lines,

@@ -8,6 +8,9 @@
   M006  mixed SMT + through-hole — dual-process assembly (ONE info)
   M007  SMT parts but no fiducial (ONE info)
   M008  fine-pitch (<=0.65mm) generated packages — process summary (ONE info)
+  M009  no `board` block — the document has no title/rev/owner (ONE warning)
+  M010  nets named after a component pin — nobody named the signal (ONE warning)
+  M011  a capacitor across a supply rail with no vmax declared (ONE warning)
 
 Never error severity: these are advisory, they must not block a build.
 
@@ -204,4 +207,81 @@ def check_mfg(design: ir.Design, path: str = "<string>",
             f"fine-pitch (<= {_FINE_PITCH_MM}mm) packages on board: "
             f"{_refs(fine)} — stencil/paste/inspection process care",
             _NO_SPAN, file=path))
+    # ---- M010: nets nobody named (ONE warning) ----
+    # A net whose name is exactly one of its own part pins was never named: the
+    # label election fell through to a capacitor. `fmu.c_y1.P1` tells a reviewer
+    # nothing about the signal and becomes a lie the moment that cap is
+    # renumbered. Objective test, no heuristics: name == "<part_ref>.<pin>" of a
+    # node on that very net.
+    unnamed = [net.name for net in low.nets
+               if any(net.name == f"{node.part_ref}.{node.pin}" for node in net.nodes)]
+    if unnamed:
+        diags.append(Diagnostic(
+            "warning", "M010",
+            f"{len(unnamed)} net(s) are named after a component pin rather than "
+            f"the signal: {_refs(sorted(unnamed))} — the name says where the net "
+            "happens to land, not what it is",
+            _NO_SPAN, file=path,
+            help='name them: `net OSC24_IN = y1.P1` inside the module'))
+
+    # ---- M011: capacitors on a rail with no voltage rating (ONE warning) ----
+    # "100nF" does not specify a capacitor. The rating is what decides whether
+    # the part survives the rail it sits across, and it is the first thing a
+    # reviewer looks for on anything touching an input supply. Only rail-facing
+    # caps are checked: a rating on a signal-path coupling cap is nice, not
+    # load-bearing, and warning about all of them would train people to ignore
+    # this one.
+    comp_of = {part.ref: comps.get(part.component) for part in low.parts}
+
+    def _role(node) -> str:
+        comp = comp_of.get(node.part_ref)
+        pin = next((p for p in comp.pins if p.name == node.pin), None) if comp else None
+        return pin.role if pin else ""
+
+    rails = {net.name for net in low.nets
+             if any(_role(node) in ("power_in", "power_out") for node in net.nodes)}
+    on_rail = []
+    for part in low.parts:
+        comp = comps.get(part.component)
+        if comp is None or "Capacitor" not in _lineage(comp, kinds):
+            continue
+        attrs = dict(part.attrs)
+        if attrs.get("vmax") is not None or attrs.get("dnp") is not None:
+            continue
+        touches_rail = any(node.part_ref == part.ref
+                           for net in low.nets if net.name in rails
+                           for node in net.nodes)
+        if touches_rail:
+            on_rail.append(part.ref)
+    if on_rail:
+        diags.append(Diagnostic(
+            "warning", "M011",
+            f"{len(on_rail)} capacitor(s) sit across a supply rail with no vmax: "
+            f"{_refs(sorted(on_rail))} — the value alone does not specify the part",
+            _NO_SPAN, file=path,
+            help="declare the rating where the part is used, e.g. "
+                 "Capacitor(value=100nF, vmax=16V, dielectric=\"X7R\")"))
+
+    # ---- M009: an uncontrolled document (ONE warning) ----
+    # A schematic with a blank title block cannot be cited in an ECO, a design
+    # review or a fab package — every reviewer reads it as a draft artifact.
+    # This is the cheapest thing on the board to fix and the first thing seen.
+    if design.board is None:
+        diags.append(Diagnostic(
+            "warning", "M009",
+            "no `board` block: the schematic's title block will be blank, so the "
+            "document has no title, revision or owner and cannot be cited",
+            _NO_SPAN, file=path,
+            help='add e.g.  board my_board: / title = "..." / rev = "A" / '
+                 'company = "..."'))
+    else:
+        missing = [f for f in ("title", "rev") if not design.board.get(f)]
+        if missing:
+            diags.append(Diagnostic(
+                "warning", "M009",
+                f"`board {design.board.name}` has no {' or '.join(missing)} — a "
+                "document without a revision cannot be referenced by an ECO",
+                _NO_SPAN, file=path,
+                help="title and rev are what make the drawing citable"))
+
     return diags

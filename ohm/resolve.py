@@ -26,6 +26,12 @@ class _BadIndex(Exception):
 
 # open_collector/open_drain (wired-OR outputs: comparators, I2C, 1-Wire) and free (base
 # default, connects to anything) added for kind-contract fidelity (ADR-008 research)
+# Title-block fields. Closed set: an unknown key is a typo that would vanish
+# silently into a document nobody can cite. `sheet` is not here — Ohm computes
+# "n of m" from what it actually emits, which is the only honest source for it.
+_BOARD_FIELDS = frozenset({"title", "rev", "date", "company", "designer",
+                           "license", "comment"})
+
 VALID_ROLES = {"power_in", "power_out", "input", "output", "bidirectional", "passive",
                "ground", "nc", "open_collector", "open_drain", "free"}
 # closed v1 set of expects patterns (ADR-009); each is a predicate in check_bringup
@@ -231,6 +237,7 @@ class _Resolver:
         self.build_symbols()
         self._validate_fns()
         interfaces, components, modules, kinds = [], [], [], []
+        board: ir.BoardDef | None = None
         for decl in self.program.decls:
             if isinstance(decl, A.UseDecl):
                 continue
@@ -247,6 +254,23 @@ class _Resolver:
                 kinds.append(self._kind(decl))
             elif isinstance(decl, A.FnDecl):
                 continue  # validated in _validate_fns; lowered below from fns_ns
+            elif isinstance(decl, A.BoardDecl):
+                if board is not None:
+                    self.diags.append(_err(
+                        "R026", f"duplicate board block '{decl.name}': a design is "
+                        f"one document, and '{board.name}' already named it",
+                        decl.span, self._cur_path,
+                        "keep one `board` block; put per-variant identity in its "
+                        "fields (rev, title) rather than in a second block"))
+                    continue
+                unknown = [k for k, _ in decl.fields if k not in _BOARD_FIELDS]
+                if unknown:
+                    self.diags.append(_err(
+                        "R027", f"unknown board field(s): {', '.join(sorted(unknown))}",
+                        decl.span, self._cur_path,
+                        "known fields: " + ", ".join(sorted(_BOARD_FIELDS))))
+                board = ir.BoardDef(decl.name, tuple(
+                    (k, v) for k, v in decl.fields if k in _BOARD_FIELDS))
             else:
                 modules.append(self._module(decl))
         self._cur_path = self.path
@@ -264,7 +288,7 @@ class _Resolver:
         fns = tuple(ir.FnDef(f.name, f.params, f.expr, f.span)
                     for f in self.fns_ns.values())
         return ir.Design(tuple(interfaces), tuple(components), tuple(modules), top,
-                         tuple(kinds), fns)
+                         tuple(kinds), fns, board)
 
     def _kind(self, decl: A.KindDecl) -> ir.KindDef:
         for role_name, members in (("required", decl.requires), ("optional", decl.optional)):
@@ -531,6 +555,8 @@ class _Resolver:
         path = self._cur_path
         configs, ports, instances, connections, asserts, obligations, constraints = \
             [], [], [], [], [], [], []
+        net_names: list[ir.NetName] = []
+        notes: list[str] = []
         scope: dict[str, str] = {}  # binding name -> def name ("" = poisoned/config)
         poisoned: set[str] = set()
         self._current_overrides = {}
@@ -762,6 +788,11 @@ class _Resolver:
                         instances.append(ir.Instance(item.name, callee, overrides, item.span,
                                                      waivers=waivers))
                         self._current_overrides[item.name] = {k for k, _ in item.call.kwargs}
+            elif isinstance(item, A.NoteStmt):
+                notes.append(item.text)
+            elif isinstance(item, A.NetDecl):
+                if self._check_ref(item.target, scope, poisoned, decl.name, connect=True):
+                    net_names.append(ir.NetName(item.name, item.target.parts, item.span))
             elif isinstance(item, A.Connect):
                 okl = self._check_ref(item.left, scope, poisoned, decl.name, connect=True)
                 okr = self._check_ref(item.right, scope, poisoned, decl.name, connect=True)
@@ -801,7 +832,7 @@ class _Resolver:
                 )
         return ir.Module(decl.name, tuple(configs), tuple(ports), tuple(instances),
                          tuple(connections), tuple(asserts), tuple(obligations),
-                         tuple(constraints), decl.span)
+                         tuple(constraints), decl.span, tuple(net_names), tuple(notes))
 
     def _check_overrides(self, item: A.Binding, target: A.ComponentDecl | A.ModuleDecl) -> None:
         """R012: unknown instance-override kwargs. Modules: strict (declared configs

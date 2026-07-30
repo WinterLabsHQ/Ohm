@@ -72,6 +72,10 @@ def _item_line(item: A.ModuleItem) -> str:  # ForStmt handled by caller
             return f"obligation {A.to_src(item.call)} {item.op} {A.to_src(item.bound)}"
         case A.ConstraintStmt():
             return f"constraint {A.to_src(item.call)}"
+        case A.NetDecl():
+            return f"net {item.name} = {item.target.dotted()}"
+        case A.NoteStmt():
+            return f'note "{item.text}"'
         case _:
             return ""  # ForStmt: multi-line, rendered by _decl_lines
 
@@ -117,6 +121,12 @@ def _decl_lines(decl: A.Decl) -> list[tuple[int, int, str]]:
         params = ", ".join(decl.params)
         return [(decl.span.line, decl.span.end_line,
                  f"fn {decl.name}({params}) = {A.to_src(decl.expr)}")]
+    elif isinstance(decl, A.BoardDecl):
+        # fields keep source order: a title block reads title/rev/date, and
+        # re-sorting someone's header is not formatting, it is editing
+        return ([(decl.span.line, decl.span.line, f"board {decl.name}:")]
+                + [(decl.span.line, decl.span.line, f'{_INDENT}{k} = "{v}"')
+                   for k, v in decl.fields])
     else:
         out.append((decl.span.line, decl.span.line, f"module {decl.name}:"))
         out += _module_items(decl.items, 1)

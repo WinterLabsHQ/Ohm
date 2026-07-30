@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from ohm import ir
-from ohm.emit_kicad import diffpair_renames
+from ohm.emit_kicad import _uid, diffpair_renames, sheet_groups
 
 _DEFAULTS = {
     "bus_width": 12,
@@ -55,9 +55,37 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>") -> str:
             "DiffPair", track_width=0.4, diff_pair_width=0.4, diff_pair_gap=0.4))
         patterns += [("DiffPair", renamed) for renamed in sorted(renames.values())]
 
+    # KiCad will not open a hierarchy it cannot find in the project: root first,
+    # then one (uuid, name) per module sheet. Empty for a flat single sheet.
+    groups = sheet_groups(low)
+    sheets = ([[_uid(source, "sch"), ""]]
+              + [[_uid(source, "sheetsym", g), g] for g in groups]
+              if len(groups) > 1 else [])
+
     doc = {
         "board": {"3dviewports": [], "design_settings": {}, "layer_presets": []},
         "boards": [],
+        # KiCad 7 has no headless ERC (`kicad-cli sch` only exports), so ERC is
+        # a GUI run — but it is only worth running against the right severities.
+        # The two that matter for a LABEL-connected schematic are raised to
+        # error: `similar_labels` catches a typo'd label silently forking a net,
+        # and `pin_not_connected` catches a pin nobody accounted for (deliberate
+        # opens carry a no-connect marker from source intent, ADR-015).
+        "erc": {
+            "erc_exclusions": [],
+            "meta": {"version": 0},
+            "rule_severities": {
+                "endpoint_off_grid": "warning",
+                "label_dangling": "error",
+                "no_connect_connected": "error",
+                "no_connect_dangling": "warning",
+                "pin_not_connected": "error",
+                "pin_not_driven": "error",
+                "power_pin_not_driven": "error",
+                "similar_labels": "error",
+                "wire_dangling": "error",
+            },
+        },
         "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
         "meta": {"filename": f"{Path(source).stem}.kicad_pro", "version": 1},
         "net_settings": {
@@ -72,7 +100,7 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>") -> str:
         },
         "pcbnew": {"page_layout_descr_file": ""},
         "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},
-        "sheets": [],
+        "sheets": sheets,
         "text_variables": {},
     }
     return json.dumps(doc, sort_keys=True, indent=2) + "\n"

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ohm import __version__, ir
 from ohm.driver import compile_source
-from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
+from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch, emit_kicad_sheets
 from ohm.emit_netlist import emit_netlist
 
 # The real console encoding at process start, captured before main() forces the
@@ -400,6 +400,12 @@ def main(argv: list[str] | None = None) -> int:
                          choices=["netlist", "kicad", "zen", "constraints", "package",
                                   "eagle", "all"],
                          default="all")
+    p_build.add_argument("--sheets", choices=["auto", "flat", "hier"], default="auto",
+                         help="schematic sheets: 'auto' (default) keeps one sheet "
+                              "when the drawing fits A3 and splits into one A3 "
+                              "sheet per module when it does not; 'flat' forces a "
+                              "single sheet at whatever size it takes; 'hier' "
+                              "always splits")
     p_build.add_argument("--dump-ir", choices=["high", "typed", "low"])
     p_build.add_argument("--json-diagnostics", action="store_true")
     p_build.add_argument("--strict", action="store_true",
@@ -446,6 +452,8 @@ def main(argv: list[str] | None = None) -> int:
                             help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
     p_sign.add_argument("file", help="the Ohm source")
     p_sign.add_argument("board", help="the routed .kicad_pcb")
+    p_sign.add_argument("--no-geometry", action="store_true",
+                        help="skip the V007 geometry gate (KiCad's DRC engine)")
     p_sign.add_argument("--json-diagnostics", action="store_true")
 
     p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
@@ -696,6 +704,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: cannot read '{args.board}': {detail}", file=sys.stderr)
             return 1
         diags = signoff(result.low, board_text, args.board)
+        if not args.no_geometry:
+            # source-fidelity (V001-V006) and geometry (V007) are one verdict:
+            # a board can match its source exactly and still be unmanufacturable
+            from ohm.drc import DrcUnavailable, run_geometry_drc
+
+            try:
+                diags = list(diags) + run_geometry_drc(args.board)
+            except DrcUnavailable as exc:
+                print(f"warning: geometry gate skipped: {exc}", file=sys.stderr)
         if args.json_diagnostics:
             print(json.dumps([{
                 "severity": d.severity, "code": d.code, "message": d.message,
@@ -735,9 +752,22 @@ def main(argv: list[str] | None = None) -> int:
             if args.emit in ("kicad", "all"):
                 from ohm.emit_kicad_pro import emit_kicad_pro
 
-                (outdir / f"{stem}.kicad_sch").write_text(
-                    emit_kicad_sch(low, args.file, result.design),
-                    encoding="utf-8", newline="\n")
+                mode = getattr(args, "sheets", "auto")
+                sheets = ({f"{stem}.kicad_sch":
+                           emit_kicad_sch(low, args.file, result.design)}
+                          if mode == "flat"
+                          else emit_kicad_sheets(low, args.file, result.design,
+                                                 force=mode == "hier"))
+                for fname, text in sheets.items():
+                    (outdir / fname).write_text(text, encoding="utf-8", newline="\n")
+                # The drawing gate. Connectivity is proved by the netlist; this
+                # is the other half — that the sheet can be READ. Advisory, and
+                # reported at emit time because that is when the geometry exists.
+                from ohm.check_drawing import check_drawing
+
+                for fname, text in sorted(sheets.items()):
+                    for d in check_drawing(text, str(outdir / fname)):
+                        print(d.machine(), file=sys.stderr)
                 (outdir / f"{stem}.kicad_pcb").write_text(
                     emit_kicad_pcb(low, args.file), encoding="utf-8", newline="\n")
                 (outdir / f"{stem}.kicad_pro").write_text(

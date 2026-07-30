@@ -1,5 +1,6 @@
 {
  "__type__": "Design",
+ "board": null,
  "components": [
   {
    "__type__": "ComponentDef",
@@ -303,6 +304,8 @@
     }
    ],
    "name": "Supply",
+   "net_names": [],
+   "notes": [],
    "obligations": [
     {
      "__type__": "ObligationRec",

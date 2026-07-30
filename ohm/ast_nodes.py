@@ -216,7 +216,40 @@ class ConstraintStmt:
     span: Span
 
 
-ModuleItem = Binding | ArrayBinding | ForStmt | IfStmt | Connect | AssertStmt | ObligationStmt | ConstraintStmt
+@dataclass(frozen=True)
+class NetDecl:
+    """`net NAME = <label>` — the signal's real name.
+
+    A net in Ohm had no name, only a label ELECTION: lower.py picked the
+    shallowest label on the net, so when no port won, a capacitor pin won and
+    the net became `fmu.c_y1.P1`. That names a net after a component it happens
+    to touch, which tells a reviewer nothing and turns into a lie the moment
+    someone renumbers the cap. An explicit name always wins the election.
+    """
+
+    name: str
+    target: "Ref"
+    span: Span
+    file: str | None = None
+
+
+
+@dataclass(frozen=True)
+class NoteStmt:
+    """`note "..."` — an engineering note carried onto the drawing.
+
+    Real schematics carry them: "place within 2 mm of pin 49", "0R link, cut to
+    isolate", "ferrite-isolated analogue domain". They are how a schematic tells
+    layout and the next engineer WHY. Ohm could not express one, so the sheets
+    came out silent and every such instruction lived in someone's head.
+    """
+
+    text: str
+    span: Span
+    file: str | None = None
+
+
+ModuleItem = Binding | ArrayBinding | ForStmt | IfStmt | Connect | AssertStmt | ObligationStmt | ConstraintStmt | NetDecl | NoteStmt
 
 
 @dataclass(frozen=True)
@@ -265,7 +298,24 @@ class KindDecl:
     file: str | None = None
 
 
-Decl = InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl | KindDecl | FnDecl
+@dataclass(frozen=True)
+class BoardDecl:
+    """`board <name>:` — document identity for the title block.
+
+    A schematic with a blank title block cannot be cited in an ECO, a review or
+    a fab package: it is a draft artifact, not a controlled document. Ohm could
+    not state any of this, so the emitter left it blank and KiCad filled the
+    space with its own generator string.
+    """
+
+    name: str
+    fields: tuple[tuple[str, str], ...]  # (key, value), source order
+    span: Span
+    file: str | None = None
+
+
+Decl = (InterfaceDecl | ComponentDecl | ModuleDecl | UseDecl | KindDecl | FnDecl
+        | BoardDecl)
 
 
 def to_src(e: Expr) -> str:

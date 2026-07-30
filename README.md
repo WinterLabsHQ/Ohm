@@ -128,7 +128,8 @@ docs/STYLE.md   the authoring guide
 docs/adr/       12 architecture decision records
 docs/blueprint/ the founding design docs (read-only, canonical)
 examples/       complete boards, CI-enforced to compile clean
-tests/          648 tests: golden netlists, adversarial suites, determinism gates
+tests/          840 tests: golden netlists, KiCad round-trip oracle,
+                adversarial suites, determinism gates
 ```
 
 ## Design principles

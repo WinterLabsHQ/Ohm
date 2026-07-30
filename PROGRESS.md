@@ -252,3 +252,64 @@ overridden by a parent are R022, never a silent stale elaboration. Golden IR
 snapshot regenerated (Design.fns schema addition). Recorded ceiling:
 per-instance re-elaboration (module generics) is the next expressiveness
 milestone if demand shows. **648 tests green, ruff+mypy clean.**
+
+---
+
+## Sprint — the schematic becomes a DRAWING (2026-07-29 / 30)
+
+Held against a professionally drafted reference board, the emitted schematic was
+electrically exact and read as a netlist rendered as boxes. Closed over this
+sprint; **840 tests green, ruff + mypy clean, deterministic, and the fmuv2
+reference board still reads back 77 nets / 377 pins IDENTICAL from KiCad at every
+step.**
+
+**ADR-016 — hierarchical sheets.** One `.kicad_sch` per top-level module plus a
+root block diagram. No longer the default (see ADR-017); reachable as
+`--sheets hier`, and chosen automatically when the drawing does not fit A3.
+
+**ADR-017 — drawn, not labelled.** Two-terminal parts are drawn as their
+conventional glyph from the declared `kind`, not as labelled boxes (a passive
+went from 20 mm to 7.6 mm). A passive serving one pin of an IC is placed against
+that pin and wired to it; shunt parts stand upright with the rail above or ground
+below; clusters (crystal + load caps, LED + series resistor, reset RC) are wired
+end to end; parts in parallel share one rail wire with junctions and return to
+their own ground symbols; each module gets a dashed titled partition, and each
+cluster inside it a lighter frame titled by kind. Blocks pack across the page,
+zoned power → compute → peripheral → interface. A flat `_overview` sheet is
+emitted alongside the hierarchy — same netlist, two renderings.
+
+**ADR-018 — a language for the document.** `board` (title block, revision),
+`net NAME = <label>` (a net had no name, only an election over its labels),
+`note "..."`, `unused_pins = open`, and `vmax`/`dielectric` printed on values.
+New checks M009/M010/M011 report the absence of each rather than guessing.
+
+**ADR-019 — first pass, not twentieth.** Every connectivity defect this sprint
+was caught automatically by the round-trip oracle; every geometric one was caught
+by rendering a PDF and looking. That asymmetry is closed by a **D tier**
+(`ohm/check_drawing.py`, D001–D004: overlapping text, text over a symbol body,
+overlapping symbols, duplicate uuids), run on every emitted sheet. `AGENTS.md`
+and `docs/STYLE.md` carry the author-facing contract.
+
+**Also landed:** `ohm signoff` runs the geometry gate itself (**V007**) through
+KiCad's own DRC engine, because it used to advise `kicad-cli pcb drc` — a
+subcommand that does not exist in KiCad 7, so nothing checked geometry at all.
+**S011** catches parts sharing board area, which KiCad found on fmuv2 and every
+Ohm tier had passed. Generated footprints no longer draw silkscreen over pads
+(76 violations → 0).
+
+**Defects the oracle caught that would have shipped:** a label's text rotation
+clobbering the symbol's between pins; a net drawn as a bare wire silently losing
+the netclass pattern that carries its diffpair trace rule; a part dropped from
+the sheet entirely by a rider chain; a rail line running past a box symbol's
+pins because the ladder assumed glyph geometry; eight resistors on one bus
+telescoping into a chain that shorted four nets. Three separate
+variable-shadowing bugs in one file (`group`, `rot`, `want`).
+
+**Closed as not planned:** position-based reference annotation and buses — see
+ADR-018.
+
+**Open, and now reported by the tools rather than discovered by a reviewer:**
+D001×3 / D002×2 / D003×2 on fmuv2 (including riders overlapping the MCU body),
+S011×5 placeholder-courtyard conflicts, M010×30 unnamed nets, no `fp-lib-table`
+emitted, no `Edge.Cuts` outline, no router (Meridian scope).
+

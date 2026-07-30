@@ -102,7 +102,11 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             return [lbl for lbl in got if lbl is not None]
         return []  # config or unresolvable (already diagnosed by resolver)
 
+    declared: dict[str, tuple[str, Span | None]] = {}  # label -> (net name, span)
+
     def walk(module: ir.Module, prefix: str, stack: frozenset[str]) -> None:
+        for nn in module.net_names:  # `net NAME = label` (explicit naming)
+            declared[f"{prefix}{'.'.join(nn.target)}"] = (nn.name, nn.span)
         for inst in module.instances:
             if inst.def_ref in comps:
                 parts.append((f"{prefix}{inst.name}", comps[inst.def_ref], inst.overrides))
@@ -184,8 +188,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
     groups: dict[str, list[str]] = {}
     for label in slots:
         groups.setdefault(find(label), []).append(label)
-    nets = []
-    net_of_label: dict[str, str] = {}
+    pending = []  # (name, explicit, members, port_labels, nodes, conn_spans)
     for members in groups.values():
         members.sort()
         port_labels = tuple(lbl for lbl in members if slots[lbl][0] == _PORT)
@@ -196,11 +199,61 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
                 key=lambda n: (n.part_ref, n.pin),
             )
         )
-        # shallowest label wins: a top-level `vin.v` must beat a deep `a.pwr.v`
-        name = min(port_labels or members, key=lambda lbl: (lbl.count("."), lbl))
+        # An explicit `net NAME = ...` always wins: naming a signal is a
+        # statement about what it IS, and no election over labels can beat it.
+        # Two names on one net is a contradiction, so it is reported and the
+        # alphabetically first is used to keep the emit deterministic.
+        named = sorted({declared[lbl] for lbl in members if lbl in declared})
+        if named:
+            name = named[0][0]
+            if len(named) > 1:
+                diags.append(Diagnostic(
+                    "error", "R028",
+                    "one net, two names: "
+                    + ", ".join(f"'{n}'" for n, _s in named)
+                    + " all name the same net",
+                    named[0][1] or Span(1, 1, 1, 1), file=path,
+                    help="the labels are already connected, so they are one "
+                         "signal — keep a single `net` declaration for it"))
+        else:
+            # shallowest label wins: a top-level `vin.v` must beat a deep `a.pwr.v`
+            name = min(port_labels or members, key=lambda lbl: (lbl.count("."), lbl))
         root = find(members[0])
-        spans = {s for lbl, s in edges if find(lbl) == root}
-        conn_spans = tuple(sorted(spans, key=lambda s: (s.line, s.col, s.end_line, s.end_col)))
+        spans = {sp for lbl, sp in edges if find(lbl) == root}
+        conn_spans = tuple(sorted(spans, key=lambda sp: (sp.line, sp.col,
+                                                         sp.end_line, sp.end_col)))
+        pending.append((name, bool(named) or name not in port_labels,
+                        members, port_labels, nodes, conn_spans))
+
+    # An interface MEMBER name is not part of the signal's identity: `VDD_3V3.v`
+    # and `GND.gnd` carry an Ohm implementation detail onto a drawing where the
+    # reader wants the rail's name. Drop the trailing member when the port
+    # instance identifies the net on its own — exactly one net hangs off that
+    # prefix and nothing else claims the bare name. Anything ambiguous (a Power
+    # port whose .v and .gnd are distinct nets) keeps its suffix, because there
+    # the member IS what distinguishes them.
+    #
+    # Only PORT labels are collapsed. A name that came from a pin (`r1.P2`) is
+    # not a port-and-member at all; stripping it would rename the net after the
+    # PART, which is worse than the pin. Those are M010's business instead.
+    taken = {n for n, *_ in pending}
+    stem_count: dict[str, int] = {}
+    for name, explicit, *_ in pending:
+        if not explicit and "." in name:
+            stem_count[name.rsplit(".", 1)[0]] = \
+                stem_count.get(name.rsplit(".", 1)[0], 0) + 1
+    collapse: dict[str, str] = {}
+    for name, explicit, *_ in pending:
+        if explicit or "." not in name:
+            continue
+        stem = name.rsplit(".", 1)[0]
+        if stem_count.get(stem) == 1 and stem not in taken and stem not in collapse.values():
+            collapse[name] = stem
+
+    nets = []
+    net_of_label: dict[str, str] = {}
+    for name, _explicit, members, port_labels, nodes, conn_spans in pending:
+        name = collapse.get(name, name)
         nets.append(ir.NetLow(name, nodes, port_labels, conn_spans))
         for lbl in members:
             net_of_label[lbl] = name

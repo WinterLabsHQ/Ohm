@@ -155,6 +155,15 @@ class Constraint:
 
 
 @dataclass(frozen=True)
+class NetName:
+    """`net NAME = <label>` — an explicit name for the net carrying that label."""
+
+    name: str
+    target: tuple[str, ...]  # dotted label parts
+    span: Span | None = None
+
+
+@dataclass(frozen=True)
 class Module:
     name: str
     configs: tuple[Config, ...]
@@ -165,6 +174,8 @@ class Module:
     obligations: tuple[ObligationRec, ...]
     constraints: tuple[Constraint, ...] = ()
     span: Span | None = None
+    net_names: tuple[NetName, ...] = ()  # explicit `net NAME = ...` declarations
+    notes: tuple[str, ...] = ()  # `note "..."` — engineering notes for the sheet
 
 
 @dataclass(frozen=True)
@@ -199,6 +210,22 @@ class Design:
     top: str | None  # ponytail: top = last-declared module; --top flag when needed
     kinds: tuple[KindDef, ...] = ()  # component-type taxonomy (ADR-008)
     fns: tuple[FnDef, ...] = ()  # pure compile-time functions (ADR-012 E0)
+    board: BoardDef | None = None  # document identity for the title block
+
+
+@dataclass(frozen=True)
+class BoardDef:
+    """Title-block identity: what this document IS, so it can be cited.
+
+    Ohm had no way to say it, so every emitted schematic carried a blank title
+    block — the mark of a draft artifact rather than a controlled deliverable.
+    """
+
+    name: str
+    fields: tuple[tuple[str, str], ...]  # (key, value), source order
+
+    def get(self, key: str) -> str:
+        return next((v for k, v in self.fields if k == key), "")
 
 
 # ---------- IR-LOW (flat, emitter-ready; produced by P-LOWER) ----------

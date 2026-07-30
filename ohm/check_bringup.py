@@ -18,6 +18,7 @@ instantiation) suppress a finding into an info note — visible, never silent.
   B009  Polarized part reverse-biased vs declared operating points
   B010  finding waived at instantiation (info note)
   B011  unconnected pins with no declared connection intent (info)
+        — satisfied wholesale by `unused_pins = open` on the component
 
 Pure, deterministic, O(nets×parts): no simulation, no layout data (N1).
 """
@@ -418,7 +419,8 @@ def check_bringup(design: ir.Design, path: str = "<string>",
                 emit("B003", "warning",
                      f"power pin '{pin.name}' of '{part.ref}' is on no net",
                      pin.span, waivers)
-            if pin.must_connect is None and pin.role in _STRAPPABLE:
+            if (pin.must_connect is None and pin.role in _STRAPPABLE
+                    and str(attrs.get("unused_pins", "")) != "open"):
                 undeclared.append(pin.name)
 
         # ---- B011 undeclared connection intent ----

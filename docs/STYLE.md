@@ -11,6 +11,10 @@ indentation blocks (4 spaces), `#` comments, newline-terminated statements.
 Declaration order is free — forward references are fine.
 
 ```ohm
+board supply_demo:                 # document identity — see "The drawing" below
+    title = "Supply Demo"
+    rev = "A"
+
 interface Power:
     v:   Signal, role=power_in
     gnd: Signal, role=ground
@@ -199,6 +203,61 @@ warning/info; promote with `--strict`.
 (trace width/clearance, acid traps, annular rings), solder mask, courtyard overlap and
 spacing, paste/stencil, test-point *accessibility*, panelization — and all SI/PI/EMC
 (≈30% of respin causes). Layout-stage DRC/DFM tools own those.
+
+## The drawing (what the schematic needs you to say)
+
+Ohm emits a schematic, not just a netlist, and it can only draw what the source
+states. Where a fact is missing the emitter must invent a substitute, and the
+inventions are what make a generated sheet look generated (ADR-018).
+
+**`board`** — document identity, at most one per design. Fills KiCad's title
+block; without it the block is blank and the drawing cannot be cited in an ECO
+or a fab package (**M009**). Sheet "n of m" is computed, never declared.
+
+```ohm
+board fmuv2:
+    title = "FMUv2 Flight Controller"
+    rev = "B"
+    date = "2026-07-29"
+    company = "Upcheck Technologies"
+    designer = "Kiran Sekar"
+```
+
+Fields: `title`, `rev`, `date`, `company`, `designer`, `license`, `comment`. The
+set is closed — an unknown key is **R027**, because a typo would otherwise
+vanish into a document nobody can cite.
+
+**`net NAME = <label>`** — a net has no name in Ohm, only an election over the
+labels on it. When no port label wins, a part pin does, and the net becomes
+`fmu.c_y1.P1` — a name that says where the net lands rather than what it is, and
+that turns false the moment the part is renumbered. Name the signals that matter
+(**M010** reports the rest). One net, one name (**R028**).
+
+```ohm
+module Fmu:
+    net OSC24_IN  = y_main.P1
+    net OSC24_OUT = y_main.P2
+```
+
+**`note "..."`** — an engineering note carried onto the sheet: *"place within
+2 mm of pin 49"*, *"0R link, cut to isolate"*. `near(...)` constraints already
+render themselves as placement notes; use `note` for what geometry cannot say.
+
+**`unused_pins = open`** on a component — every pin left unwired on it is a
+deliberate open, so each gets a no-connect marker and **B011** goes quiet. One
+line instead of a `must_connect=false` per pin on a 100-pin MCU, and a pin
+nobody accounted for stays *visible*, because it has no marker.
+
+**Values carry their ratings.** `Capacitor(value=100nF, vmax=16V,
+dielectric="X7R")` prints as `100nF 16V X7R` on the drawing. A capacitor across
+a supply rail with no `vmax` is not specified (**M011**); tolerance rides inside
+the quantity already (`10kohm +/- 1%`).
+
+**`kind` conformance drives the SYMBOL, not only the checks.** A part declaring
+`Capacitor` is drawn as a capacitor rather than a labelled box; a cluster's frame
+is titled by kind ("Crystal", "Connector"); blocks are laid out power → compute
+→ peripheral → interface from the same declarations. Declaring kinds is how the
+drawing gets its shape.
 
 ## Placement intent (routing stays out of the language)
 

@@ -3,6 +3,7 @@ control chars rejected in strings, kicad emitters escape quotes, generated
 footprints carry silkscreen outline + pin-1 marker, `python -m ohm` works,
 version is single-sourced with an uninstalled fallback."""
 
+import re
 import shutil
 import subprocess
 import sys
@@ -77,12 +78,31 @@ SOIC8 = build("SOIC", {"pins": Decimal(8)})
 
 
 def test_footprint_has_silk_outline_and_pin1_marker():
+    """Silk marks the body and NEVER lands on a pad.
+
+    This used to assert a single fp_rect at courtyard - 0.25mm. On any package
+    whose pads reach the courtyard that rectangle lay across them: 76
+    `silk_over_copper` violations on the fmuv2 board, and in fabrication silk on
+    bare copper is either clipped by the mask or ends up on the solderable
+    surface. The outline is now cut around the pads, so the invariant worth
+    asserting is the clearance itself, not the shape it happens to leave.
+    """
     fp = emit_footprint(SOIC8)
-    silk_rects = [ln for ln in fp.splitlines() if "fp_rect" in ln and "F.SilkS" in ln]
-    assert len(silk_rects) == 1
-    # outline is courtyard minus 0.25mm margin
-    half_w = SOIC8.courtyard_w / 2 - Decimal("0.25")
-    assert f"(start -{half_w}" in silk_rects[0]
+    silk = [ln for ln in fp.splitlines() if "fp_line" in ln and "F.SilkS" in ln]
+    assert silk, "no silkscreen body outline at all"
+
+    clear = Decimal("0.2")
+    for line in silk:
+        nums = [Decimal(v) for v in re.findall(r"-?\d+\.?\d*", line.split("(layer")[0])]
+        (x1, y1, x2, y2) = nums[:4]
+        for pad in SOIC8.pads:
+            # segments are axis-aligned, so overlap is a box test on both axes
+            on_x = (min(x1, x2) < pad.x + pad.w / 2 + clear
+                    and max(x1, x2) > pad.x - pad.w / 2 - clear)
+            on_y = (min(y1, y2) < pad.y + pad.h / 2 + clear
+                    and max(y1, y2) > pad.y - pad.h / 2 - clear)
+            assert not (on_x and on_y), f"silk {line.strip()} runs over pad {pad.id}"
+
     circles = [ln for ln in fp.splitlines() if "fp_circle" in ln and "F.SilkS" in ln]
     assert len(circles) == 1
     # SOIC pad 1 sits in the -x/-y quadrant → marker at that corner

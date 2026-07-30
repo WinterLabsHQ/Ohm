@@ -259,6 +259,14 @@ class _ToAst(Transformer):
         name, call = children
         return A.Binding(str(name), call, _span(meta, children))
 
+    def note_stmt(self, meta, children):
+        (text,) = children
+        return A.NoteStmt(str(text)[1:-1], _span(meta, children))
+
+    def net_decl(self, meta, children):
+        name, target = children
+        return A.NetDecl(str(name), target, _span(meta, children))
+
     def cnt(self, meta, children):
         tok = str(children[0])
         return A.BoundE(None, Decimal(tok)) if tok[0].isdigit() else A.BoundE(tok, Decimal(0))
@@ -300,6 +308,15 @@ class _ToAst(Transformer):
 
     def fn_params(self, meta, children):
         return tuple(str(c) for c in children)
+
+    # ---------- board (document identity) ----------
+    def board_decl(self, meta, children):
+        name, *items = children
+        return A.BoardDecl(str(name), tuple(items), _span(meta, children))
+
+    def board_item(self, meta, children):
+        key, value = children
+        return (str(key), str(value)[1:-1])  # STRING token, quotes stripped
 
     def connect(self, meta, children):
         return A.Connect(children[0], children[1], _span(meta, children))

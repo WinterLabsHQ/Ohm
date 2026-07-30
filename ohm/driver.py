@@ -14,6 +14,7 @@ from ohm.check_bringup import check_bringup
 from ohm.check_intent import check_intent
 from ohm.check_kinds import check_kinds
 from ohm.check_mfg import check_mfg
+from ohm.check_placement import check_placement
 from ohm.check_quant import check_quant
 from ohm.check_structural import check_structural
 from ohm.check_units import annotate_units, check_units
@@ -25,7 +26,7 @@ from ohm.lower import lower
 from ohm.resolve import resolve
 
 CHECKERS = [check_units, check_structural, check_kinds, check_intent, fold_asserts,
-            check_quant, check_bringup, check_mfg]
+            check_quant, check_bringup, check_mfg, check_placement]
 
 
 @dataclass
@@ -59,7 +60,7 @@ def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
     snapshot = ir.to_json(design) if debug_passes else None
     for checker in CHECKERS:
         extra = {"low": low} if checker in (check_intent, check_quant, check_bringup,
-                                            check_mfg) else {}
+                                            check_mfg, check_placement) else {}
         result.diagnostics += checker(design, path, **extra)
         if debug_passes and ir.to_json(design) != snapshot:
             raise AssertionError(f"checker '{checker.__name__}' mutated the design")

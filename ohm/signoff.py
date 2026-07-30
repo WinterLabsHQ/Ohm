@@ -7,8 +7,10 @@ from the netlist. A router (Meridian, KiCad) is trusted to add copper; signoff
 verifies the result against the *source*, which no board-local DRC can do.
 
 Pure: (IRLow, kicad_pcb text) -> diagnostics. No I/O, no subprocess (N1).
-Geometric rule checking (clearance/overlap shorts) is DELEGATED to kicad-cli
-pcb drc — signoff checks source-fidelity and point-topology connectivity:
+Geometric rule checking (clearance/overlap shorts) is impure — it needs KiCad's
+own engine — so it lives in ohm/drc.py and the `ohm signoff` COMMAND runs both,
+reporting geometry as V007. This module checks source-fidelity and
+point-topology connectivity:
 
   V001  board ≠ source: footprint missing/foreign, pad bound to the wrong net
   V002  incomplete net: a net's copper does not join all its pads (islands)
@@ -317,11 +319,11 @@ def signoff(low: ir.IRLow, board_text: str, board_file: str) -> list[Diagnostic]
 
     # ---- V005: honest scope notices ----
     if board.has_zones:
-        d("info", "V005", "board has copper zones; zone connectivity is not modeled — "
-          "confirm with `kicad-cli pcb drc`")
+        d("info", "V005", "board has copper zones; zone connectivity is not modeled "
+          "here — the V007 geometry gate covers them")
     if unverifiable:
         d("info", "V005", "nets with pad-less stub footprints cannot be traced: "
           + ", ".join(sorted(set(unverifiable))))
-    d("info", "V005", "geometric rules (clearance, overlap shorts) are delegated — "
-      "run `kicad-cli pcb drc` for the geometry gate")
+    d("info", "V005", "geometric rules (clearance, overlap shorts) are not checked "
+      "here — `ohm signoff` runs them as V007 via KiCad's DRC engine")
     return diags

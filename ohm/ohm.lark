@@ -8,7 +8,14 @@ top_decl: interface_decl
         | module_decl
         | kind_decl
         | fn_decl
+        | board_decl
         | use_stmt
+
+// ---------- board (document identity: title block, revision control) ----------
+// A schematic nobody can cite in an ECO is a draft, not a deliverable. These are
+// the fields a title block carries; all optional, at most one block per design.
+board_decl: "board" NAME ":" _NL _INDENT board_item+ _DEDENT
+board_item: NAME "=" STRING _NL
 
 // ---------- pure compile-time functions (ADR-012 E0) ----------
 fn_decl: "fn" NAME "(" [fn_params] ")" "=" expr _NL
@@ -49,7 +56,9 @@ component_item: "pin" NAME ":" attr ("," attr)* _NL   -> pin_decl
 // ---------- module (R6) ----------
 module_decl: "module" NAME ":" _NL _INDENT module_item+ _DEDENT
 
-module_item: NAME "=" call _NL                    -> binding
+module_item: "net" NAME "=" ref _NL               -> net_decl
+           | "note" STRING _NL                    -> note_stmt
+           | NAME "=" call _NL                    -> binding
            | NAME "=" cnt "*" call _NL            -> array_binding
            | ref "~" ref _NL                      -> connect
            | "assert" expr _NL                    -> assert_stmt
