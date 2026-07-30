@@ -97,7 +97,7 @@ class _CfgEnv(_cf.Env):
     resolves single-name refs against the enclosing module's literal configs."""
 
     def __init__(self, cfgs: dict[str, "ir.Value"],
-                 fns: dict | None = None):  # noqa: super-init not needed
+                 fns: dict | None = None):  # no super().__init__ to call
         self.cfgs = cfgs
         self.used: set[str] = set()  # configs the fold consumed (override guard)
         self.fns = fns or {}  # user `fn` decls fold here too (ADR-012 E0)
