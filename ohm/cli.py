@@ -17,21 +17,29 @@ from ohm.emit_netlist import emit_netlist
 _CONSOLE_ENCODING = getattr(sys.stdout, "encoding", None)
 
 
-def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
+def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad",
+                             stem: str = "ohm") -> None:
     """P-GEN-PACKAGE: write one .kicad_mod per distinct generated package
     (spec-named, shared across parts) and one .kicad_sym per component.
 
     fmt="eagle" writes one self-contained .lbr per component instead — Eagle keeps
-    package, symbol and their pin<->pad connects in a single library file."""
+    package, symbol and their pin<->pad connects in a single library file.
+
+    fmt="altium" writes one multi-part `<stem>.PcbLib` and one `<stem>.SchLib`, which
+    is how Altium libraries ship — a file per part would be unusable there."""
     from ohm.ir import GenerateSpec
     from ohm.pkggen.footprint import emit_footprint
     from ohm.pkggen.packages import build_from_spec, spec_name
     from ohm.pkggen.pindata_iface import DeclaredPinData
+    from ohm.pkggen.altium import SchSymbol
+    from ohm.pkggen.packages import PackageModel
     from ohm.pkggen.symbol import DEFAULT_FOOTPRINT_LIB, emit_symbol
 
     comps = {c.name: c for c in result.design.components}
     footprints_done: set[str] = set()
     symbols_done: set[str] = set()
+    altium_models: dict[str, PackageModel] = {}
+    altium_symbols: list[SchSymbol] = []
     for part in result.low.parts:
         spec = part.package  # effective package (R9 override already applied)
         if not isinstance(spec, GenerateSpec):
@@ -49,6 +57,15 @@ def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
                 model, comp.name, DeclaredPinData().pin_table(comp),
                 {k: str(v) for k, v in comp.attrs}),
                 encoding="utf-8", newline="\n")
+            continue
+        if fmt == "altium":
+            attrs = {k: str(v) for k, v in comp.attrs}
+            altium_models.setdefault(fp_name, build_from_spec(spec, fp_name))
+            if comp.name not in symbols_done:
+                symbols_done.add(comp.name)
+                altium_symbols.append(SchSymbol(
+                    comp.name, DeclaredPinData().pin_table(comp), fp_name, attrs,
+                    attrs.get("description", "")))
             continue
         if fp_name not in footprints_done:
             footprints_done.add(fp_name)
@@ -71,6 +88,13 @@ def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad") -> None:
                             footprint=f"{DEFAULT_FOOTPRINT_LIB}:{fp_name}",
                             attrs={k: str(v) for k, v in comp.attrs}),
                 encoding="utf-8", newline="\n")
+
+    if fmt == "altium" and altium_models:
+        from ohm.pkggen.altium import emit_pcblib, emit_schlib
+
+        (outdir / f"{stem}.PcbLib").write_bytes(
+            emit_pcblib(list(altium_models.values())))
+        (outdir / f"{stem}.SchLib").write_bytes(emit_schlib(altium_symbols))
 
 
 def _target_major(target: str) -> str:
@@ -398,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
                          help="output directory (default: ohm.toml 'out', else '.')")
     p_build.add_argument("--emit",
                          choices=["netlist", "kicad", "zen", "constraints", "package",
-                                  "eagle", "all"],
+                                  "eagle", "altium", "allegro", "all"],
                          default="all")
     p_build.add_argument("--sheets", choices=["auto", "flat", "hier"], default="auto",
                          help="schematic sheets: 'auto' (default) keeps one sheet "
@@ -777,6 +801,14 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_generated_packages(result, outdir)
             if args.emit in ("eagle",):  # the same part as an Eagle .lbr library
                 _emit_generated_packages(result, outdir, fmt="eagle")
+            if args.emit in ("altium",):  # native .PcbLib + .SchLib (ADR-020)
+                _emit_generated_packages(result, outdir, fmt="altium", stem=stem)
+            if args.emit in ("allegro",):  # Allegro third-party logic import
+                from ohm.emit_allegro import emit_allegro
+
+                assert result.design is not None  # result.ok gated above
+                for fname, text in emit_allegro(result.design, low, stem).items():
+                    (outdir / fname).write_text(text, encoding="utf-8", newline="\n")
             if args.emit in ("zen", "all"):
                 from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
 

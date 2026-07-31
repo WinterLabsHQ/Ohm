@@ -28,6 +28,12 @@ module LedBar:
 net classes), a netlist, a `.zen` interop file, and a constraints JSON for
 routers — byte-identical on every run.
 
+Not only KiCad: `--emit altium` writes native Altium `.PcbLib` and `.SchLib`
+libraries, `--emit allegro` writes the three-file logic import Cadence Allegro
+reads from any third-party front end, and `--emit eagle` writes Eagle `.lbr`.
+The geometry comes from the same `PackageModel` the KiCad footprint does, so the
+targets cannot disagree about a land pattern (ADR-020).
+
 ## Why
 
 Industry surveys put the average at ~2.9 respins per project; 35–40% of respin
@@ -105,6 +111,9 @@ ohm signoff board.ohm routed.kicad_pcb  # verify a routed board against the sour
 ohm check design.zen                    # lint a .zen design's flat netlist
 ohm convert design.zen -o design.ohm    # .zen design -> annotatable Ohm source
 ohm import-symbol Device.kicad_sym R    # real KiCad symbol -> Ohm component
+ohm build board.ohm --emit altium       # native Altium .PcbLib + .SchLib
+ohm build board.ohm --emit allegro      # Allegro third-party logic import (3 .dat)
+ohm build board.ohm --emit eagle        # Eagle .lbr library per component
 ohm lsp                                 # stdio LSP for editor red-squiggles
 ```
 

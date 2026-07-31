@@ -26,7 +26,11 @@ Changelog = "https://github.com/WinterLabsHQ/Ohm/blob/master/CHANGELOG.md"
 [project.optional-dependencies]
 # linters pinned exactly: their rulesets drift release-to-release, and the CI
 # gate must reproduce the local gate byte-for-byte (upgrade deliberately)
-dev = ["pytest>=8", "ruff==0.15.22", "mypy==2.3.0"]
+# olefile is TEST-ONLY and deliberately not a runtime dependency: `ohm` writes the
+# Altium compound-file container itself (ohm/pkggen/cfb.py). It is here so the test
+# suite reads that container back with an implementation Ohm did not write — a
+# self-written reader would agree with a self-written writer about a broken file.
+dev = ["pytest>=8", "ruff==0.15.22", "mypy==2.3.0", "olefile==0.47"]
 
 [project.scripts]
 ohm = "ohm.cli:main"

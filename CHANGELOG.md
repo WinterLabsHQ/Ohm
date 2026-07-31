@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **feat(emit)**: **native Altium and Cadence Allegro targets** (ADR-020) — the
+  multi-EDA claim stops being an aspiration.
+  - `ohm build --emit altium` writes real `.PcbLib` and `.SchLib` binaries, not an
+    interchange to import and repair. That meant writing the MS-CFB compound-file
+    container from scratch (`ohm/pkggen/cfb.py`, no runtime dependency) and packing
+    Altium's own records. Every field offset, block length and magic constant was
+    read out of Altium-authored libraries; fields whose meaning is still unknown are
+    copied verbatim rather than zeroed, because an unknown field set to zero is a
+    guess and an unknown field set to what Altium writes is a fact.
+  - `ohm build --emit allegro` writes `pstchip.dat` / `pstxprt.dat` / `pstxnet.dat`,
+    the logic import Allegro accepts from any third-party front end. Allegro's
+    library binaries are undocumented and Ohm emits none — this is parity on
+    connectivity and footprint binding, and explicitly none on library geometry.
+  - Geometry is shared, not reimplemented: pads from `PackageModel`, silkscreen from
+    `silk_segments`, symbols from `symbol_layout`. The new targets cannot drift from
+    the `.kicad_mod` that is validated against KiCad's own reference footprints, and
+    the tests assert that equality rather than trusting it.
+  - Validation is stated per layer and stops where the evidence does: the container
+    is read back by `olefile` (an implementation Ohm did not write, now a test-only
+    dev dependency), record framing is asserted against the lengths Altium itself
+    writes, and the Allegro triplet is asserted node-for-node against Ohm's own
+    proved netlist. That Altium or Allegro *opens* these files is **not** claimed —
+    neither tool exists on any machine Ohm is developed on.
+
 - **feat(check)**: a **D tier** — the drawing is checked, not eyeballed
   (ADR-019). `ohm build --emit kicad` now reports **D001** overlapping text,
   **D002** text over a symbol body, **D003** overlapping symbols and **D004**

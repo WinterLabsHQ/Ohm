@@ -313,3 +313,64 @@ D001×3 / D002×2 / D003×2 on fmuv2 (including riders overlapping the MCU body)
 S011×5 placeholder-courtyard conflicts, M010×30 unnamed nets, no `fp-lib-table`
 emitted, no `Edge.Cuts` outline, no router (Meridian scope).
 
+
+## Multi-EDA native targets — Altium + Allegro (2026-07-31, ADR-020)
+
+"Multi-EDA" was an aspiration: KiCad first-class, Eagle `.lbr` because Eagle is
+the only *other* published textual library format, and nothing a team on Altium
+or Allegro could open. Closed for Altium, half-closed for Allegro, and the half
+that is not closed is stated rather than papered over.
+
+**Altium is native, not interchange.** `ohm build --emit altium` writes real
+`.PcbLib` and `.SchLib` binaries. That required writing the MS-CFB compound-file
+container from scratch (`ohm/pkggen/cfb.py`, ~190 lines, zero runtime deps: v3
+sectors, a real mini stream because Altium libraries are dozens of sub-4 KB
+streams a reader locates by size alone) and packing Altium's own records
+(`ohm/pkggen/altium.py`): binary pad/track/arc on the PCB side, pipe-delimited
+parameter strings with the pins — and only the pins — in binary on the schematic
+side.
+
+**Nothing was guessed.** Every field offset, block length and magic constant was
+read out of Altium-authored libraries and cross-checked against the published
+format descriptions. The rule applied throughout: an unknown field set to zero is
+a guess, an unknown field set to what Altium writes is a fact — so the undocumented
+tail of the pad record is `_OBSERVED_*` copied verbatim, not zeroed.
+
+**Geometry is shared, so it cannot drift.** Pads from `PackageModel`, silkscreen
+from `silk_segments`, symbols from `symbol_layout` — the same functions the KiCad
+emitter calls. The test asserts pad-for-pad equality with the `.kicad_mod`, which
+`test_pkggen.py` validates against KiCad's own reference footprints:
+KiCad reference ← `.kicad_mod` ← `PackageModel` → `.PcbLib`.
+
+**Allegro gets connectivity, and that is said plainly.** Allegro's `.dra`/`.psm`/
+`.pad` are undocumented binary only Cadence's tools write, so Ohm emits none.
+What Allegro *does* document is the third-party logic import, and
+`ohm build --emit allegro` writes all three files (`pstchip.dat`, `pstxprt.dat`,
+`pstxnet.dat`) with syntax and canonical-path escaping taken from a real
+OrCAD-written triplet. Ohm net names routinely contain `.` (`r1.P1`), which
+Allegro reads as a hierarchy descent unless backslash-wrapped — so it is. Parity
+on connectivity and footprint binding; none on library geometry.
+
+**What the tests prove, layer by layer:** the container is read back by `olefile`
+(an implementation Ohm did not write — now a test-only dev dep, because a
+self-written reader would agree with a self-written writer about a broken file);
+record framing is asserted against the block lengths Altium itself writes (pad
+110, track 41, arc 45); geometry is asserted equal to the KiCad-validated
+`.kicad_mod`; the Allegro triplet is asserted node-for-node against Ohm's own
+proved netlist. All four emitters now share the role-map contract — every role in
+`VALID_ROLES` must appear in every target's electrical-type map, or the suite
+fails.
+
+**Evidence beyond the gate:** the emitted files were parsed by `pyAltiumLib`, a
+third-party Altium reader, which recovered the library header, part names,
+descriptions, every pad (designator, position, size, shape, layer, no hole) and
+every pin (name, number, electrical type, side, length). Recorded, not wired into
+CI — a second parser is still not Altium.
+
+**Not claimed:** that Altium Designer opens/renders/DRC-passes these files, or
+that Allegro imports the triplet. No Altium and no Cadence tool exists on any
+machine Ohm is developed or tested on. First user with a licence closes that gap.
+
+**Also fixed in passing:** the five golden netlists still carried `ohm 0.1.0`
+after the version bump, so six tests were red before this work started. Verified
+the only delta was the version string, then regenerated.
