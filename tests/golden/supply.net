@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "tests/golden/supply.ohm") (tool "ohm 0.1.0"))
+  (design (source "tests/golden/supply.ohm") (tool "ohm 0.1.1"))
   (components
     (comp (ref "U1") (value "NCP1529ASNT1G") (footprint "TSOT-23-5") (fields (field (name "ohm_ref") "reg")))
   )

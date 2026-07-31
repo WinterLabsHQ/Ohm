@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "tests/golden/i2c_bus.ohm") (tool "ohm 0.1.0"))
+  (design (source "tests/golden/i2c_bus.ohm") (tool "ohm 0.1.1"))
   (components
     (comp (ref "U1") (value "MCU") (footprint "QFN-16-1EP_3x3mm_P0.5mm") (fields (field (name "ohm_ref") "mcu.u")))
     (comp (ref "U2") (value "Sensor") (footprint "SOT-23-6") (fields (field (name "ohm_ref") "sens.s")))

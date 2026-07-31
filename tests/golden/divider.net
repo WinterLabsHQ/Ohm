@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "tests/golden/divider.ohm") (tool "ohm 0.1.0"))
+  (design (source "tests/golden/divider.ohm") (tool "ohm 0.1.1"))
   (components
     (comp (ref "R1") (value "10kohm +/- 1%") (footprint "R_0402_1005Metric") (fields (field (name "ohm_ref") "r1")))
     (comp (ref "R2") (value "10kohm +/- 1%") (footprint "R_0402_1005Metric") (fields (field (name "ohm_ref") "r2")))
