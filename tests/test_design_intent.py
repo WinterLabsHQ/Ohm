@@ -191,3 +191,45 @@ def test_fmt_never_drops_the_new_statements(statement):
     src = f"module M:\n    {statement}\n    r = R()\n"
     out, _ = format_source(src, "t.ohm")
     assert statement in out
+
+
+# ---------- components that declare no pins at all ----------
+# Regression: a fiducial and a mounting hole declare ZERO pins, but the emitter
+# synthesizes one anchor pin so KiCad has something to place. That pin was
+# emitted bare, so KiCad's ERC reported an unconnected pin the source never
+# declared — and `unused_pins = open` could not silence it, because there was
+# no pin in the source to mark. Seven of them on the ECG triage board.
+
+PINLESS = BOARD + '''use std.interfaces
+
+component Fid:
+    package = "Fiducial:Fiducial_1mm_Mask2mm"
+    designator_prefix = "FID"
+
+component Hole:
+    package = "MountingHole:MountingHole_3.2mm_M3"
+    designator_prefix = "H"
+
+module Top:
+    pwr = io(Power)
+    fid1 = Fid()
+    fid2 = Fid()
+    h1 = Hole()
+'''
+
+
+def test_a_pinless_part_gets_a_no_connect_on_its_anchor_pin():
+    """The anchor pin exists for the emitter, not the design, so it says so."""
+    result = compile_source(PINLESS, "t.ohm")
+    assert not [d for d in result.diagnostics if d.severity == "error"]
+    sch = emit_kicad_sch(result.low, "t.ohm", result.design)
+    assert sch.count("(no_connect") == 3, "one per pinless part (2 fiducials + 1 hole)"
+
+
+def test_a_pinless_part_needs_no_unused_pins_declaration():
+    """`unused_pins = open` cannot reach a pin the source never declared, so
+    the emitter must handle it without the author having to say anything."""
+    assert "unused_pins" not in PINLESS
+    result = compile_source(PINLESS, "t.ohm")
+    sch = emit_kicad_sch(result.low, "t.ohm", result.design)
+    assert "(no_connect" in sch

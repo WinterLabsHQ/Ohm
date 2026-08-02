@@ -1173,6 +1173,14 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         # deliberate open, so it gets a no-connect marker and ERC stays clean —
         # and a pin nobody accounted for is then visible because it has none.
         open_pins = str(dict(part.attrs).get("unused_pins", "")) == "open"
+        # A component that declares NO pins at all — a fiducial, a mounting
+        # hole — still gets one synthesized anchor pin from the pin-table
+        # fallback above, so KiCad has something to place. That pin exists for
+        # the emitter's benefit, not the design's, and it must carry a
+        # no-connect: otherwise ERC reports an unconnected pin the source never
+        # declared, and `unused_pins = open` cannot silence it because there is
+        # no pin in the source to mark.
+        anchor_only = comp_def is not None and not comp_def.pins
         for number, _name, _role, lx, ly, pside in pin_geom:
             # a turned symbol takes its pins' stubs with it
             sdx, sdy = _stub_dir(pside, rot)
@@ -1185,9 +1193,10 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 # the findings that matter are invisible; with it, anything left
                 # unflagged is a pin nobody has accounted for.
                 pin_def = pin_by_pad.get(number)
-                if pin_def is not None and (pin_def.role == "nc"
-                                            or pin_def.must_connect is False
-                                            or open_pins):
+                if anchor_only or (pin_def is not None
+                                   and (pin_def.role == "nc"
+                                        or pin_def.must_connect is False
+                                        or open_pins)):
                     nx, ny = _pin_abs(px, py, lx, ly, rot)
                     out.append(f"  (no_connect (at {nx} {ny})"
                                f' (uuid "{_uid(source, "nc", part.ref, number)}"))')
