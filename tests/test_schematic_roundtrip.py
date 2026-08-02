@@ -61,7 +61,12 @@ def _nets(text: str) -> dict[str, set[tuple[str, str]]]:
     counted as a difference.
     """
     out: dict[str, set[tuple[str, str]]] = {}
+    # KiCad 9 inserts `(class "Default")` between the net name and its nodes;
+    # KiCad 7 did not. Without tolerating it the node group matches zero times,
+    # every net comes back with an empty pin set, and the comparison fails on
+    # an empty partition rather than on a real difference.
     for m in re.finditer(r'\(net \(code "\d+"\) \(name "([^"]*)"\)'
+                         r'(?:\s*\(class "[^"]*"\))?'
                          r'((?:\s*\(node [^\n]*)*)', text):
         # KiCad path-prefixes a sheet-local label ("/pwr/pwr.c1.P1"); Ohm names
         # are already globally unique, so the last segment is the name. Two

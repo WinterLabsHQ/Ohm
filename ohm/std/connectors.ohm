@@ -24,13 +24,13 @@ use std.kinds
 # the .kicad_mod. Terminals carry whatever you wire through them: role=passive.
 
 component TerminalBlock_2(Connector):
-    package = "TerminalBlock:TerminalBlock_bornier-2_P5.08mm"
+    package = "TerminalBlock_CUI:TerminalBlock_CUI_TB007-508-02_1x02_P5.08mm_Horizontal"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
 
 component TerminalBlock_3(Connector):
-    package = "TerminalBlock:TerminalBlock_bornier-3_P5.08mm"
+    package = "TerminalBlock_CUI:TerminalBlock_CUI_TB007-508-03_1x03_P5.08mm_Horizontal"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2

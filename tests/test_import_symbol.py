@@ -27,6 +27,8 @@ FIXTURE = """(kicad_symbol_lib (version 20220914) (generator test)
 )"""
 
 SYSLIB = Path("/usr/share/kicad/symbols/Device.kicad_sym")
+# KiCad 9 moved the discrete FETs out of Device into Transistor_FET.
+FETLIB = Path("/usr/share/kicad/symbols/Transistor_FET.kicad_sym")
 
 
 def test_import_generates_compilable_component():
@@ -73,7 +75,7 @@ def test_real_device_resistor():
 def test_every_role_emitted_is_valid():
     from ohm.resolve import VALID_ROLES
 
-    text = import_symbol(SYSLIB.read_text(), "Q_NMOS_GDS", "Device")
+    text = import_symbol(FETLIB.read_text(), "Q_NMOS_GDS", "Transistor_FET")
     for line in text.splitlines():
         if line.strip().startswith("pin "):
             role = line.split("role=")[1].split(",")[0]

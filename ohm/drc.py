@@ -93,7 +93,19 @@ def run_geometry_drc(board_path: str) -> list[Diagnostic]:
     board = pcbnew.LoadBoard(board_path)
     with tempfile.TemporaryDirectory() as tmp:
         report = Path(tmp) / "drc.rpt"
-        pcbnew.WriteDRCReport(board, str(report), pcbnew.EDA_UNITS_MILLIMETRES, True)
+        # KiCad 9 renamed the millimetre unit enum (EDA_UNITS_MILLIMETRES ->
+        # EDA_UNITS_MM). Ask for whichever this KiCad has rather than pinning a
+        # version: signoff's geometry gate is the last check before a board is
+        # fabricated, and it failing with an AttributeError on a KiCad upgrade
+        # is exactly when it must not.
+        mm = getattr(pcbnew, "EDA_UNITS_MM", None)
+        if mm is None:
+            mm = getattr(pcbnew, "EDA_UNITS_MILLIMETRES", None)
+        if mm is None:
+            raise DrcUnavailable(
+                "this KiCad's pcbnew exposes no millimetre unit constant "
+                "(looked for EDA_UNITS_MM and EDA_UNITS_MILLIMETRES)")
+        pcbnew.WriteDRCReport(board, str(report), mm, True)
         text = report.read_text(encoding="utf-8", errors="replace")
     return parse_drc_report(text, board_path)
 

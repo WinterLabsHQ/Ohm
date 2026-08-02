@@ -3,7 +3,6 @@ that import into KiCad clean and match a golden reference within tolerance;
 (b) generated pads satisfy the pin<->pad map (Tier-S); (c) byte-identical
 across runs. `ohm gen-package` works standalone. No fetch in the build path."""
 
-import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.kicad_golden import pads_from_kicad_mod
 from ohm.driver import compile_source
 from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import PkgError, build
@@ -26,10 +26,7 @@ SOIC8 = build("SOIC", {"pins": Decimal(8)})
 # ---------- gate (a): golden reference within tolerance ----------
 @pytest.mark.skipif(not KICAD_SOIC8.exists(), reason="KiCad library not installed")
 def test_soic8_matches_kicad_golden_within_tolerance():
-    golden = {}
-    for m in re.finditer(r"\(pad (\d+) smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)",
-                         KICAD_SOIC8.read_text()):
-        golden[m.group(1)] = tuple(Decimal(m.group(i)) for i in (2, 3, 4, 5))
+    golden = pads_from_kicad_mod(KICAD_SOIC8)
     assert len(golden) == 8
     for pad in SOIC8.pads:
         gx, gy, gw, gh = golden[pad.id]
@@ -126,11 +123,7 @@ KICAD_QFN32 = Path("/usr/share/kicad/footprints/Package_DFN_QFN.pretty/"
 
 @pytest.mark.skipif(not KICAD_QFN32.exists(), reason="KiCad library not installed")
 def test_qfn32_matches_kicad_golden_within_tolerance():
-    golden = {}
-    for m in re.finditer(r"\(pad (\d+) smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)",
-                         KICAD_QFN32.read_text()):
-        pid, x, y, w, h = m.groups()
-        golden[pid] = (float(x), float(y), float(w), float(h))
+    golden = pads_from_kicad_mod(KICAD_QFN32, as_float=True)
     model = build("QFN", {"pins": Decimal(32), "pitch": _q("0.5"), "body": _q("5")})
     assert len(model.pads) == 32
     for p in model.pads:
@@ -163,10 +156,7 @@ KICAD_LQFP48 = Path("/usr/share/kicad/footprints/Package_QFP.pretty/LQFP-48_7x7m
 
 @pytest.mark.skipif(not KICAD_LQFP48.exists(), reason="KiCad library not installed")
 def test_qfp48_matches_kicad_golden_within_tolerance():
-    golden = {}
-    for m in re.finditer(r"\(pad (\d+) smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)",
-                         KICAD_LQFP48.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_LQFP48, as_float=True)
     model = build("QFP", {"pins": Decimal(48), "pitch": _q("0.5"), "span": _q("9")})
     assert len(model.pads) == 48
     for p in model.pads:
@@ -195,10 +185,7 @@ KICAD_DFN8 = Path("/usr/share/kicad/footprints/Package_DFN_QFN.pretty/DFN-8_2x2m
 
 @pytest.mark.skipif(not KICAD_DFN8.exists(), reason="KiCad library not installed")
 def test_dfn8_matches_kicad_golden_within_tolerance():
-    golden = {}
-    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
-                         KICAD_DFN8.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_DFN8, as_float=True)
     model = build("DFN", {"pins": Decimal(8), "pitch": _q("0.5"), "body": _q("2")})
     assert len(model.pads) == 8
     for p in model.pads:
@@ -222,10 +209,7 @@ KICAD_BGA49 = Path("/usr/share/kicad/footprints/Package_BGA.pretty/"
 
 @pytest.mark.skipif(not KICAD_BGA49.exists(), reason="KiCad library not installed")
 def test_bga49_matches_kicad_golden_exactly():
-    golden = {}
-    for m in re.finditer(r"\(pad (\w+) smd circle \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)",
-                         KICAD_BGA49.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_BGA49, as_float=True)
     model = build("BGA", {"rows": Decimal(7), "cols": Decimal(7), "pitch": _q("0.8"), "ball": _q("0.5")})
     assert len(model.pads) == 49
     for p in model.pads:
@@ -252,10 +236,7 @@ KICAD_PLCC28 = Path("/usr/share/kicad/footprints/Package_LCC.pretty/PLCC-28.kica
 
 @pytest.mark.skipif(not KICAD_PLCC28.exists(), reason="KiCad library not installed")
 def test_plcc28_matches_kicad_golden_within_tolerance():
-    golden = {}
-    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
-                         KICAD_PLCC28.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_PLCC28, as_float=True)
     model = build("PLCC", {"pins": Decimal(28)})
     assert len(model.pads) == 28
     for p in model.pads:
@@ -292,10 +273,7 @@ def test_plcc32_rectangular_matches_kicad_topology():
     land style differs from the generic PLCC-NN family Ohm reproduces), so this
     asserts numbering, side split, pitch and pad orientation — not radial offset.
     """
-    golden = {}
-    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
-                         KICAD_PLCC32.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_PLCC32, as_float=True)
     model = build("PLCC", {"pins": Decimal(32)})
     assert len(model.pads) == 32
     assert model.courtyard_w != model.courtyard_h  # rectangular courtyard
@@ -331,10 +309,7 @@ KICAD_SOT223 = Path("/usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/SOT-2
 
 @pytest.mark.skipif(not KICAD_SOT223.exists(), reason="KiCad library not installed")
 def test_sot223_matches_kicad_golden():
-    golden = {}
-    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
-                         KICAD_SOT223.read_text()):
-        golden[m.group(1)] = tuple(float(x) for x in m.groups()[1:])
+    golden = pads_from_kicad_mod(KICAD_SOT223, as_float=True)
     model = build("SOT223", {})
     assert len(model.pads) == 4
     for p in model.pads:
@@ -363,10 +338,7 @@ def test_fixed_power_package_signal_leads_match_kicad(pkg, ref_leads):
     ref_path = Path(f"/usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/{ref_name}.kicad_mod")
     if not ref_path.exists():
         pytest.skip("KiCad library not installed")
-    golden = {}
-    for m in re.finditer(r'\(pad "(\d+)" smd \w+ \(at ([-\d.]+) ([-\d.]+)\) \(size ([\d.]+) ([\d.]+)\)',
-                         ref_path.read_text()):
-        golden.setdefault(m.group(1), tuple(float(x) for x in m.groups()[1:]))
+    golden = pads_from_kicad_mod(ref_path, as_float=True)
     model = build(pkg, {})
     assert len(model.pads) == 4  # 3 signal leads + solid tab (pad 4)
     byid = {p.id: p for p in model.pads}
