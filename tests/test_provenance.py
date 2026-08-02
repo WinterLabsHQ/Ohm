@@ -355,3 +355,45 @@ def test_s010_flags_an_unequal_perimeter_ring():
 
 def test_s010_silent_on_a_full_grid():
     assert "S010" not in codes(_lga(4, 4, border=0).replace("border=0", "border=0"))
+
+
+# ---------- the tool must not diff a part against a DIFFERENT part ----------
+# Regression: a hand-declared ADS1292R (2-channel AFE) whose pinout_source said
+# "datasheet:..." was fuzzy-matched against KiCad 9's ADS1299 (8-channel AFE)
+# and reported 64 confident "findings". Under KiCad 7 the same design correctly
+# abstained, purely because no ADS1299 symbol existed to latch onto.
+
+def test_prefix_score_rejects_a_sibling_in_the_same_family():
+    """ADS1292R and ADS1299 share six characters and are different parts.
+
+    Any family whose prefix reaches six characters would otherwise sail past
+    the length rule -- and those are the parts it is most dangerous to confuse.
+    """
+    assert _prefix_score("ADS1292R", "ADS1299") == 0
+    assert _prefix_score("ADS1298", "ADS1299") == 0
+    assert _prefix_score("STM32H743IIT6", "STM32H750IIT6") == 0
+
+
+def test_prefix_score_still_accepts_a_wildcard_suffix():
+    """A LETTER on either side is the variant wildcard, not a different part."""
+    assert _prefix_score("STM32F427VIT6", "STM32F427VITx") >= 6
+    assert _prefix_score("ADS1292R", "ADS1292") >= 6
+
+
+@requires_kicad_sym
+def test_datasheet_provenance_is_not_fuzzy_matched():
+    """A declared datasheet origin abstains; it does not hunt for a lookalike.
+
+    The author has said where the map came from. Searching the library for a
+    similarly-named part contradicts that declaration, and a verification tool
+    that is confidently wrong is worse than one that abstains.
+    """
+    from ohm.provenance import verify_against_libs
+
+    src = _part(mpn=True, source="datasheet:SBAS502C:PinFunctions")
+    design = compile_source(src, "t.ohm").design
+    [(name, status, detail, findings)] = verify_against_libs(design, str(KICAD_SYMBOLS))
+    assert name == "Widget"
+    assert status == "unverifiable", f"expected abstention, got {status}: {findings}"
+    assert "datasheet" in detail
+    assert findings == []

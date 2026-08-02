@@ -124,6 +124,20 @@ def verify_against_libs(design: ir.Design, lib_dir: str) -> list[tuple[str, str,
                 results.append((comp.name, "unverifiable",
                                 f"pinout_source names {parsed[1]}, not found in {lib_dir}", []))
                 continue
+        elif isinstance(src, str) and (declared_src := parse_source(src)):
+            # The author has SAID where this map came from and it is not a
+            # KiCad symbol — a datasheet attestation. Falling through to the
+            # MPN search here would contradict that declaration and diff the
+            # part against whatever the library happens to have a similar name
+            # for. That is how a hand-declared ADS1292R got diffed against an
+            # unrelated ADS1299 and reported 64 confident "findings".
+            #
+            # A verification tool that is confidently wrong is worse than one
+            # that abstains, so it abstains.
+            results.append((comp.name, "unverifiable",
+                            f"pinout_source is {declared_src[0]}, "
+                            "not machine-checkable", []))
+            continue
         elif isinstance(attrs.get("mpn"), str):
             # Search by part number. Symbol names encode variant families
             # (STM32F427V_G-I_Tx covers F427VG/F427VI), so match on the longest
@@ -183,6 +197,18 @@ def _prefix_score(mpn: str, symbol: str) -> int:
     n = 0
     for x, y in zip(a, b):
         if x != y:
+            # Diverging on a DIGIT against a DIGIT means two different members
+            # of one family, not a variant of the same part: ADS1292R vs
+            # ADS1299 share six characters and are a 2-channel and an 8-channel
+            # part. Families whose prefix is >= 6 characters would otherwise
+            # sail past the length rule below — and those are exactly the parts
+            # it is most dangerous to confuse.
+            #
+            # A letter on either side is the variant suffix libraries use as a
+            # wildcard (STM32F427VIT6 vs STM32F427VITx), which is the case this
+            # heuristic exists to accept.
+            if x.isdigit() and y.isdigit():
+                return 0
             break
         n += 1
     return n if n >= 6 and n >= 0.6 * min(len(a), len(b)) else 0
