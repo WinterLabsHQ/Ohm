@@ -4,14 +4,15 @@ version = "0.1.1"
 description = "Ohm — AI-native, physics-aware hardware description language and hermetic compiler"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "Proprietary — see LICENSE" }
 authors = [{ name = "WinterLabs", email = "admin@upcheck.in" }]
 keywords = ["hdl", "eda", "electronics", "kicad", "hardware", "netlist", "pcb", "compiler"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: Other/Proprietary License",
+    "Private :: Do Not Upload",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",

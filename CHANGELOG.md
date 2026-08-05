@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **licence**: **Ohm is proprietary.** The D6 open-core question is closed the
+  other way: `LICENSE` is now the Ohm Software License (all rights reserved,
+  use only under a written agreement), `NOTICE` and the `pyproject` metadata
+  match it, and the packaging carries `Private :: Do Not Upload` so an
+  accidental `twine upload` is refused rather than irreversible. Output is
+  untouched by this: designs and netlists you build with Ohm remain yours.
+
+- **docs**: README rewritten in plain language — same claims, fewer of them
+  said twice, and the stale counts (tests, KiCad version support) corrected.
+
 - **feat(pcb)**: **track widths are computed, and the placer places.** The two
   things that made the board output a stub rather than a starting point.
   - **A netclass now carries a width, not just a name.** `netclass(rail,

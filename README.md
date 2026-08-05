@@ -1,12 +1,13 @@
 # Ohm
 
-**An AI-native, physics-aware hardware description language for electronics — and
-a hermetic compiler that catches the mistakes that kill first spins.**
+**Write your circuit as code. The compiler catches the mistakes that kill a
+first spin — before you order boards.**
 
-Circuits are declared intent: typed interfaces, component `kind` contracts,
-operating points, and bring-up expectations. The more a design declares, the more
-the compiler proves — deterministically, at compile time, with machine-readable
-diagnostics that both humans and LLM agents iterate on.
+You describe the circuit in a text file: the parts, what connects to what, and
+what you expect (this is a 3.3 V rail, this is an I2C bus, this pin sinks
+20 mA). Ohm checks the design against that and emits a KiCad project, a
+netlist, and constraints for routers. Same input, same output bytes, every
+time.
 
 ```
 use std.interfaces
@@ -17,71 +18,68 @@ module LedBar:
     pwr = io(Power)
     vcc = config(Voltage, default=3.3V)
     leds = 8 * LED()
-    rs = 8 * Resistor(value=(vcc - 2V) / 10mA)   # folds to 130ohm at compile time
+    rs = 8 * Resistor(value=(vcc - 2V) / 10mA)   # works out to 130ohm at compile time
     for i in 0..7:
         pwr.v ~ rs[i].P1
         rs[i].P2 ~ leds[i].A
         leds[i].K ~ pwr.gnd
 ```
 
-`ohm build led_bar.ohm` emits a KiCad 7 project (schematic, placed board,
-net classes), a netlist, a `.zen` interop file, and a constraints JSON for
-routers — byte-identical on every run.
+`ohm build led_bar.ohm` gives you a KiCad schematic and board, a netlist, a
+`.zen` file, and a constraints JSON.
 
-Not only KiCad: `--emit altium` writes native Altium `.PcbLib` and `.SchLib`
-libraries, `--emit allegro` writes the three-file logic import Cadence Allegro
-reads from any third-party front end, and `--emit eagle` writes Eagle `.lbr`.
-The geometry comes from the same `PackageModel` the KiCad footprint does, so the
-targets cannot disagree about a land pattern (ADR-020).
+Other CAD tools too: `--emit altium` writes real Altium `.PcbLib`/`.SchLib`
+libraries, `--emit allegro` writes the three files Cadence Allegro imports, and
+`--emit eagle` writes an Eagle `.lbr`. All of them get their land patterns from
+the same internal package model, so they can't disagree about a footprint.
 
 ## Why
 
-Industry surveys put the average at ~2.9 respins per project; 35–40% of respin
-causes are addressable before layout, and the dominant class *passes every DRC
-and dies on the bench*: missing pull-ups, floating gate straps, missing
-decoupling, unterminated buses, 5V into a 3.3V pin. Generic ERC cannot see
-protocol-level intent. Ohm's typed interfaces make these deterministic
-compile-time errors:
+Most boards need about three spins. A large share of those respins are caused
+by things you could have caught before layout — and the worst of them **pass
+DRC and fail on the bench**: a missing pull-up, a floating gate, no decoupling,
+an unterminated bus, 5 V driven into a 3.3 V pin. A normal ERC can't see any of
+that, because it doesn't know what the net is *for*. Ohm does, because you told
+it:
 
-| Tier | Catches |
+| Checks | Examples |
 |---|---|
-| Structural (S) | dangling pins, package/pad mismatches |
-| Intent (I) | swapped SDA/SCL, output↔output, undriven inputs |
-| Units (U) | `3.3V + 10kohm`, dimension mismatches — exact Decimal, tolerance intervals |
-| Quantities (Q) | operating point vs pin ratings (vmax/imax/pmax, thermal) |
-| Kinds (K) | a part claiming `component X(OpAmp)` must structurally satisfy the OpAmp contract |
-| Bring-up (B) | `expects pullup` on I2C, decoupling, crystal load caps, `when endpoint` bus termination |
-| Manufacturing (M) | DFM/DFT lints once the BOM stage starts (MPNs declared) |
-| Signoff (V) | a **routed** board re-verified against the source: incomplete nets, floating copper, drift |
+| Structural (S) | pins connected to nothing, footprint/pad mismatches |
+| Intent (I) | SDA and SCL swapped, two outputs driving each other, an input nobody drives |
+| Units (U) | `3.3V + 10kohm`, and any other unit that doesn't add up |
+| Quantities (Q) | the operating point vs. what the pin is actually rated for |
+| Kinds (K) | a part declared as an op-amp that isn't wired like one |
+| Bring-up (B) | missing I2C pull-ups, decoupling, crystal load caps, bus termination |
+| Manufacturing (M) | DFM/DFT lints once you've picked real part numbers |
+| Signoff (V) | a **routed** board re-checked against the source: missed nets, floating copper, drift |
 
-Every check has a declared escape (`waive=` → an auditable note, never silence),
-and every code has an explanation: `ohm explain B001`.
+Every check can be waived with `waive=` — which leaves a note in the output,
+never silence. Every code explains itself: `ohm explain B001`.
 
-**Ohm meets you where your designs already are.** `ohm check design.zen` lints
-a `.zen` design's flat netlist directly; `ohm convert design.zen` turns it into
-annotatable Ohm source whose TODOs are exactly the intent a flat netlist cannot
-express — fill them (or hand them to your agent) and the full tier stack lights
-up. `ohm import-symbol` does the same for any installed KiCad symbol library.
-You don't have to start from scratch to get Ohm's checking.
+**You don't have to start from scratch.** `ohm check design.zen` checks an
+existing `.zen` netlist as-is. `ohm convert design.zen` turns it into Ohm source
+with TODOs where the intent is missing — fill those in (yourself or with an
+agent) and the rest of the checks switch on. `ohm import-symbol` pulls in any
+symbol from your installed KiCad libraries.
 
 ## Install
 
-Requires Python 3.12+.
+Needs Python 3.12+.
 
-**Global (recommended)** — `ohm` on your PATH everywhere, no venv to activate.
-[pipx](https://pipx.pypa.io) installs it in its own isolated environment:
+**Recommended** — [pipx](https://pipx.pypa.io) puts `ohm` on your PATH with no
+venv to activate:
 
 ```sh
 git clone <this repo> && cd Ohm
-pipx install .              # or, from anywhere: pipx install /path/to/Ohm
+pipx install .              # or from anywhere: pipx install /path/to/Ohm
 ohm --version
-ohm doctor                  # verify Python, install, encoding, KiCad libs
+ohm doctor                  # checks Python, install, encoding, KiCad libraries
 ```
 
-**From source (for development)** — an editable install in a virtualenv:
+**For development** — editable install in a virtualenv:
 
 ```sh
-# POSIX
+# macOS / Linux
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/ohm --version
 # Windows PowerShell
 py -3.12 -m venv .venv; .venv\Scripts\pip install -e ".[dev]"; .venv\Scripts\ohm --version
@@ -89,81 +87,89 @@ py -3.12 -m venv .venv; .venv\Scripts\pip install -e ".[dev]"; .venv\Scripts\ohm
 
 ## Quick start
 
-Scaffold a project, then work inside it — commands find the entry via `ohm.toml`:
-
 ```sh
-ohm init myboard            # scaffold a project (ohm.toml, starter design, docs, lib/)
+ohm init myboard    # make a project (ohm.toml, a starter design, docs, lib/)
 cd myboard
-ohm check                   # all checks, no emit (uses the entry from ohm.toml)
-ohm build                   # emit netlist + KiCad + zen + constraints -> out/
-ohm doctor                  # diagnose the environment (install, PATH, encoding)
-ohm refactor .              # restructure an existing folder (dry-run; --apply to commit)
+ohm check           # run every check, emit nothing
+ohm build           # write netlist + KiCad + zen + constraints to out/
 ```
 
-Every command also takes an explicit file, no project required:
+Inside a project, commands find your design through `ohm.toml`. You can also
+just point at a file:
 
 ```sh
-ohm check examples/led_bar.ohm          # all checks, no emit (fast inner loop)
-ohm build examples/led_bar.ohm -o out/  # emit netlist + KiCad + zen + constraints
-ohm fmt examples/led_bar.ohm            # canonical formatting
-ohm explain I005                        # what a diagnostic means and how to fix it
-ohm signoff board.ohm routed.kicad_pcb  # verify a routed board against the source
-ohm check design.zen                    # lint a .zen design's flat netlist
-ohm convert design.zen -o design.ohm    # .zen design -> annotatable Ohm source
-ohm import-symbol Device.kicad_sym R    # real KiCad symbol -> Ohm component
-ohm build board.ohm --emit altium       # native Altium .PcbLib + .SchLib
-ohm build board.ohm --emit allegro      # Allegro third-party logic import (3 .dat)
-ohm build board.ohm --emit eagle        # Eagle .lbr library per component
-ohm lsp                                 # stdio LSP for editor red-squiggles
+ohm check examples/led_bar.ohm          # fast inner loop: checks only
+ohm build examples/led_bar.ohm -o out/  # everything, into out/
+ohm fmt examples/led_bar.ohm            # tidy the formatting
+ohm explain I005                        # what a message means and how to fix it
+ohm signoff board.ohm routed.kicad_pcb  # check a routed board against the source
+ohm check design.zen                    # check an existing .zen netlist
+ohm convert design.zen -o design.ohm    # .zen -> Ohm source you can annotate
+ohm import-symbol Device.kicad_sym R    # KiCad symbol -> Ohm component
+ohm build board.ohm --emit altium       # Altium .PcbLib + .SchLib
+ohm build board.ohm --emit allegro      # Allegro third-party import (3 .dat files)
+ohm build board.ohm --emit eagle        # Eagle .lbr
+ohm doctor                              # what's wrong with my environment
+ohm lsp                                 # editor support (red squiggles) over stdio
+ohm refactor .                          # reorganise an existing folder (dry run; --apply)
 ```
 
-The language stays deliberately small but composes: pure compile-time functions
-(`fn led_r(vcc, vf, i) = (vcc - vf) / i`), config-driven arrays and loops
-(`rs = n * Resistor(...)`, `for i in 0..n-1:`), and compile-time board variants
-(`if endpoint:` / `else:`) — everything folds at elaborate, so builds stay
-hermetic, terminating, and byte-identical.
+The language stays small on purpose, but it composes: compile-time functions
+(`fn led_r(vcc, vf, i) = (vcc - vf) / i`), arrays and loops driven by config
+(`rs = n * Resistor(...)`, `for i in 0..n-1:`), and board variants
+(`if endpoint:` / `else:`). All of it is worked out at compile time, so a build
+always finishes and always produces the same bytes.
 
-Authoring guide (self-contained, written for humans *and* LLM agents):
-[`docs/STYLE.md`](docs/STYLE.md). Agents: see [`AGENTS.md`](AGENTS.md).
+How to write Ohm: [`docs/STYLE.md`](docs/STYLE.md) — written for humans and for
+LLM agents. If you're an agent: [`AGENTS.md`](AGENTS.md).
 
-## Repository layout
+## What's in here
 
 ```
-ohm/            the compiler: parse → resolve → check tiers → lower → emit
-ohm/std/        standard library (~106 blocks + honest templates, 17 domains)
-ohm/pkggen/     IPC-7351 footprint/symbol generation
-shared/         the constraints-schema seam consumed by routing/solver layers
-docs/STYLE.md   the authoring guide
-docs/adr/       12 architecture decision records
-docs/blueprint/ the founding design docs (read-only, canonical)
-examples/       complete boards, CI-enforced to compile clean
-tests/          840 tests: golden netlists, KiCad round-trip oracle,
-                adversarial suites, determinism gates
+ohm/            the compiler: parse -> resolve -> check -> lower -> emit
+ohm/std/        standard library (~106 blocks across 17 domains)
+ohm/pkggen/     footprint and symbol generation (IPC-7351)
+shared/         the constraints format the routing/solver products read
+docs/STYLE.md   how to write Ohm
+docs/adr/       why things are built the way they are
+docs/blueprint/ the original design docs (read-only)
+examples/       complete boards, kept compiling by CI
+tests/          895 tests: golden netlists, a KiCad round-trip oracle,
+                adversarial suites, byte-for-byte determinism gates
 ```
 
-## Design principles
+## Principles
 
-- **Hermetic**: the compiler does no I/O, network, clock, or solver calls —
-  enforced by tests. Same source, same bytes out, forever.
-- **Honest**: no "catches all bugs" claims; what isn't checked says so
-  (see the V005 delegation notices, un-kinded parts, `# TEMPLATE` blocks).
-- **Open language, proprietary computation**: the language, compiler, checks,
-  and emitters are this repo. Routing (Meridian) and the convergence solver
-  are separate products consuming the `shared/` seam.
+- **Predictable.** The compiler does no network, disk, clock, or solver calls —
+  and there are tests that prove it. Same source in, same bytes out, forever.
+- **Honest.** No "catches everything" claims. Where Ohm doesn't check something,
+  it says so (V005 notices, parts with no declared kind, `# TEMPLATE` blocks).
 
-## Status & license
+## Status
 
-Pre-release (v0.1.0). The language and compiler are feature-complete through
-signoff (see [`CHANGELOG.md`](CHANGELOG.md)).
+Pre-release (v0.1.0). Language and compiler are feature-complete through
+signoff — see [`CHANGELOG.md`](CHANGELOG.md).
 
-**Honesty about validation**: every claim above is enforced by the test suite
-(golden netlists, adversarial suites, KiCad ground-truth agreement, live-LLM
-authoring fixtures) — but no Ohm-designed board has been manufactured yet.
-Until a first spin comes back from a fab and boots, treat the bring-up tier as
-*test-validated, not field-validated*. That first board is the next gate, and
-this line will change when it happens.
+Ohm writes the KiCad 7 file format, verified to open and extract identically in
+KiCad 7 through 10.0.5.
 
-Licensed under the [Apache License 2.0](LICENSE) — free to use, modify, and
-distribute, with an explicit patent grant. The Ohm language, compiler, checks,
-and emitters in this repository are open source; the routing (Meridian) and
-convergence-solver products that consume the `shared/` seam are separate.
+**About validation, plainly**: everything claimed above is backed by the test
+suite — golden netlists, adversarial suites, agreement with KiCad itself — but
+no board designed in Ohm has been manufactured yet. Until one comes back from a
+fab and boots, treat the bring-up checks as *tested, not field-proven*. That
+first board is the next milestone, and this paragraph changes when it happens.
+
+## Licence
+
+Ohm is **proprietary software**. Copyright 2026 WinterLabs, all rights
+reserved. It is licensed, not sold, and use requires a written agreement with
+WinterLabs — see [`LICENSE`](LICENSE). This repository is not open source and
+must not be redistributed.
+
+Your designs are yours: the licence claims no ownership of anything you make
+with Ohm.
+
+Routing (Meridian) and the convergence solver are separate products that read
+the `shared/` format.
+
+Licensing enquiries: admin@upcheck.in
