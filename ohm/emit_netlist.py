@@ -10,6 +10,11 @@ from ohm import ir
 from ohm import __version__
 
 
+# Ohm attr -> the field name a BOM tool expects to find it under. Ordered, so
+# the emitted fields are deterministic.
+BOM_FIELDS = {"mpn": "MPN", "manufacturer": "Manufacturer", "datasheet": "Datasheet"}
+
+
 def _q(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -41,9 +46,18 @@ def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
         attrs = dict(p.attrs)
         raw = attrs.get("value")
         value = _value_text(raw) if raw is not None else str(attrs.get("mpn", p.component))
+        # A netlist whose parts carry only "100nF" is not orderable: two 0402
+        # 100nF caps differ by dielectric, voltage and tolerance, and the design
+        # already said which one it meant. Carry the sourcing attrs through under
+        # the field names KiCad's own BOM tooling reads.
+        fields = "".join(
+            f" (field (name {_q(BOM_FIELDS[k])}) {_q(_value_text(attrs[k]))})"
+            for k in BOM_FIELDS if attrs.get(k) is not None
+        )
         out.append(
             f"    (comp (ref {_q(p.designator)}) (value {_q(value)})"
-            f" (footprint {_q(fp)}) (fields (field (name \"ohm_ref\") {_q(p.ref)})))"
+            f" (footprint {_q(fp)}) (fields (field (name \"ohm_ref\")"
+            f" {_q(p.ref)}){fields}))"
         )
     out.append("  )")
     out.append("  (nets")

@@ -71,7 +71,7 @@ def test_unrouted_board_fires_v002():
 
 def test_fully_routed_board_is_clean():
     low, pcb = build()
-    pcb = route(pcb, "r1.P2", [("r1", "2"), ("r2", "1")])
+    pcb = route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")])
     diags = signoff(low, pcb, "d.kicad_pcb")
     assert not [d for d in diags if d.severity in ("error", "warning")], \
         [d.machine() for d in diags]
@@ -83,7 +83,7 @@ def test_multihop_route_chains_endpoints():
     board = read_board(pcb)
     pos = {(p.fp_path, p.pad_id): (p.x, p.y) for p in board.pads}
     (ax, ay), (bx, by) = pos[("r1", "2")], pos[("r2", "1")]
-    nid = net_id(pcb, "r1.P2")
+    nid = net_id(pcb, "R1_P2")
     mid = f"{(ax + bx) / 2} 77.7"
     segs = (f'  (segment (start {ax} {ay}) (end {mid}) (width 0.25) (layer "F.Cu") (net {nid}))\n'
             f'  (segment (start {mid}) (end {bx} {by}) (width 0.25) (layer "F.Cu") (net {nid}))\n')
@@ -115,8 +115,8 @@ def test_pad_on_wrong_net_fires_v001():
     # rebind a PAD (occurrences after the first footprint), not the net table
     cut = pcb.index("(footprint")
     wrong = pcb[:cut] + pcb[cut:].replace(
-        f'(net {net_id(pcb, "r1.P2")} "r1.P2")',
-        f'(net {net_id(pcb, "pwr.gnd")} "pwr.gnd")', 1)
+        f'(net {net_id(pcb, "R1_P2")} "R1_P2")',
+        f'(net {net_id(pcb, "PWR_GND")} "PWR_GND")', 1)
     assert wrong != pcb
     assert "V001" in by_code(signoff(low, wrong, "d.kicad_pcb"))
 
@@ -131,8 +131,8 @@ def test_net0_copper_fires_v003():
 
 def test_floating_trace_fires_v003():
     low, pcb = build()
-    pcb = route(pcb, "r1.P2", [("r1", "2"), ("r2", "1")])  # net complete...
-    nid = net_id(pcb, "r1.P2")
+    pcb = route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")])  # net complete...
+    nid = net_id(pcb, "R1_P2")
     floating = pcb.rstrip()[:-1] + (
         f'  (segment (start 90 90) (end 95 95) (width 0.25) (layer "F.Cu") (net {nid}))\n)\n')
     codes = by_code(signoff(low, floating, "d.kicad_pcb"))
@@ -142,7 +142,7 @@ def test_floating_trace_fires_v003():
 # ---------- V004: topology shorts ----------
 def test_cross_net_point_fires_v004():
     low, pcb = build()
-    n1, n2 = net_id(pcb, "r1.P2"), net_id(pcb, "pwr.gnd")
+    n1, n2 = net_id(pcb, "R1_P2"), net_id(pcb, "PWR_GND")
     shorted = pcb.rstrip()[:-1] + (
         f'  (segment (start 50 50) (end 60 60) (width 0.25) (layer "F.Cu") (net {n1}))\n'
         f'  (segment (start 60 60) (end 70 70) (width 0.25) (layer "F.Cu") (net {n2}))\n)\n')
@@ -153,7 +153,7 @@ def test_wrong_net_copper_into_pad_fires_v004():
     low, pcb = build()
     board = read_board(pcb)
     px, py = next((p.x, p.y) for p in board.pads if (p.fp_path, p.pad_id) == ("r2", "1"))
-    nid = net_id(pcb, "pwr.gnd")
+    nid = net_id(pcb, "PWR_GND")
     bad = pcb.rstrip()[:-1] + (
         f'  (segment (start {px} {py}) (end 90 90) (width 0.25) (layer "F.Cu") (net {nid}))\n)\n')
     assert "V004" in by_code(signoff(low, bad, "d.kicad_pcb"))
@@ -189,7 +189,7 @@ def _pcbnew_ok() -> bool:
 @pytest.mark.skipif(not _pcbnew_ok(), reason="system pcbnew module not installed")
 def test_pcbnew_agrees_with_signoff(tmp_path):
     low, pcb = build()
-    routed = route(pcb, "r1.P2", [("r1", "2"), ("r2", "1")])
+    routed = route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")])
     (tmp_path / "un.kicad_pcb").write_text(pcb)
     (tmp_path / "ro.kicad_pcb").write_text(routed)
     script = (

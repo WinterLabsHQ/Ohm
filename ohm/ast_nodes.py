@@ -222,7 +222,7 @@ class NetDecl:
 
     A net in Ohm had no name, only a label ELECTION: lower.py picked the
     shallowest label on the net, so when no port won, a capacitor pin won and
-    the net became `fmu.c_y1.P1`. That names a net after a component it happens
+    the net became `FMU_C_Y1_P1`. That names a net after a component it happens
     to touch, which tells a reviewer nothing and turns into a lie the moment
     someone renumbers the cap. An explicit name always wins the election.
     """

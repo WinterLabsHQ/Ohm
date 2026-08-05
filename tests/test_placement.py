@@ -134,7 +134,7 @@ def test_ohm_path_and_pad_net_bindings(pcb, low):
     assert set(fps) == {p.ref for p in low.parts}
     ra = fps["ra"]
     assert '(pad "1" smd roundrect' in ra and '(pad "2" smd roundrect' in ra
-    assert re.search(r'\(pad "2" [^\n]*\(net \d+ "pwr.gnd"\)', ra)
+    assert re.search(r'\(pad "2" [^\n]*\(net \d+ "PWR_GND"\)', ra)
     assert "(pad" not in fps["j"]  # string-footprint stub: no pads
     assert fps["j"].splitlines()[0].startswith('  (footprint "Connector:USB_C"')
 
@@ -143,13 +143,17 @@ def test_ohm_path_and_pad_net_bindings(pcb, low):
 def test_diffpair_renamed_only_in_kicad_files(pcb, low):
     sch = emit_kicad_sch(low, "board.ohm")
     for text in (pcb, sch):
-        assert '"j.DP_P"' in text and '"j.DP_N"' in text
-        assert '"j.DP"' not in text and '"j.DM"' not in text
+        assert '"J_DP_P"' in text and '"J_DP_N"' in text
+        assert '"J_DP"' not in text and '"J_DM"' not in text
     net = emit_netlist(low, "board.ohm")
-    assert '"j.DP"' in net and '"j.DM"' in net and "_P" not in net
+    # The renamed pair must not leak into the canonical netlist. Name the two
+    # renames exactly: a bare "_P" substring also matches any net that honestly
+    # ends in a P-pin (`SUB_R1_P2`), which says nothing about the diffpair.
+    assert '"J_DP"' in net and '"J_DM"' in net
+    assert '"J_DP_P"' not in net and '"J_DP_N"' not in net
     doc = json.loads(emit_constraints(low, "board.ohm"))
     dp = next(c for c in doc["constraints"] if c["kind"] == "diffpair")
-    assert dp["nets"] == ["j.DP", "j.DM"]  # canonical names in the seam
+    assert dp["nets"] == ["J_DP", "J_DM"]  # canonical names in the seam
 
 
 # ---------- constraints JSON: placement + groups ----------
@@ -173,8 +177,8 @@ def test_kicad_pro_classes(low):
     assert classes["DiffPair"]["diff_pair_gap"] == 0.4
     patterns = {(p["netclass"], p["pattern"])
                 for p in doc["net_settings"]["netclass_patterns"]}
-    assert ("power", "pwr.v") in patterns
-    assert ("DiffPair", "j.DP_P") in patterns and ("DiffPair", "j.DP_N") in patterns
+    assert ("power", "PWR_V") in patterns
+    assert ("DiffPair", "J_DP_P") in patterns and ("DiffPair", "J_DP_N") in patterns
 
 
 # ---------- keepout zone with geometry ----------

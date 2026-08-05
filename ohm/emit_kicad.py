@@ -60,6 +60,14 @@ _ORIGIN_Y = _D(20)
 _PARAM_RE = re.compile(r"^(-?\d+(?:\.\d+)?)([A-Za-z]*)$")
 
 
+_PWR_REF_RE = re.compile(r'\(property "Reference" "(#PWR\d+)"')
+
+
+def _pwr_ref(seq: int) -> str:
+    """KiCad's own spelling for the nth power symbol: #PWR01, #PWR02, ..."""
+    return f"#PWR{seq:02d}"
+
+
 def _uid(*parts: str) -> str:
     return str(uuid.uuid5(_NS, "/".join(parts)))
 
@@ -250,6 +258,12 @@ _A3_W, _A3_H = _D(420), _D(297)  # KiCad A3 landscape, mm — the target sheet s
 _PAPERS = (("A4", _D(297), _D(210)), ("A3", _A3_W, _A3_H),
            ("A2", _D(594), _D(420)), ("A1", _D(841), _D(594)),
            ("A0", _D(1189), _D(841)))
+# KiCad draws its title block inside the frame at the bottom right, and it is
+# not part of the drawing area. Reserving its height keeps a module frame from
+# running straight through "Title: ... / Rev: ...", which is the one part of the
+# sheet a reviewer reads first. Height only: reserving the width as well would
+# push most sheets up a paper size for a strip that is usually empty anyway.
+_TITLE_H = _D(32)
 _SCH_TALL_FACTOR = _D("3")  # symbols this much taller than median get their own row
 # A rail touching this many pins is drawn as a power symbol at every pin instead of
 # a repeated text label. That is how a human draws a supply: on this board GND.gnd
@@ -404,6 +418,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                    hier_nets: frozenset[str] = frozenset(),
                    sheet_path: str | None = None,
                    page: int = 1, pages: int = 1,
+                   pwr_start: int = 0,
                    sheet_note: str | None = None) -> str:
     """A real, reviewable schematic: symbol bodies, pins, wires and net labels.
 
@@ -422,6 +437,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     electrical graph, survive re-generation, and are what a human draws for dense
     MCU/FPGA sheets anyway. KiCad's net highlighting makes them navigable.
     """
+    from ohm.emit_netlist import BOM_FIELDS, _value_text
     from ohm.pkggen.pindata_iface import DeclaredPinData
     from ohm.pkggen.symbol import emit_symbol, glyph_for, symbol_layout
 
@@ -484,6 +500,18 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
 
     def _pwr_id(net: str) -> str:
         return "PWR_" + re.sub(r"\W", "_", net)
+
+    # Every power symbol used to be emitted as reference "#PWR", so a board with
+    # 191 of them had 191 symbols sharing one designator. KiCad numbers them
+    # #PWR01, #PWR02, ... precisely because a reference identifies ONE symbol;
+    # KiCad 9 tolerated the collision silently, KiCad 10 refuses the schematic as
+    # having "annotation errors" on every netlist export. Numbered in emission
+    # order, which is deterministic, so the file stays byte-stable.
+    #
+    # `pwr_start` offsets the run so a HIERARCHY stays unique too: a reference
+    # identifies one symbol in the whole schematic, not one per sheet, and
+    # restarting at #PWR01 on every sheet just moves the collision up a level.
+    pwr_seq = pwr_start
 
     for rail_name in sorted(rail_nets):
         # KiCad takes a power symbol's NET from its pin NAME, so there is one
@@ -603,13 +631,45 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             _rank, nname, other, opin, mine = min(cand)
             riders[part.ref] = (nname, other, opin, mine)
 
+    # `near(cap, ic, 2mm)` is the design SAYING which part this cap serves. A
+    # bypass cap sits on two rails and nothing else, so connectivity alone can
+    # never recover that pairing — every bypass cap on the board looks identical
+    # to every other. Without the hint they can only be banked; with it they go
+    # where the author said they belong, on the sheet as well as on the board.
+    near_host: dict[str, str] = {}
+    for c in low.constraints:
+        if c.kind != "near" or len(c.nets) < 2 or c.nets[0] == c.nets[1]:
+            continue
+        follower, host_ref = c.nets[0], c.nets[1]
+        # Only ever a SMALLER part riding a BIGGER one: the reverse would drag a
+        # 100-pin MCU into a capacitor's slot. Ties are not pairings.
+        if (follower in on_sheet and host_ref in on_sheet
+                and pin_count.get(follower, 0) < pin_count.get(host_ref, 0)):
+            near_host.setdefault(follower, host_ref)
+
+    # Collapse chains to their ROOT host. `near` constraints chain freely — the
+    # FMU's four port connectors are each declared near the previous one — but a
+    # satellite is only ever expanded ONE level beside its host. A two-deep chain
+    # therefore placed the head, placed its satellite, and silently dropped the
+    # satellite's own satellite: J9 vanished from the drawing while staying in
+    # the netlist and the BOM, which is the worst way for a part to go missing.
+    for follower in list(near_host):
+        seen, root = {follower}, near_host[follower]
+        while root in near_host and root not in seen:
+            seen.add(root)
+            root = near_host[root]
+        near_host[follower] = root  # a cycle stops at its first repeat
+
+
     # The decoupling bank: parts whose every pin lands on a rail. They have no
     # local net to be wired by, so they can only ever be a row of rail-connected
     # symbols — which is the bank convention, and correct for a monolithic MCU
     # symbol whose bypass caps cannot travel with a unit. Framing them as one
     # block is what turns that row from "scattered caps" into "the bank".
+    # A part the design placed by `near` is not bank material: it has a home.
     bank = {p.ref for p in sheet_parts
             if pin_count[p.ref] <= _RIDER_MAX_PINS
+            and p.ref not in near_host
             and not edges.get(p.ref)
             and all(net_at.get((p.ref, num)) in rail_nets
                     for num, *_r in layouts[p.component][1]
@@ -681,8 +741,13 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
               if r in {x for refs in riders_of.values() for x in refs}}
 
     host_of: dict[str, str] = {}
+    # A declared `near` outranks the inferred neighbour: it is the one statement
+    # about this pairing that came from the engineer rather than from the graph.
+    for follower, host_ref in sorted(near_host.items()):
+        if follower not in riders and host_ref not in riders:
+            host_of[follower] = host_ref
     for part in sheet_parts:
-        if pin_count[part.ref] != 2 or part.ref in riders:
+        if pin_count[part.ref] != 2 or part.ref in riders or part.ref in host_of:
             continue
         hosts: list[tuple[int, str]] = []
         for net in nets_of.get(part.ref, ()):
@@ -902,7 +967,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     paper_fit: str | None = None
     for sheet_name, sheet_w, sheet_h in _PAPERS:
         cand = _pack(sheet_w - _SCH_MARGIN * 2)
-        if cand[2] <= sheet_w and cand[3] <= sheet_h:
+        if cand[2] <= sheet_w and cand[3] <= sheet_h - _TITLE_H:
             packed, blocks, page_w, page_h = cand
             paper_fit = sheet_name
             break
@@ -915,7 +980,8 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     if paper_fit is not None:
         sheet_w, sheet_h = next((w, h) for n, w, h in _PAPERS if n == paper_fit)
         shift_x = _snap(max(_D(0), (sheet_w - page_w) / 2))
-        shift_y = _snap(max(_D(0), (sheet_h - page_h) / 2))
+        # centred in the drawing area, which stops above the title block
+        shift_y = _snap(max(_D(0), (sheet_h - _TITLE_H - page_h) / 2))
         blocks = {g: (x1 + shift_x, y1 + shift_y, x2 + shift_x, y2 + shift_y)
                   for g, (x1, y1, x2, y2) in blocks.items()}
 
@@ -1105,11 +1171,13 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         # one rail symbol per ladder, at its head — the whole point of drawing a
         # ladder is that the rail arrives once instead of eleven times
         if rail_net in rail_nets:
+            pwr_seq += 1
             sid = _pwr_id(rail_net)
             out.append(f'  (symbol (lib_id "ohm:{sid}") (at {ex} {ey} 0)'
                        " (unit 1) (in_bom no) (on_board no) (dnp no)")
             out.append(f'    (uuid "{_uid(source, "ldpwr", rail_net, str(ex), str(ey))}")')
-            out.append(f'    (property "Reference" "#PWR" (at {ex} {ey} 0)'
+            out.append(f'    (property "Reference" "{_pwr_ref(pwr_seq)}"'
+                       f" (at {ex} {ey} 0)"
                        " (effects (font (size 1.27 1.27)) hide))")
             hide = " hide" if rail_net in ground_nets else ""
             ty = ey if rail_net in ground_nets else _snap(ey - _D("2.54"))
@@ -1118,18 +1186,43 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             out.append('    (pin "1" (uuid "'
                        f'{_uid(source, "ldpin", rail_net, str(ex), str(ey))}"))')
             out.append(f'    (instances (project "ohm" (path "{inst_path}"'
-                       ' (reference "#PWR") (unit 1))))')
+                       f' (reference "{_pwr_ref(pwr_seq)}") (unit 1))))')
             out.append("  )")
         else:
             out.append(f'  (label "{_q(rail_net)}" (at {ex} {ey} 180)'
                        " (effects (font (size 1.27 1.27)) (justify right bottom))"
                        f' (uuid "{_uid(source, "ldlbl", rail_net, str(ex), str(ey))}"))')
 
+    # A label at a PIN cannot move — it sits on that pin's stub end and shifting
+    # it would name a different net. A label riding a WIRE is not pinned like
+    # that: every point along the wire is the same net, so the label may slide.
+    # It was always dropped at the midpoint, which is where the crystal sits in
+    # a crystal/load-cap/MCU cluster — that one blind midpoint accounted for
+    # every "text prints over a symbol" on the MCU sheet. Slide it instead.
+    # Measured with the CHECKER's own function against the CHECKER's own input
+    # (the library block this file is about to carry), so "clear of that symbol"
+    # means the same thing on both sides. A private estimate here — pin extents,
+    # layout height — silently disagreed with D002 and reported every candidate
+    # position as free.
+    from ohm.check_drawing import _body_half
+
+    _libtext = "\n".join(lib_defs)
+    sym_boxes = [
+        (px - hw, py - hh, px + hw, py + hh)
+        for part, px, py, rot in placed
+        for hw, hh in (_body_half(_libtext, part.component, rot),)
+    ]
     for ax, ay, bx, nname in wire_labels:
-        mx = _snap((ax + bx) / 2)
-        out.append(f'  (label "{_q(nname)}" (at {mx} {ay} 0)'
-                   " (effects (font (size 1.27 1.27)) (justify left bottom))"
-                   f' (uuid "{_uid(source, "wlbl", nname, str(mx), str(ay))}"))')
+        lo, hi = (ax, bx) if ax <= bx else (bx, ax)
+        span = hi - lo
+        # midpoint first (it reads as "this wire's name"), then progressively
+        # further along it, then the ends — all still on the wire.
+        cands = [(_snap(lo + span * _D(f)), ay, "left")
+                 for f in ("0.5", "0.35", "0.65", "0.2", "0.8", "0.05", "0.95")]
+        lx, ly, just = _free_spot(cands, nname, _D("1.27"), sym_boxes)
+        out.append(f'  (label "{_q(nname)}" (at {lx} {ly} 0)'
+                   f" (effects (font (size 1.27 1.27)) (justify {just} bottom))"
+                   f' (uuid "{_uid(source, "wlbl", nname, str(lx), str(ly))}"))')
 
     hier_drawn: set[str] = set()
     for part, px, py, rot in placed:
@@ -1137,7 +1230,13 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         # KiCad turns a symbol's property text with the symbol, so an upright
         # part would carry sideways text through its neighbours. Compensate the
         # angle and stack ref/value beside the body instead of above and below.
-        tang = (360 - rot) % 360
+        #
+        # Modulo 180, not 360: a drawing has exactly two legal text angles, 0 and
+        # 90 (read from the bottom edge or the right edge). Compensating into the
+        # full circle put R5's value at 180 — printed upside down — and every
+        # 90-degree part's text at 270, reading top-to-bottom. Both are the same
+        # text either way, so the half-turn is free to drop.
+        tang = (360 - rot) % 180
         if rot in (90, 270):
             tx = _snap(px + box_h + _SCH_GRID)
             ref_pos = f"{tx} {_snap(py - _SCH_GRID)} {tang}"
@@ -1158,6 +1257,15 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                    " (at 0 0 0) (effects (font (size 1.27 1.27)) hide))")
         out.append(f'    (property "Ohm" "{_q(part.ref)}" (at 0 0 0)'
                    " (effects (font (size 1.27 1.27)) hide))")
+        # Sourcing attrs ride the symbol so KiCad's own BOM export can see them.
+        # HIDDEN on purpose: a part number is what you order by, not what you
+        # read the circuit by, and printing GRM155R71C104KA88D beside all 47
+        # bypass caps buries the values that carry the design intent.
+        part_attrs = dict(part.attrs)
+        for _k, _field in BOM_FIELDS.items():
+            if (_v := part_attrs.get(_k)) is not None:
+                out.append(f'    (property "{_field}" "{_q(_value_text(_v))}"'
+                           " (at 0 0 0) (effects (font (size 1.27 1.27)) hide))")
         for number, *_rest in pin_geom:
             out.append(f'    (pin "{_q(number)}" (uuid "'
                        f'{_uid(source, "pin", part.ref, number)}"))')
@@ -1216,7 +1324,9 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 out.append(f'  (symbol (lib_id "ohm:{sid}") (at {bx} {by} 0)'
                            " (unit 1) (in_bom no) (on_board no) (dnp no)")
                 out.append(f'    (uuid "{_uid(source, "pwr", part.ref, number)}")')
-                out.append(f'    (property "Reference" "#PWR" (at {bx} {by} 0)'
+                pwr_seq += 1
+                out.append(f'    (property "Reference" "{_pwr_ref(pwr_seq)}"'
+                           f" (at {bx} {by} 0)"
                            " (effects (font (size 1.27 1.27)) hide))")
                 if net_name in ground_nets:  # the triangle needs no caption
                     out.append(f'    (property "Value" "{_q(net_name)}" (at {bx} {by} 0)'
@@ -1255,7 +1365,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 out.append('    (pin "1" (uuid "'
                            f'{_uid(source, "pwrpin", part.ref, number)}"))')
                 out.append(f'    (instances (project "ohm" (path "{inst_path}"'
-                           ' (reference "#PWR") (unit 1))))')
+                           f' (reference "{_pwr_ref(pwr_seq)}") (unit 1))))')
                 out.append("  )")
                 continue
             just = "right" if side == "left" else "left"
@@ -1501,8 +1611,36 @@ def sub_blocks(pos, layouts, part_by_ref, riders_of, bank, comps, stand_off):
     # with the debug connector was enough to stretch the bank's bounding box
     # across two other clusters and enclose them — a frame around three other
     # frames tells a reader nothing.
-    members = sorted(r for r in bank if r in pos)
-    if len(members) >= _BANK_MIN and (box := _bbox(members)) is not None:
+    #
+    # "Entirely" has to be TESTED, not assumed from the sort order. Bank parts
+    # sort last within a block, but a part that is not bank can still land on a
+    # bank row, and then the bbox over all bank members quietly swallows it: the
+    # frame said "Decoupling" over a 3.3V regulator, two diodes and four test
+    # points. So rows are built from the placed positions and a row is kept only
+    # if nothing outside the bank sits on it.
+    # Rows have to be RECOVERED, not read off y: every part in a row is centred
+    # in its own cell, so a tall part and a 0402 on the same row differ in y by
+    # half their height difference. Split on the gaps instead — a real row break
+    # is at least _SCH_ROW_GAP, which no within-row offset reaches.
+    rows: list[list[str]] = []
+    for ref in sorted(pos, key=lambda r: (pos[r][1], pos[r][0])):
+        y = pos[ref][1]
+        if rows and y - max(pos[m][1] for m in rows[-1]) < _SCH_ROW_GAP:
+            rows[-1].append(ref)
+        else:
+            rows.append([ref])
+    # ...and only a CONTIGUOUS run of pure rows can be framed. Two pure rows
+    # with the regulator's row between them still bound a rectangle that
+    # contains the regulator; the frame has to stop at the first row that
+    # is not all bank.
+    best: list[str] = []
+    run: list[str] = []
+    for row in rows + [["\0"]]:  # sentinel closes the final run
+        if all(m in bank for m in row):
+            run.extend(row)
+        else:
+            best, run = max((best, run), key=len), []
+    if len(best) >= _BANK_MIN and (box := _bbox(best)) is not None:
         out.append(("Decoupling", *box))
     return out
 
@@ -1661,12 +1799,16 @@ def emit_kicad_sheets(low: ir.IRLow, source: str = "<string>",
     crossing = _crossing(low, design)
     root_uuid = _uid(source, "sch")
     out = {f"{stem}.kicad_sch": _emit_root_sheet(low, source, stem, crossing, design)}
+    pwr_used = 0
     for page, grp in enumerate(groups, start=2):
-        out[f"{stem}_{grp}.kicad_sch"] = emit_kicad_sch(
+        sheet = emit_kicad_sch(
             low, source, design, group=grp,
             hier_nets=frozenset(crossing.get(grp, [])),
             sheet_path=f"/{root_uuid}/{_uid(source, 'sheetsym', grp)}",
-            page=page, pages=len(groups) + 1)
+            page=page, pages=len(groups) + 1, pwr_start=pwr_used)
+        # count what this sheet consumed so the next one starts past it
+        pwr_used += len(_PWR_REF_RE.findall(sheet))
+        out[f"{stem}_{grp}.kicad_sch"] = sheet
     # The same netlist, rendered twice. Hierarchical sheets are what you EDIT —
     # each module on a reviewable page. The overview is what you REVIEW: every
     # block on one sheet, so the system view is never lost while paging. Two

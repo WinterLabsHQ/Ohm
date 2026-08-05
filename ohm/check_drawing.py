@@ -136,29 +136,40 @@ def _symbols(sch: str) -> list[tuple[str, Box]]:
         lib, x, y = m.group(1), _D(m.group(2)), _D(m.group(3))
         if lib.startswith("ohm:PWR_"):
             continue
-        half = _body_half(sch, lib)
-        out.append((lib, (x - half, y - half, x + half, y + half)))
+        hw, hh = _body_half(sch, lib, int(m.group(4)))
+        out.append((lib, (x - hw, y - hh, x + hw, y + hh)))
     return out
 
 
-def _body_half(sch: str, lib: str) -> Decimal:
-    """Half-extent of a symbol's drawn BODY, from its own library definition.
+def _body_half(sch: str, lib: str, rot: int = 0) -> tuple[Decimal, Decimal]:
+    """(half-width, half-height) of a symbol's drawn BODY, from its library definition.
 
     The `_0_1` sub-symbol holds the graphics; `_1_1` holds the pins, which stand
     off beyond the body. Measuring both made every part that legitimately sits
     against its neighbour's pin — a rider, a series chain — read as an overlap.
+
+    Per AXIS, not one square of the larger dimension. A 100-pin MCU is 25mm wide
+    and 130mm tall; as a square it claimed a 130x130mm footprint and every label
+    in the 50mm of empty sheet either side of it was reported as printing over
+    it. That is most of what D002 and D003 used to report on a big sheet, and
+    all of it was the envelope rather than the drawing. A turned symbol swaps
+    its axes, which is why `rot` is taken — a square never had to care.
     """
     name = lib.split(":", 1)[-1]
     start = sch.find(f'(symbol "{name}_0_1"')
     if start < 0:
-        return _D("7.62")
+        return _D("7.62"), _D("7.62")
     stop = sch.find(f'(symbol "{name}_1_1"', start)
     body = sch[start:stop if stop > 0 else start + 4000]
-    coords: list[Decimal] = []
-    for m in re.finditer(r"\(xy (-?[\d.]+) (-?[\d.]+)\)|\((?:start|end) "
-                         r"(-?[\d.]+) (-?[\d.]+)\)", body):
-        coords += [abs(_D(v)) for v in m.groups() if v is not None]
-    return max(coords) if coords else _D("7.62")
+    xs: list[Decimal] = []
+    ys: list[Decimal] = []
+    for m in re.finditer(r"\((?:xy|start|end) (-?[\d.]+) (-?[\d.]+)\)", body):
+        xs.append(abs(_D(m.group(1))))
+        ys.append(abs(_D(m.group(2))))
+    if not xs:
+        return _D("7.62"), _D("7.62")
+    half_w, half_h = max(xs), max(ys)
+    return (half_h, half_w) if rot % 180 else (half_w, half_h)
 
 
 def check_drawing(sch: str, path: str = "<string>") -> list[Diagnostic]:
@@ -188,8 +199,8 @@ def check_drawing(sch: str, path: str = "<string>") -> list[Diagnostic]:
         lib, x, y = m.group(1), _D(m.group(2)), _D(m.group(3))
         owned[index] = _texts(chunk)
         if not lib.startswith("ohm:PWR_"):
-            half = _body_half(sch, lib)
-            boxes.append((lib, (x - half, y - half, x + half, y + half)))
+            hw, hh = _body_half(sch, lib, int(m.group(4)))
+            boxes.append((lib, (x - hw, y - hh, x + hw, y + hh)))
 
     texts = _texts(body)
     clashes = [(a, b) for i, (a, ab) in enumerate(texts)

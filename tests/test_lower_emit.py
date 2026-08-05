@@ -134,13 +134,13 @@ def test_hierarchy_flattening_and_designators():
     result = compile_ok(GOLDEN / "i2c_bus.ohm")
     assert [(p.ref, p.designator) for p in result.low.parts] == [
         ("mcu.u", "U1"), ("sens.s", "U2")]
-    scl = next(n for n in result.low.nets if n.name == "mcu.bus.scl")
+    scl = next(n for n in result.low.nets if n.name == "MCU_BUS_SCL")
     assert [(n.designator, n.pad) for n in scl.nodes] == [("U1", "5"), ("U2", "1")]
     assert "sens.bus.scl" in scl.ports
 
 
 def test_shared_net_across_ports():
     result = compile_ok(GOLDEN / "divider.ohm")
-    gnd = next(n for n in result.low.nets if n.name == "vin.gnd")
+    gnd = next(n for n in result.low.nets if n.name == "VIN_GND")
     assert set(gnd.ports) == {"vin.gnd", "vout.gnd"}
     assert [(n.designator, n.pin) for n in gnd.nodes] == [("R2", "P2")]

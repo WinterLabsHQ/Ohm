@@ -5,9 +5,9 @@
     (comp (ref "U1") (value "UsbDevice") (footprint "QFN-24-1EP_4x4mm_P0.5mm") (fields (field (name "ohm_ref") "u")))
   )
   (nets
-    (net (code "1") (name "j.DM") (node (ref "J1") (pin "2")) (node (ref "U1") (pin "11")))
-    (net (code "2") (name "j.DP") (node (ref "J1") (pin "3")) (node (ref "U1") (pin "10")))
-    (net (code "3") (name "j.GND") (node (ref "J1") (pin "5")) (node (ref "U1") (pin "13")))
-    (net (code "4") (name "j.VBUS") (node (ref "J1") (pin "1")) (node (ref "U1") (pin "1")))
+    (net (code "1") (name "J_DM") (node (ref "J1") (pin "2")) (node (ref "U1") (pin "11")))
+    (net (code "2") (name "J_DP") (node (ref "J1") (pin "3")) (node (ref "U1") (pin "10")))
+    (net (code "3") (name "J_GND") (node (ref "J1") (pin "5")) (node (ref "U1") (pin "13")))
+    (net (code "4") (name "J_VBUS") (node (ref "J1") (pin "1")) (node (ref "U1") (pin "1")))
   )
 )

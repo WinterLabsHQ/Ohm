@@ -13,6 +13,7 @@ schematic can look plausible and be disconnected, which is exactly the failure a
 generated diagram invites.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -27,7 +28,11 @@ from ohm.pkggen.pindata_iface import DeclaredPinData
 from ohm.pkggen.symbol import symbol_layout
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
-KICAD_CLI = shutil.which("kicad-cli")
+# $OHM_KICAD_CLI overrides the binary this gate runs against, so the SAME gate
+# can certify a different KiCad than the one installed — point it at a wrapper
+# and the whole roundtrip runs inside a container. Compatibility with a KiCad
+# release is then something measured, not assumed from release notes.
+KICAD_CLI = os.environ.get("OHM_KICAD_CLI") or shutil.which("kicad-cli")
 requires_kicad_cli = pytest.mark.skipif(KICAD_CLI is None, reason="kicad-cli not installed")
 
 CASES = ["divider_led", "io_expander_board", "kind_demo_power_amp",
@@ -53,6 +58,39 @@ def _named(nets: dict[str, set[tuple[str, str]]]) -> dict[str, set[tuple[str, st
     return {n: p for n, p in nets.items() if not n.startswith("Net-(")}
 
 
+def _blocks(text: str, head: str):
+    """Every `(<head> ...)` s-expression in `text`, balanced-paren, as source.
+
+    Structural rather than line-anchored ON PURPOSE. This reader has now been
+    broken twice by KiCad changing nothing but its pretty-printer: KiCad 9 put
+    `(class "Default")` between the name and the nodes, and KiCad 10 broke every
+    net across a dozen tab-indented lines. Both times the netlist was correct,
+    both times a regex expecting one layout matched zero nets, and the gate
+    failed as if the circuit were wrong. Paren depth is the only part of the
+    format that is actually promised.
+    """
+    for m in re.finditer(rf"\({head}[\s(]", text):
+        depth, i = 0, m.start()
+        while i < len(text):
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    yield text[m.start():i + 1]
+                    break
+            elif text[i] == '"':  # a string may hold parens; skip it whole
+                i += 1
+                while i < len(text) and text[i] != '"':
+                    i += 2 if text[i] == "\\" else 1
+            i += 1
+
+
+def _atom(block: str, key: str) -> str | None:
+    m = re.search(rf'\({key}\s+"((?:[^"\\]|\\.)*)"', block)
+    return m.group(1) if m else None
+
+
 def _nets(text: str) -> dict[str, set[tuple[str, str]]]:
     """(net name -> {(ref, pin)}) from a KiCad S-expression netlist.
 
@@ -61,20 +99,22 @@ def _nets(text: str) -> dict[str, set[tuple[str, str]]]:
     counted as a difference.
     """
     out: dict[str, set[tuple[str, str]]] = {}
-    # KiCad 9 inserts `(class "Default")` between the net name and its nodes;
-    # KiCad 7 did not. Without tolerating it the node group matches zero times,
-    # every net comes back with an empty pin set, and the comparison fails on
-    # an empty partition rather than on a real difference.
-    for m in re.finditer(r'\(net \(code "\d+"\) \(name "([^"]*)"\)'
-                         r'(?:\s*\(class "[^"]*"\))?'
-                         r'((?:\s*\(node [^\n]*)*)', text):
+    for net in _blocks(text, "net"):
+        name = _atom(net, "name")
+        if name is None:
+            continue
         # KiCad path-prefixes a sheet-local label ("/pwr/pwr.c1.P1"); Ohm names
         # are already globally unique, so the last segment is the name. Two
         # sheets colliding on one short name would merge here and fail loudly.
-        name = m.group(1).rsplit("/", 1)[-1]
+        name = name.rsplit("/", 1)[-1]
         if name.startswith("unconnected-"):
             continue
-        out[name] = set(re.findall(r'\(node \(ref "([^"]+)"\) \(pin "([^"]+)"', m.group(2)))
+        pins = set()
+        for node in _blocks(net, "node"):
+            ref, pin = _atom(node, "ref"), _atom(node, "pin")
+            if ref is not None and pin is not None:
+                pins.add((ref, pin))
+        out[name] = pins
     return out
 
 
@@ -371,3 +411,113 @@ module Top:
     pad = {num: (_snap(px + lx), _snap(py - ly)) for num, _n, _r, lx, ly, _s in geom}
     assert f"(xy {pad['E1'][0]} {pad['E1'][1]})" in sch, "nothing wired to pad E1"
     assert f"(xy {pad['C1'][0]} {pad['C1'][1]})" not in sch, "pad C1 was wired"
+
+
+def test_every_power_symbol_has_its_own_reference():
+    """A reference identifies ONE symbol, across the whole schematic.
+
+    Ohm emitted every power symbol as bare "#PWR", so the FMU shipped 191
+    symbols sharing one designator. KiCad 9 said nothing; KiCad 10 rejects the
+    schematic as having annotation errors on every netlist export, which is the
+    correct reading — that is what annotation MEANS. Uniqueness has to hold
+    across the HIERARCHY, not per sheet: restarting at #PWR01 on each sheet
+    just moves the collision up a level.
+    """
+    from ohm.check_drawing import _sheet_body
+
+    result = compile_source(HIER_SRC, "hier.ohm")
+    sheets = emit_kicad_sheets(result.low, "hier.ohm", result.design, force=True)
+    # placed symbols only — a library DEFINITION carries "#PWR" as its prefix,
+    # which is what a prefix is for and must stay unnumbered
+    hier = [r for name, text in sheets.items() if "overview" not in name
+            for r in re.findall(r'\(property "Reference" "(#PWR\d*)"',
+                                _sheet_body(text))]
+    assert hier, "this design draws no power symbols, so it proves nothing"
+    assert all(re.fullmatch(r"#PWR\d+", r) for r in hier), \
+        f"unnumbered power reference: {sorted(set(hier))[:5]}"
+    dupes = sorted({r for r in hier if hier.count(r) > 1})
+    assert not dupes, f"power references reused across the hierarchy: {dupes[:5]}"
+
+
+NEAR_CHAIN_SRC = '''use std.interfaces
+
+component Conn4:
+    package = generate(SOIC, pins=4)
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+
+component Conn6:
+    package = generate(SOIC, pins=6)
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+
+component Conn8:
+    package = generate(SOIC, pins=8)
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+    pin P7: role=passive, pad=7
+    pin P8: role=passive, pad=8
+
+module Ports:
+    pwr = io(Power)
+    j_small = Conn4()
+    j_mid = Conn6()
+    j_big = Conn8()
+    pwr.v ~ j_small.P1
+    pwr.v ~ j_mid.P1
+    pwr.v ~ j_big.P1
+    pwr.gnd ~ j_small.P4
+    pwr.gnd ~ j_mid.P6
+    pwr.gnd ~ j_big.P8
+    # a CHAIN: small is near mid, mid is near big
+    constraint near(j_small, j_mid, 8mm)
+    constraint near(j_mid, j_big, 8mm)
+
+module Board:
+    pwr = io(Power)
+    ports = Ports()
+    pwr ~ ports.pwr
+'''
+
+
+def _sheet_body_of(text: str) -> str:
+    from ohm.check_drawing import _sheet_body
+    return _sheet_body(text)
+
+
+def test_a_chain_of_near_constraints_drops_no_part_from_the_drawing():
+    """A part in the netlist and the BOM but on no sheet is the worst way to
+    lose one — the board is orderable and unbuildable.
+
+    `near` chains freely, but a satellite is expanded only ONE level beside its
+    host, so a two-deep chain placed the head, placed its satellite, and
+    silently dropped the satellite's own satellite. The real FMU lost its RC
+    connector this way.
+    """
+    result = compile_source(NEAR_CHAIN_SRC, "chain.ohm")
+    assert result.low is not None, [d.machine() for d in result.diagnostics]
+    expected = {p.designator for p in result.low.parts}
+
+    flat = {m.group(1) for m in re.finditer(r'\(property "Reference" "([^"#]+)"',
+            _sheet_body_of(emit_kicad_sch(result.low, "chain.ohm", result.design)))}
+    assert expected <= flat, f"never drawn on the flat sheet: {sorted(expected - flat)}"
+
+    union = set()
+    for name, text in emit_kicad_sheets(result.low, "chain.ohm", result.design,
+                                        force=True).items():
+        if "overview" in name:
+            continue
+        union |= {m.group(1) for m in
+                  re.finditer(r'\(property "Reference" "([^"#]+)"',
+                              _sheet_body_of(text))}
+    assert expected <= union, f"never drawn on any sheet: {sorted(expected - union)}"

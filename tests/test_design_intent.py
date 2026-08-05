@@ -105,7 +105,7 @@ def test_an_explicit_name_beats_the_label_election():
     src = SRC.replace("    u.IN ~ r.P1", "    net FEEDBACK = r.P1\n    u.IN ~ r.P1")
     names = [n.name for n in _compile(src).low.nets]
     assert "FEEDBACK" in names
-    assert "r.P1" not in names
+    assert "R_P1" not in names
 
 
 def test_a_net_named_after_a_pin_is_reported():
@@ -113,7 +113,7 @@ def test_a_net_named_after_a_pin_is_reported():
     where the net lands, not what it is, and it breaks when the part is
     renumbered."""
     hits = [d for d in compile_source(SRC, "t.ohm").diagnostics if d.code == "M010"]
-    assert hits and "r.P1" in hits[0].message
+    assert hits and "R_P1" in hits[0].message
 
 
 def test_one_net_cannot_have_two_names():
@@ -135,14 +135,14 @@ def test_a_rail_drops_its_interface_member_suffix():
     src = RAIL + SRC.replace("    vdd = io(Power)", "    vdd = io(Rail)\n    gnd = io(Power)")
     src = src.replace("vdd.gnd ~", "gnd.gnd ~")
     names = [n.name for n in _compile(src).low.nets]
-    assert "vdd" in names and "vdd.v" not in names
+    assert "VDD" in names and "VDD_V" not in names
 
 
 def test_an_ambiguous_suffix_is_kept():
     """Two nets under one port instance: there the member IS what tells them
     apart, so collapsing would merge two different signals into one name."""
     names = [n.name for n in _compile(SRC).low.nets]
-    assert "vdd.v" in names and "vdd.gnd" in names
+    assert "VDD_V" in names and "VDD_GND" in names
 
 
 # ---------- unused pins, values, notes ----------
@@ -233,3 +233,52 @@ def test_a_pinless_part_needs_no_unused_pins_declaration():
     result = compile_source(PINLESS, "t.ohm")
     sch = emit_kicad_sch(result.low, "t.ohm", result.design)
     assert "(no_connect" in sch
+
+
+IFACE_SIG = '''interface Sig:
+    s: Signal, role=bidirectional
+
+'''
+
+COLLIDE = IFACE_SIG + '''component Part:
+    package = generate(SOIC, pins=8)
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+    pin P3: role=passive, pad=3
+    pin P4: role=passive, pad=4
+    pin P5: role=passive, pad=5
+    pin P6: role=passive, pad=6
+    pin P7: role=passive, pad=7
+    pin P8: role=passive, pad=8
+
+module A:
+    b = io(Sig)
+    u = Part()
+    b.s ~ u.P1
+
+module Top:
+    A_B = io(Sig)
+    a = A()
+    u2 = Part()
+    u3 = Part()
+    A_B.s ~ u2.P1
+    a.b.s ~ u3.P2
+'''
+
+
+def test_a_readable_rename_never_lands_on_another_nets_name():
+    """Two nets, one name, is a SHORT — not a cosmetic clash.
+
+    Connectivity in the emitted schematic is carried by the label, so two nets
+    drawn with one name are one net in KiCad. `a.b` reads as `A_B`, and this
+    design already has a top-level port spelled `A_B`; renaming onto it merged
+    two separate nets. The rename must stand down and keep the ugly path.
+    """
+    nets = _compile(COLLIDE).low.nets
+    names = [n.name for n in nets]
+    assert len(names) == len(set(names)), \
+        f"two nets share a name: {sorted(n for n in names if names.count(n) > 1)}"
+    # and the two really are distinct circuits, not one net counted twice
+    by_name = {n.name: {(x.part_ref, x.pin) for x in n.nodes} for n in nets}
+    assert by_name["A_B"] == {("u2", "P1")}
+    assert ("u3", "P2") in by_name["a.b"]

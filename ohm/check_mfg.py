@@ -37,7 +37,7 @@ from decimal import Decimal
 
 from ohm import ir, units
 from ohm.diagnostics import Diagnostic, Span
-from ohm.lower import lower
+from ohm.lower import lower, readable_net_name
 from ohm.pkggen.packages import _GULLWING  # in-repo family table (default pitch)
 
 _NO_SPAN = Span(1, 1, 1, 1)
@@ -209,12 +209,18 @@ def check_mfg(design: ir.Design, path: str = "<string>",
             _NO_SPAN, file=path))
     # ---- M010: nets nobody named (ONE warning) ----
     # A net whose name is exactly one of its own part pins was never named: the
-    # label election fell through to a capacitor. `fmu.c_y1.P1` tells a reviewer
+    # label election fell through to a capacitor. `FMU_C_Y1_P1` tells a reviewer
     # nothing about the signal and becomes a lie the moment that cap is
     # renumbered. Objective test, no heuristics: name == "<part_ref>.<pin>" of a
     # node on that very net.
+    # Compare in the SAME spelling the net carries. Derived names are rewritten
+    # to their readable form (`c_y1.P1` -> `C_Y1_P1`) on the way out of lowering,
+    # so testing the raw dotted path here matched nothing and the warning went
+    # quiet on every board.
     unnamed = [net.name for net in low.nets
-               if any(net.name == f"{node.part_ref}.{node.pin}" for node in net.nodes)]
+               if any(net.name in (f"{node.part_ref}.{node.pin}",
+                                   readable_net_name(f"{node.part_ref}.{node.pin}"))
+                      for node in net.nodes)]
     if unnamed:
         diags.append(Diagnostic(
             "warning", "M010",

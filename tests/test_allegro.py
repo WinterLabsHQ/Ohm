@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from ohm.driver import compile_source
-from ohm.emit_allegro import PINUSE, emit_allegro
+from ohm.emit_allegro import PINUSE, _seg, emit_allegro
 from ohm.emit_netlist import emit_netlist
 from ohm.resolve import VALID_ROLES
 
@@ -141,20 +141,32 @@ def test_connectivity_is_the_same_as_ohms_own_netlist(built, files):
 
 
 def test_canonical_paths_escape_the_characters_allegro_treats_as_structure():
-    r"""A net named `r1.P1` must reach Allegro as `\r1.p1\`, or the dot reads as a
-    hierarchy descent and the net silently loses its nodes."""
+    r"""A segment like `r1.P1` must reach Allegro as `\r1.p1\`, or the dot reads
+    as a hierarchy descent and the net silently loses its nodes.
+
+    Driven directly rather than through a net name: net names are now always
+    `[A-Za-z0-9_]` (derived ones via `readable_net_name`, authored ones via the
+    grammar's NAME), so no fixture can produce a net that needs escaping. The
+    escape still guards part and pin segments, so it is still tested — and the
+    emitted signal names are checked to be clean rather than merely unescaped.
+    """
+    for raw, want in [("r1.P1", "\\r1.p1\\"),
+                      ("+3.3V", "\\+3.3v\\"),
+                      ("BOOSTXL-CC2650MA", "\\boostxl-cc2650ma\\"),
+                      ("VDD_5V", "vdd_5v"),
+                      ("FMU_SPI_FRAM_MISO", "fmu_spi_fram_miso")]:
+        assert _seg(raw) == want, raw
+
     result = compile_source(SRC, "demo.ohm")
     files = emit_allegro(result.design, result.low, "demo")
     signals = re.findall(r"C_SIGNAL='([^']*)'", files["pstxnet.dat"])
     assert signals
-    escaped = 0
     for signal in signals:
         tail = signal.split(":", 1)[1]
         assert tail == tail.lower(), "the canonical form is lower-case"
-        if any(c in tail for c in ".-+()"):
-            assert tail.startswith("\\") and tail.endswith("\\"), tail
-            escaped += 1
-    assert escaped, "no net name in the fixture needed escaping — test proves nothing"
+        # every net name is now structurally safe, so none should be wrapped
+        assert not any(c in tail for c in ".-+()"), tail
+        assert not tail.startswith("\\"), tail
 
 
 def test_paths_are_unique_per_part(files):

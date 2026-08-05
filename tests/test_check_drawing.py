@@ -116,3 +116,56 @@ def test_findings_are_advisory_and_never_block():
                  _label("ANOTHER_ONE", "101", "100", "cccccccc-0000-0000-0000-000000000006"))
     found = check_drawing(sch)
     assert found and all(d.severity == "warning" for d in found)
+
+
+# ---- the envelope is the BODY, per axis ----
+TALL = HEAD.replace(
+    '(rectangle (start -5.08 5.08) (end 5.08 -5.08)',
+    '(rectangle (start -5.08 63.5) (end 5.08 -63.5)').replace(
+    '(symbol "ohm:Part"', '(symbol "ohm:Tall"').replace(
+    '"Part_0_1"', '"Tall_0_1"').replace('"Part_1_1"', '"Tall_1_1"').replace(
+    '"Value" "Part"', '"Value" "Tall"')
+
+
+def _tall(x: str, y: str, uid: str, rot: str = "0", ref: str = "U9") -> str:
+    return (f'  (symbol (lib_id "ohm:Tall") (at {x} {y} {rot})'
+            " (unit 1) (in_bom yes) (on_board yes) (dnp no)\n"
+            f'    (uuid "{uid}")\n'
+            f'    (property "Reference" "{ref}" (at {x} {y} 0)'
+            " (effects (font (size 1.27 1.27))))\n"
+            "  )")
+
+
+def _tall_sheet(*body: str) -> str:
+    return TALL + "\n".join(body) + "\n)\n"
+
+
+def test_a_tall_narrow_symbol_does_not_claim_the_sheet_beside_it():
+    """A 10x127mm part is not a 127x127mm square. Measured as a square it
+    reported every label in the 60mm of empty sheet either side of a 100-pin
+    MCU as printing over it — which was most of what D002 said on a big sheet,
+    and none of it was the drawing."""
+    sch = _tall_sheet(
+        _tall("100", "100", "bbbbbbbb-0000-0000-0000-00000000000a"),
+        # 30mm to the left: far outside the 5.08mm half-width, well inside
+        # the 63.5mm half-height a square envelope would have claimed
+        _label("SOME_NET", "70", "100", "cccccccc-0000-0000-0000-00000000000a"))
+    assert "D002" not in _codes(sch)
+
+
+def test_a_label_actually_over_the_tall_body_is_still_reported():
+    """The narrower envelope must not blind the check: directly on the body
+    still collides."""
+    sch = _tall_sheet(
+        _tall("100", "100", "bbbbbbbb-0000-0000-0000-00000000000b"),
+        _label("SOME_NET", "98", "60", "cccccccc-0000-0000-0000-00000000000b"))
+    assert "D002" in _codes(sch)
+
+
+def test_a_turned_symbol_swaps_its_axes():
+    """At 90 degrees the tall part is WIDE, so the same label 30mm to the side
+    is now genuinely over it. A square envelope could never tell these apart."""
+    sch = _tall_sheet(
+        _tall("100", "100", "bbbbbbbb-0000-0000-0000-00000000000c", rot="90"),
+        _label("SOME_NET", "70", "100", "cccccccc-0000-0000-0000-00000000000c"))
+    assert "D002" in _codes(sch)

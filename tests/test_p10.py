@@ -46,9 +46,9 @@ def test_constraints_emit_shared_schema():
     kinds = [c["kind"] for c in doc["constraints"]]
     assert kinds == ["impedance", "diffpair", "length"]
     imp = doc["constraints"][0]
-    assert imp["nets"] == ["usb.dp"] and imp["params"] == ["45ohm"]
+    assert imp["nets"] == ["USB_DP"] and imp["params"] == ["45ohm"]
     dp = doc["constraints"][1]
-    assert dp["nets"] == ["usb.dp", "usb.dm"] and dp["params"] == []
+    assert dp["nets"] == ["USB_DP", "USB_DM"] and dp["params"] == []
     assert doc["constraints"][2]["params"] == ["0.5mm"]
     (hole,) = doc["holes"]
     assert hole == {"kind": "ripple", "args": ["usb.dp"], "op": "<", "bound": "50mV"}

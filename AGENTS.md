@@ -30,7 +30,7 @@ miss them and Ohm has to invent a substitute, which is what reads as amateur.
   title block is blank and the drawing cannot be cited in an ECO (**M009**).
 - **`net NAME = <label>`** — a net has no name in Ohm, only an election over the
   labels on it, so when no port wins, a capacitor pin names the net
-  (`fmu.c_y1.P1`). Name the signals that matter (**M010**).
+  (`FMU_C_Y1_P1`, after `fmu.c_y1.P1`). Name the signals that matter (**M010**).
 - **`kind` conformance** — this is not decoration. It drives the SYMBOL: a part
   declaring `Capacitor` is drawn as a capacitor rather than a labelled box, and
   a cluster's frame is titled by kind ("Crystal", "Connector"). It also drives

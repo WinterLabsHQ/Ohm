@@ -229,7 +229,8 @@ vanish into a document nobody can cite.
 
 **`net NAME = <label>`** — a net has no name in Ohm, only an election over the
 labels on it. When no port label wins, a part pin does, and the net becomes
-`fmu.c_y1.P1` — a name that says where the net lands rather than what it is, and
+`FMU_C_Y1_P1` (the path `fmu.c_y1.P1`, made readable) — a name that says where
+the net lands rather than what it is, and
 that turns false the moment the part is renumbered. Name the signals that matter
 (**M010** reports the rest). One net, one name (**R028**).
 

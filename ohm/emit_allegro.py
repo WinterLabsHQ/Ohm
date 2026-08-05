@@ -77,8 +77,14 @@ def _seg(text: str) -> str:
 
     Allegro's own writer wraps any segment carrying a character outside `[a-z0-9_]`
     in backslashes — `\+3.3v\`, `\boostxl-cc2650ma\` — because `.`, `-` and `(` are
-    structural in a path. Ohm net names routinely contain `.` (`r1.P1`), so without
-    this a two-pin net would parse as a hierarchy descent and lose its nodes.
+    structural in a path. Without it a net named `r1.P1` parses as a hierarchy
+    descent and silently loses its nodes.
+
+    Net names no longer reach here with a dot in them: derived names go through
+    `readable_net_name` and authored ones are grammar NAMEs, so both are already
+    `[A-Za-z0-9_]`. This is kept anyway — it also escapes PART and PIN segments,
+    and the failure it prevents is silent node loss in a file nobody re-reads.
+    `tests/test_allegro.py` covers it directly rather than through a net name.
     """
     lowered = text.lower()
     plain = all(c.isascii() and (c.isalnum() or c == "_") for c in lowered)

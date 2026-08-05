@@ -2,6 +2,85 @@
 
 ## Unreleased
 
+- **fix(kicad10)**: **certified against KiCad 10.0.5**, and fixed the one thing
+  that was genuinely broken.
+  - **Ohm's emit was already compatible and is now proven so.** Ohm writes the
+    KiCad 7 format and relies on KiCad reading forward, which is the direction
+    KiCad guarantees. KiCad 10.0.5 extracts the FMUv2's netlist as **77 nets,
+    partition-identical to KiCad 9.0.9**, and plots its gerbers and schematic
+    PDF. No emitter version bump was needed and none was made — writing a newer
+    stamp would only cost backward compatibility for no gain.
+  - **The roundtrip READER was broken, for the second time by a pretty-printer.**
+    KiCad 9 inserted `(class "Default")` between a net's name and its nodes;
+    KiCad 10 splits every net across a dozen tab-indented lines. Both times the
+    netlist was correct and a line-anchored regex matched zero nets, so the gate
+    failed as though the circuit were wrong — 7 of 23 cases. Replaced with a
+    balanced-paren reader: paren depth is the only part of the format that is
+    actually promised.
+  - **Every power symbol shared one reference.** Ohm emitted them all as bare
+    `#PWR`, so the FMUv2 shipped 191 symbols with one designator between them.
+    KiCad 9 was silent; KiCad 10 reports "annotation errors" on every netlist
+    export, which is the correct reading — that is what a reference means. They
+    are now `#PWR01`, `#PWR02`, ... numbered across the WHOLE hierarchy, because
+    restarting per sheet just moves the collision up a level. Latent since the
+    power symbols were introduced; found only by running KiCad 10.
+  - **`$OHM_KICAD_CLI`** redirects the roundtrip gate at another KiCad, and
+    `tests/kicad_in_docker.sh` supplies one from a container. Certifying a
+    release is now one line and does not touch the developer's toolchain:
+    `OHM_KICAD_VERSION=10.0.5 OHM_KICAD_CLI=tests/kicad_in_docker.sh pytest
+    tests/test_schematic_roundtrip.py`. Verified on **7, 9.0.9 and 10.0.5**.
+  - Not fixed, recorded instead: KiCad 10 reports 39 more `footprint_link_issues`
+    than KiCad 9 on the same board and renamed `label_dangling` to
+    `isolated_pin_label`. Both are library-resolution and rule-naming
+    differences in an environment with no footprint tables configured, not
+    findings about the design.
+
+- **BREAKING**: **derived net names changed spelling** (`fmu.spi_fram.miso` ->
+  `FMU_SPI_FRAM_MISO`). Anything holding the old names must be regenerated:
+  - A board routed against an earlier build carries the old names in its copper,
+    and `ohm signoff` compares board net names to the source's — so it will
+    report V001 on **every pad** until the netlist is re-imported into the board.
+    Re-import, then re-run signoff.
+  - Explicit `net NAME = ...` is unaffected: authored names are never rewritten.
+  - A rename is skipped whenever the readable form is already taken by another
+    net, so no design silently changes which pins are connected.
+- **feat(emit)**: **the drawing reads like one an engineer drew.** Five changes,
+  all in what happens after lowering; the language is untouched.
+  - **Net names are signal names.** A derived name was the Ohm instance path —
+    `fmu.spi_fram.miso` — printed on every label on every sheet. It is now
+    `FMU_SPI_FRAM_MISO` (`readable_net_name`, the single definition of the
+    mapping). The path is kept whole and never shortened: `accel.spi.cs` and
+    `gyro.spi.cs` are different chip selects, and collapsing them to `SPI_CS`
+    would short two nets in the drawing. An explicit `net NAME =` is left exactly
+    as authored, and a rename that would collide is not applied.
+  - **M010 was silently switched off by that rename** and is fixed in the same
+    change: it tested `name == "<part_ref>.<pin>"` against the raw dotted path,
+    which after the rewrite matched nothing, so "nobody named this signal"
+    stopped being reported on every board. It now asks in the spelling the net
+    actually carries. This is the check that motivated the feature, so shipping
+    the feature with the check dead would have been the worst outcome.
+  - **Property text is never upside down.** The angle compensation ran mod 360,
+    which put a 180-degree part's value at 180 (printed upside down and
+    mirrored) and a 90-degree part's at 270 (read top-to-bottom). A drawing has
+    two legal text angles; it is now mod 180.
+  - **`near(cap, ic)` places the cap on the SHEET, not just the board.** A bypass
+    cap sits on two rails and nothing else, so connectivity can never recover
+    which part it serves — every one looks alike. The constraint already says
+    it, and the schematic was throwing that away and banking them.
+  - **A frame only encloses what it names.** The "Decoupling" bank was framed by
+    the bounding box of its members, which swallowed a 3.3V regulator, two
+    diodes and four test points that happened to sit inside it. Rows are now
+    recovered from the placed positions (parts in a row differ in y by their own
+    half-heights, so exact y never grouped them) and only a *contiguous run* of
+    entirely-bank rows is framed.
+  - **Sheet fit reserves the title block**, so a module frame no longer runs
+    through "Title:" and "Rev:".
+- **feat(emit)**: **sourcing attrs reach the BOM.** `mpn`, `manufacturer` and
+  `datasheet` were declared in the source and dropped at the seam — a netlist
+  whose parts say only "100nF" cannot be ordered. They now ride the netlist as
+  fields and the KiCad symbol as hidden properties (hidden because a part number
+  is what you order by, not what you read the circuit by).
+
 - **feat(emit)**: **native Altium and Cadence Allegro targets** (ADR-020) — the
   multi-EDA claim stops being an aspiration.
   - `ohm build --emit altium` writes real `.PcbLib` and `.SchLib` binaries, not an

@@ -23,7 +23,7 @@ def test_live_llm_board_is_clean():
 def test_pullups_present_on_i2c_nets():
     result = compile_source(FIXTURE.read_text(), str(FIXTURE))
     nets = {n.name: n for n in result.low.nets}
-    sda = next(n for name, n in nets.items() if name.endswith("sda"))
+    sda = next(n for name, n in nets.items() if name.endswith("SDA"))
     assert any(node.part_ref == "rsda" for node in sda.nodes)  # the taught fix
 
 

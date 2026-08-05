@@ -80,8 +80,8 @@ module Top:
 def test_deep_port_net_named_from_top_level():
     result = compile_ok(DEEP)
     names = {n.name for n in result.low.nets}
-    assert "vin.v" in names and "vin.gnd" in names
-    assert "a.pwr.v" not in names  # deep inner label must not win over vin.v
+    assert "VIN_V" in names and "VIN_GND" in names
+    assert "A_PWR_V" not in names  # deep inner label must not win over vin.v
 
 
 # ---------- finding 5: constraint on unconnected pin -> I007, no phantom net ----------
@@ -106,7 +106,7 @@ def test_constraint_unconnected_pin_warns_no_phantom_net():
     assert len(i007) == 1  # once via driver's lower; checkers must not re-surface it
     assert i007[0].severity == "warning"
     assert "j.NC" in i007[0].message
-    assert [n.name for n in result.low.nets] == ["j.DM"]  # no phantom j.NC net
+    assert [n.name for n in result.low.nets] == ["J_DM"]  # no phantom j.NC net
     assert "j.NC" not in emit_netlist(result.low, "x")
 
 

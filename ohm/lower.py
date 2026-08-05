@@ -11,11 +11,30 @@ lexicographically smallest port-member label on the net, else pin label.
 
 from __future__ import annotations
 
+import re
+
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
 from shared.constraints_schema import PLACEMENT_KINDS
 
 _PIN, _PORT = "pin", "port"
+
+
+def readable_net_name(name: str) -> str:
+    """An Ohm instance path (`fmu.spi_fram.miso`) as a net name (`FMU_SPI_FRAM_MISO`).
+
+    Exported because it is the ONE definition of the mapping. Any check that
+    reasons about where a derived name came from — M010 asks whether a net is
+    named after a part pin — has to ask in the same spelling the net now has,
+    or it silently stops matching and reports nothing forever.
+
+    An array subscript is SYNTAX, not a separator: `rs[1].P2` is the second
+    resistor's P2, and the name a person writes for it is `RS1_P2`. Turning the
+    brackets into separators too gives `RS_1__P2`, which reads like three
+    fields. They are dropped; only the dots become underscores.
+    """
+    return re.sub(r"_+", "_", re.sub(r"\W", "_", name.replace("[", "")
+                                     .replace("]", ""))).upper()
 
 
 def first_by_name(items) -> dict:
@@ -222,8 +241,12 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         spans = {sp for lbl, sp in edges if find(lbl) == root}
         conn_spans = tuple(sorted(spans, key=lambda sp: (sp.line, sp.col,
                                                          sp.end_line, sp.end_col)))
+        # Two different questions, so two flags. `no_collapse` gates the
+        # member-stripping below (only a port label may lose its member).
+        # `authored` is the narrower fact — the author wrote `net NAME =` — and
+        # is the only thing that may veto the readable-name rewrite.
         pending.append((name, bool(named) or name not in port_labels,
-                        members, port_labels, nodes, conn_spans))
+                        members, port_labels, nodes, conn_spans, bool(named)))
 
     # An interface MEMBER name is not part of the signal's identity: `VDD_3V3.v`
     # and `GND.gnd` carry an Ohm implementation detail onto a drawing where the
@@ -250,10 +273,42 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
         if stem_count.get(stem) == 1 and stem not in taken and stem not in collapse.values():
             collapse[name] = stem
 
+    # A derived name is an Ohm INSTANCE PATH; a net name is read by a human on a
+    # drawing. `fmu.spi_fram.miso` and `SPI_FRAM_MISO` are the same signal, but
+    # only one of them looks like something an engineer chose. Uppercase and
+    # underscore the derived ones — the path is kept whole, never shortened,
+    # because `accel.spi.cs` and `gyro.spi.cs` are different chip selects and
+    # dropping the instance would short them into one `SPI_CS`.
+    #
+    # Explicit `net NAME = ...` is left exactly as authored: the author already
+    # said what this signal is called, and case is part of that.
+    # Never merge two nets by renaming. Connectivity in the emitted schematic is
+    # carried BY THE NAME — two nets drawn with one label are one net in KiCad —
+    # so a rename that lands on a name another net already holds is a short, not
+    # a cosmetic clash. The taken set therefore has to hold every name that will
+    # survive: the authored ones, and every derived name as it currently stands,
+    # because a derived name that is already in readable form (`A_B`) is never
+    # itself renamed and so would never appear in `renamed.values()`. Checking
+    # only those two was enough to let `a.b` rename onto a sibling `A_B`.
+    taken_names = {collapse.get(n, n) for n, *_ in pending}
+    renamed: dict[str, str] = {}
+    for name, _nc, _m, _p, _nd, _cs, authored in pending:
+        name = collapse.get(name, name)
+        if authored or name in renamed:
+            continue
+        cand = readable_net_name(name)
+        # A collision means the readable form is ambiguous, so that net keeps
+        # the path it can be told apart by. Uglier and correct beats pretty and
+        # shorted.
+        if cand != name and cand not in taken_names:
+            renamed[name] = cand
+            taken_names.add(cand)
+
     nets = []
     net_of_label: dict[str, str] = {}
-    for name, _explicit, members, port_labels, nodes, conn_spans in pending:
+    for name, _nc, members, port_labels, nodes, conn_spans, _authored in pending:
         name = collapse.get(name, name)
+        name = renamed.get(name, name)
         nets.append(ir.NetLow(name, nodes, port_labels, conn_spans))
         for lbl in members:
             net_of_label[lbl] = name
