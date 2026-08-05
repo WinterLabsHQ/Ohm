@@ -31,7 +31,7 @@ Plan: Milestone 1 = P0–P6 (approved 2026-07-23).
 | P12 Agent validation | ✅ 2026-07-23 | live LLM given ONLY docs/STYLE.md + MCP9808 datasheet excerpt authored a clean design incl. generated TSSOP-8 (zero-shot had 1 error — R005 undeclared Power, a guide gap; 1 machine-diagnostic round fixed it); swapped SDA/SCL caught; **found+fixed a Tier-I gap**: require-pair crossed onto one instance's like-named pins now I005; frozen as tests/fixtures/agent_mcp9808.ohm |
 
 **Milestone 3 (P10–P12) COMPLETE — ALL PHASES P0–P12 DONE, 150 tests green.**
-Out of scope by design: Meridian router, convergence solver, hosted platform (proprietary side of the D6 boundary). Open items from the blueprint: OSS license needs legal advice (D6); `pcb` toolchain cross-check on the .zen interop path when the binary is available.
+Out of scope by design: Meridian router, convergence solver, hosted platform (proprietary side of the D6 boundary). Open items from the blueprint: ~~OSS license needs legal advice (D6)~~ **decided 2026-08-05 — Ohm is proprietary, see "Licence — D6 decided" below**; `pcb` toolchain cross-check on the .zen interop path when the binary is available.
 
 ## Production audit 2026-07-23 (post-P12)
 
@@ -49,6 +49,8 @@ docs are immutable; deviations live here per the session ritual):**
 - **`shared/` top-level package name**: kept as the blueprint pins the
   `shared/constraints_schema.py` seam path; the site-packages name-collision risk
   is accepted until packaging/publish time (revisit with the license decision).
+  **Still parked 2026-08-05**: the licence is decided but Ohm is not published to
+  any index, so nothing shares a site-packages namespace with it yet.
 - **.zen export pins keys**: keyed by pin *name*, which is Zener-spec-correct
   (consumers resolve pads via their own symbol data); audit finding cleared.
 - **Q005 thermal**: ambient fixed at 25 degC (ADR-004 addendum).
@@ -374,3 +376,122 @@ machine Ohm is developed or tested on. First user with a licence closes that gap
 **Also fixed in passing:** the five golden netlists still carried `ohm 0.1.0`
 after the version bump, so six tests were red before this work started. Verified
 the only delta was the version string, then regenerated.
+
+## Tooling fixes found by a real design (2026-08-02, →190ca77, b540c32)
+
+Two bugs the Mehzabeen ECG board exposed. Neither was a language bug; neither
+ever reached the netlist.
+
+- `ohm/provenance.py` — `verify-pinouts` ignored a declared
+  `pinout_source = "datasheet:..."`, fell through to the MPN search, and
+  `_prefix_score` then accepted a same-family sibling (ADS1292R vs ADS1299 share
+  exactly 6 characters and cleared `n >= 6` by one). 64 confident false findings.
+  Now a declared non-KiCad origin abstains rather than guessing, and divergence
+  digit-against-digit scores 0 — a letter still passes, since that is the variant
+  wildcard.
+- `ohm/emit_kicad.py` — the synthesized anchor pin on a pinless component
+  (Fiducial, MountingHole) was emitted bare, so KiCad ERC reported unconnected
+  pins the source never declared and `unused_pins = open` had nothing to reach.
+  It now carries a no-connect.
+
+## KiCad 9 and KiCad 10 (2026-08-02 →1a138e2, 2026-08-05 →3dd90ca)
+
+Ohm writes the KiCad 7 format and relies on KiCad reading forward, which is the
+direction KiCad guarantees. Both versions are now run against, not assumed.
+
+**KiCad 9.0.9.** The framing "regenerate the goldens" was wrong: no golden land
+pattern moved, and Ohm's runtime never *reads* a `.kicad_mod`, only writes them.
+17 of 20 failures were serialisation — KiCad 9 pretty-prints and quotes pad ids
+(9 golden regexes matched nothing; fixed by one tolerant reader in
+`tests/kicad_golden.py`, deliberately in tests/ because a footprint reader is
+scaffolding, not product), and inserts `(class "Default")` between a net's name
+and its nodes, which made the round-trip oracle see every net as empty. 3 were
+real: `std.connectors` pointed at `TerminalBlock_bornier-*`, which KiCad 9
+deleted; `pcbnew.EDA_UNITS_MILLIMETRES` was renamed `EDA_UNITS_MM`, breaking
+signoff's V007 gate (now version-tolerant, raises `DrcUnavailable`); `Q_NMOS_GDS`
+moved Device → Transistor_FET.
+
+**KiCad 10.0.5.** Extracts the FMUv2's netlist as 77 nets, partition-identical to
+KiCad 9.0.9, and plots its gerbers and schematic. KiCad 10 splits every net
+across a dozen tab-indented lines, breaking the same oracle a second time — the
+reader is now whitespace-shaped rather than line-shaped. Recorded, not fixed:
+KiCad 10 reports 39 more `footprint_link_issues` than KiCad 9 on the same board
+and renamed `label_dangling`.
+
+Same commit, net names: a derived name was the Ohm instance path printed on every
+label on every sheet. `readable_net_name()` is now the one definition of the
+mapping (`fmu.spi_fram.miso` → `FMU_SPI_FRAM_MISO`); the path is kept whole and
+never shortened, because `accel.spi.cs` and `gyro.spi.cs` are different chip
+selects, and a rename that would collide with an existing name is skipped —
+connectivity is carried BY the label, so that collision would be a short, not a
+cosmetic clash. **BREAKING**: a board routed against an earlier build carries the
+old names in its copper, so `ohm signoff` reports V001 on every pad until the
+netlist is re-imported. Authored `net NAME = ...` is never rewritten.
+
+## Track widths and a placer that places (2026-08-05, →49204e4)
+
+The two things that made the board output a stub rather than a starting point.
+
+`netclass(rail, "power")` produced a class whose `track_width` was byte-identical
+to Default — the intent was named and then the rail was routed at signal width.
+`ohm/trace_width.py` sizes it from the current the design already declares (the
+same per-pin `current=` sum Q002 checks) by the IPC-2221A external curve, 1oz,
+10 degC rise, rounded UP to 0.05mm, because rounding a current-carrying trace to
+the nearer step is the one direction that is not safe. IPC-2221 rather than the
+newer 2152 deliberately: 2152 needs copper area, dielectric and via field, which
+Ohm does not know, and 2221 errs wide. Sizing only ever widens, and only where a
+current was declared — a width invented from no current is a default wearing a
+standard's name. **Q007** reports a netclass Ohm could not size, and fires only
+where the declaration has somewhere to go, since a rail reaching nothing but
+passives has no `current=` to write.
+
+The placer advanced only x, so 116 parts landed on a single 500mm line. It now
+flows one block per module, wraps into rows against the board the `fixed` parts
+imply, and keeps clear of them — a mounting hole has a screw through it. `near`
+was dropped outright when its target was `fixed`, which is the most load-bearing
+`near` on a board; followers are now seated the moment their target lands, on the
+first free side, at the declared distance measured EDGE TO EDGE. Board
+coordinates stopped being rounded to the 1.27mm *schematic* grid — a 0.05in
+imperial pitch applied to a metric board, which is why a declared 2mm arrived as
+2.9mm — and now quantise to 0.01mm toward the target, so the quantum can only
+ever shorten a declared gap. FMUv2: 382mm × 1 row → 88 × 164mm, zero S011
+conflicts contributed, 17 of 18 `near` constraints met exactly (the 18th is the
+tail of a five-deep connector chain that runs out of free sides).
+
+**895 tests + 1 skipped green, ruff+mypy clean.**
+
+## Licence — D6 decided (2026-08-05, →273601e)
+
+**Ohm is proprietary.** The open-core question is closed the other way, by owner
+decision. `LICENSE` is the Ohm Software License: all rights reserved, use only
+under a written agreement with WinterLabs, no redistribution, no derivative
+works, no patent grant. Apache 2.0 granted every one of those to anyone who
+cloned the repo, which is what it was there to stop granting.
+
+- **Output is untouched.** Designs, netlists and boards built with Ohm belong to
+  their author; the licence claims no ownership of design data. A tool that took
+  a share of what it compiled would not be usable by anyone.
+- `NOTICE` and the `pyproject` metadata were changed to match rather than left
+  contradicting the file they point at, and the packaging carries
+  `Private :: Do Not Upload`, so an accidental publish is refused by the index
+  instead of being an irreversible open-sourcing.
+- The repo (github.com/WinterLabsHQ/Ohm) stays **private**, and that is now the
+  permanent answer rather than a holding position.
+- Downstream: any binary embedding Ohm — PinForge's desktop bundle — is now a
+  WinterLabs-internal call rather than an open-source grant.
+- **Not legal advice.** The text is a standard-shape proprietary licence; counsel
+  should read it against the first real customer agreement before it is signed.
+
+Also in that commit: README rewritten in plain language. It opened by naming
+itself an "AI-native, physics-aware hardware description language" and expected
+the reader to already know what that bought them; it now says what Ohm does in a
+sentence a hardware engineer can act on, keeps every claim, and drops the ones it
+made twice. Two stale numbers corrected — 840 tests → 895, and "emits a KiCad 7
+project" → writes the KiCad 7 format, verified through KiCad 10.0.5.
+
+**Note on the blueprint.** `docs/blueprint/OHM_ENGINEERING_BUILD_MANUAL.md` still
+states D6 as open-core with the licence TBD. The blueprint is immutable by
+design; this log is where the deviation is recorded, per the standing ritual.
+The language and compiler are no longer the open half of D6 — the boundary that
+survives is the one that always mattered: Meridian and the convergence solver are
+separate products consuming the `shared/` seam, never in this repo.
