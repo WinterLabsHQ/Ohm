@@ -13,7 +13,8 @@ component BME280:
     pin SDO:   role=input, pad=5
     pin VDDIO: role=power_in, pad=6
     pin GND2:  role=ground, pad=7
-    pin VDD:   role=power_in, vmax=3.6V, pad=8
+    # BME280 datasheet: 3.6uA at 1Hz humidity+pressure, 0.7mA peak
+    pin VDD:   role=power_in, vmax=3.6V, current=700uA, pad=8
 
 module sensor_node:
     pwr = io(Power)

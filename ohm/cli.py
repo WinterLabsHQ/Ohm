@@ -795,7 +795,8 @@ def main(argv: list[str] | None = None) -> int:
                 (outdir / f"{stem}.kicad_pcb").write_text(
                     emit_kicad_pcb(low, args.file), encoding="utf-8", newline="\n")
                 (outdir / f"{stem}.kicad_pro").write_text(
-                    emit_kicad_pro(low, args.file), encoding="utf-8", newline="\n")
+                    emit_kicad_pro(low, args.file, result.design),
+                    encoding="utf-8", newline="\n")
                 _emit_generated_packages(result, outdir)
             if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
                 _emit_generated_packages(result, outdir)

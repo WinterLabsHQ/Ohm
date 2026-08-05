@@ -15,7 +15,7 @@ import pytest
 
 from ohm.driver import compile_source
 from ohm.emit_constraints import emit_constraints
-from ohm.emit_kicad import _CELL_GAP, _ceil_grid, emit_kicad_pcb, emit_kicad_sch
+from ohm.emit_kicad import _CELL_GAP, emit_kicad_pcb, emit_kicad_sch, parse_mm
 from ohm.emit_kicad_pro import emit_kicad_pro
 from ohm.emit_netlist import emit_netlist
 from ohm.pkggen.packages import build
@@ -109,12 +109,22 @@ def test_unfixed_parts_distinct_and_non_overlapping(pcb):
 
 
 # ---------- near: adjacent in the same row ----------
-def test_near_places_part_adjacent(pcb):
+def test_near_places_part_adjacent(pcb, low):
+    """`near(a, b, d)` puts a within d of b — EDGE to edge, which is what the
+    constraint means and what a layout engineer reads it as.
+
+    The old contract was "the next cell along", which quantised a declared 2mm
+    to the 2mm placement grid plus the courtyard padding and delivered 2.9mm.
+    The distance the author wrote is the one number here that is not an
+    approximation."""
     fps = footprints(pcb)
     (xa, ya, _), (xb, yb, _) = pose(fps["ra"]), pose(fps["rb"])
-    assert ya == yb  # same row
-    pitch = _ceil_grid(build("CHIP0603", {}).courtyard_w + _CELL_GAP)
-    assert xb - xa == pitch  # immediately adjacent cell
+    # this fixture's near declares no distance, so the default cell gap applies
+    want = next((parse_mm(p) for c in low.constraints if c.kind == "near"
+                 for p in c.params if parse_mm(p) is not None), _CELL_GAP)
+    half = build("CHIP0603", {}).courtyard_w / 2
+    gap = max(abs(xb - xa) - half * 2, abs(yb - ya) - half * 2)
+    assert gap <= want, f"declared {want}mm, placed {gap}mm apart"
 
 
 # ---------- groups ----------
@@ -230,3 +240,85 @@ def test_cli_emits_kicad_pro(tmp_path):
     pro = json.loads((out / "board.kicad_pro").read_text())
     assert pro["meta"]["filename"] == "board.kicad_pro"
     assert (out / "board.kicad_pcb").exists()
+
+
+# ---------- the placer flows; it does not run off the edge of the world ----------
+FLOW_SRC = """use std.interfaces
+use std.passives
+
+component Ic:
+    package = generate(SOIC, pins=8)
+    pin VDD: role=power_in, pad=1, current=100mA
+    pin GND: role=ground, pad=2
+    pin A: role=input, pad=3
+    pin B: role=input, pad=4
+    pin C: role=input, pad=5
+    pin D: role=input, pad=6
+    pin E: role=input, pad=7
+    pin F: role=input, pad=8
+
+module Board:
+    pwr = io(Power)
+    u = Ic()
+"""
+
+
+def _many(n: int) -> str:
+    src = FLOW_SRC + "".join(f"    c{i} = Capacitor(value=100nF)\n" for i in range(n))
+    src += "    pwr.v ~ u.VDD\n    pwr.gnd ~ u.GND\n"
+    src += "".join(f"    pwr.v ~ c{i}.P1\n    pwr.gnd ~ c{i}.P2\n" for i in range(n))
+    return src
+
+
+def test_the_placer_wraps_instead_of_running_off_in_one_line():
+    """The old placer only advanced x, so 116 parts landed on a single 500mm
+    line — wider than any panel, and a placement no router can use."""
+    from ohm.emit_kicad import placement
+
+    result = compile_source(_many(60), "flow.ohm")
+    assert result.low is not None, [d.machine() for d in result.diagnostics]
+    pos = placement(result.low)
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    assert len(set(ys)) > 1, "every part is still on one row"
+    # a 61-part board is not 400mm wide
+    assert max(xs) - min(xs) < 200, f"spread {max(xs) - min(xs)}mm across"
+    assert min(xs) >= 0 and min(ys) >= 0, "placed off the board at a negative coordinate"
+
+
+def test_no_two_auto_placed_parts_overlap():
+    from ohm.emit_kicad import _courtyard, placement
+
+    result = compile_source(_many(40), "flow.ohm")
+    pos = placement(result.low)
+    pkg = {p.ref: p.package for p in result.low.parts}
+    boxes = []
+    for ref, (x, y, _r, _s, _l) in sorted(pos.items()):
+        w, h, _m = _courtyard(pkg[ref])
+        boxes.append((ref, x - w / 2, y - h / 2, x + w / 2, y + h / 2))
+    for i, (ra, ax1, ay1, ax2, ay2) in enumerate(boxes):
+        for rb, bx1, by1, bx2, by2 in boxes[i + 1:]:
+            assert not (ax1 < bx2 and ax2 > bx1 and ay1 < by2 and ay2 > by1), \
+                f"{ra} overlaps {rb}"
+
+
+def test_near_is_honoured_against_a_FIXED_target():
+    """`near(cap, u, 2mm)` with the MCU pinned is the most load-bearing near on
+    a board, and it used to be dropped outright because the target was not in
+    the flow — the cap landed wherever the row happened to reach."""
+    from ohm.emit_kicad import _courtyard, placement
+
+    src = _many(3).replace(
+        "module Board:",
+        "module Board:") + (
+        '    constraint fixed(u, 30mm, 25mm, 0, "top")\n'
+        "    constraint near(c0, u, 2mm)\n")
+    result = compile_source(src, "anchor.ohm")
+    assert result.low is not None, [d.machine() for d in result.diagnostics]
+    pos = placement(result.low)
+    pkg = {p.ref: p.package for p in result.low.parts}
+    (ux, uy, *_), (cx, cy, *_) = pos["u"], pos["c0"]
+    uw, uh, _ = _courtyard(pkg["u"])
+    cw, ch, _ = _courtyard(pkg["c0"])
+    gap = max(abs(cx - ux) - uw / 2 - cw / 2, abs(cy - uy) - uh / 2 - ch / 2)
+    assert gap <= _CELL_GAP, f"declared 2mm from a fixed part, placed {gap}mm away"

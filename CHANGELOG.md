@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- **feat(pcb)**: **track widths are computed, and the placer places.** The two
+  things that made the board output a stub rather than a starting point.
+  - **A netclass now carries a width, not just a name.** `netclass(rail,
+    "power")` produced a class whose `track_width` was byte-identical to
+    Default: the intent was named and then the rail was routed at signal width.
+    `ohm/trace_width.py` sizes it from the current the design already declares
+    (the same per-pin `current=` sum Q002 checks), by the IPC-2221A external
+    curve — 1oz, 10degC rise, rounded UP to 0.05mm, because rounding a
+    current-carrying trace to the nearer step is the one direction that is not
+    safe. The FMUv2's power class goes 0.25mm -> 0.35mm off its declared 1.05A.
+    IPC-2221 rather than the newer 2152 deliberately: 2152 needs copper area,
+    dielectric and via field, which Ohm does not know, and 2221 errs wide.
+  - Sizing only ever WIDENS, and only where a current was declared. A width
+    invented from no current is a default wearing a standard's name.
+  - **Q007** reports a netclass Ohm could not size, so a decorative class is
+    visible instead of silent. It fires only where the declaration has somewhere
+    to go — a rail reaching nothing but passives has no `current=` to write, and
+    warning there is how a check teaches people to ignore it.
+  - **The placer wraps.** It advanced only x, so 116 parts landed on a single
+    500mm line. It now flows one block per module, wraps into rows against the
+    board the `fixed` parts imply, and keeps clear of them — a mounting hole has
+    a screw through it. The FMUv2 goes from 382mm x 1 row to 88 x 164mm, and
+    contributes zero S011 conflicts (the five that remain are between the
+    author's own fixed poses, unchanged).
+  - **`near` is honoured, and honoured exactly.** It was dropped outright when
+    the target was `fixed` — `near(c_vdd1, u, 2mm)` against a pinned MCU is the
+    most load-bearing near on a board. Followers are now seated the moment their
+    target lands, on the first free side, at the declared distance measured
+    EDGE TO EDGE, which is what `near` means. 17 of the FMUv2's 18 near
+    constraints are now met exactly; the 18th is the tail of a five-deep
+    connector chain that runs out of free sides.
+  - Board coordinates stopped being rounded to the 1.27mm SCHEMATIC grid. A
+    0.05in imperial pitch was being applied to a metric board, which is why a
+    declared 2mm arrived as 2.9mm. They quantise to 0.01mm, toward the target,
+    so the quantum can only ever shorten a declared gap.
+
 - **fix(kicad10)**: **certified against KiCad 10.0.5**, and fixed the one thing
   that was genuinely broken.
   - **Ohm's emit was already compatible and is now proven so.** Ohm writes the

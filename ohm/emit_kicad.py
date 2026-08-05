@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
 from ohm import ir, units
@@ -143,6 +143,20 @@ def _courtyard(pkg: ir.Value | None):
     return _STUB_W, _STUB_H, None
 
 
+_PCB_QUANTUM = _D("0.01")  # mm; KiCad stores nm, fabs work to 10um
+
+
+def _mm(v: Decimal) -> Decimal:
+    """Round a BOARD coordinate to 0.01mm.
+
+    Placement used `_snap`, which rounds up to the 1.27mm schematic grid — a
+    0.05in imperial pitch applied to a metric board. Every `near(x, 2mm)` came
+    out at up to 3.27mm because of it, so the one number the author wrote was
+    never the number that reached the board.
+    """
+    return v.quantize(_PCB_QUANTUM)
+
+
 def _ceil_grid(d: Decimal) -> Decimal:
     return (d / _CELL_GAP).quantize(_D(1), rounding=ROUND_CEILING) * _CELL_GAP
 
@@ -154,10 +168,25 @@ def _group_of(ref: str) -> str:
 def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, bool]]:
     """part ref -> (x, y, rot, side, locked). Deterministic, Decimal-only.
 
-    Rules: fixed parts at their declared pose (locked). Others: one row per
-    top-level module group, groups left-to-right name-sorted, parts name-sorted
-    within the group, each in a 2mm-gridded cell sized ceil2(courtyard + 2mm);
-    near-parts are inserted immediately after their target (same row).
+    Fixed parts sit at their declared pose (locked). Everything else FLOWS: one
+    block per top-level module group, parts wrapped into rows, blocks stacked
+    down the board. Then every `near` follower is moved beside the part it was
+    declared near, at the distance it asked for, on the first side that is free.
+
+    Three things this gets right that the row-cursor version did not:
+
+    - It advances y. The old placer only moved x, so 116 parts landed on a
+      single 500mm line — a placement no board holds and no router uses.
+    - `near` is honoured against a FIXED target. `near(c_vdd1, u, 2mm)` with the
+      MCU pinned at (30, 25) is the most load-bearing near on a board, and it
+      was dropped outright because the target was not in the flow.
+    - A chain is a LINE, not a star. `a near b near c` places each part beside
+      its OWN target; collapsing the chain to its root (which is right for the
+      schematic, where satellites ring one host) put a connector on the far side
+      of the anchor and off the board at x = -8.89.
+
+    Distances are edge-to-edge, because that is what `near` means. Placing on
+    the 2mm cell grid instead turned a declared 2mm into 2.9mm.
     """
     fixed = fixed_poses(low)
     out: dict[str, tuple[Decimal, Decimal, Decimal, str, bool]] = {}
@@ -166,43 +195,175 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
     for ref, (x, y, rot, side) in fixed.items():
         out[ref] = (x, y, rot, side, True)
 
-    # near(follower, target): follower rides right after target, first wins
+    pkg_of = {p.ref: p.package for p in low.parts}
+
+    def half(ref: str) -> tuple[Decimal, Decimal]:
+        w, h, _m = _courtyard(pkg_of.get(ref))
+        return w / 2, h / 2
+
+    def cell_of(ref: str) -> tuple[Decimal, Decimal]:
+        w, h, _m = _courtyard(pkg_of.get(ref))
+        return _ceil_grid(w + _CELL_GAP), _ceil_grid(h + _CELL_GAP)
+
+    # near(follower, target, distance): first declaration wins
     follows: dict[str, str] = {}
+    want_of: dict[str, Decimal] = {}
     for c in low.constraints:
         if (c.kind == "near" and len(c.nets) >= 2 and c.nets[0] in auto_refs
-                and c.nets[1] in auto_refs and c.nets[0] != c.nets[1]):
-            follows.setdefault(c.nets[0], c.nets[1])
-    followers_of: dict[str, list[str]] = {}
+                and c.nets[0] != c.nets[1]
+                and (c.nets[1] in auto_refs or c.nets[1] in fixed)
+                and c.nets[0] not in follows):
+            follows[c.nets[0]] = c.nets[1]
+            want_of[c.nets[0]] = next(
+                (d for p in c.params if (d := parse_mm(p)) is not None), _CELL_GAP)
+
+    # depth from a non-follower root, so a target is always placed before the
+    # part that has to sit beside it. A cycle keeps its first-seen depth and is
+    # placed in the flow like anything else.
+    depth_of: dict[str, int] = {}
     for follower in sorted(follows):
-        followers_of.setdefault(follows[follower], []).append(follower)
+        seen, cur, hops = {follower}, follows[follower], 1
+        while cur in follows and cur not in seen:
+            seen.add(cur)
+            cur = follows[cur]
+            hops += 1
+        depth_of[follower] = hops
 
     groups: dict[str, list[str]] = {}
     for p in sorted(auto, key=lambda p: p.ref):
-        if p.ref not in follows:  # followers are placed via their target
+        if p.ref not in follows:
             groups.setdefault(_group_of(p.ref), []).append(p.ref)
 
-    court = {p.ref: _courtyard(p.package) for p in auto}
-    cursor = _ORIGIN_X
-    placed: set[str] = set()
+    # Occupancy, so nothing lands on anything: fixed parts first, then each
+    # part as it is placed. A mounting hole has a screw through it.
+    taken: list[tuple[Decimal, Decimal, Decimal, Decimal]] = []
 
-    def place(ref: str) -> None:
-        nonlocal cursor
-        if ref in placed:
-            return
-        placed.add(ref)
-        w, _h, _m = court[ref]
-        cell = _ceil_grid(w + _CELL_GAP)
-        out[ref] = (cursor + cell / 2, _ORIGIN_Y, _D(0), "top", False)
-        cursor += cell
-        for follower in followers_of.get(ref, ()):
-            place(follower)
+    def rect(ref: str, x: Decimal, y: Decimal):
+        hw, hh = half(ref)
+        pad = _CELL_GAP / 2
+        return (x - hw - pad, y - hh - pad, x + hw + pad, y + hh + pad)
 
+    def free(r) -> bool:
+        # Compared with a quantum of slack. `rect` pads each part by half a cell
+        # gap as a courtesy margin, so a follower placed at exactly the distance
+        # it asked for has pads that just touch — and rounding the position to
+        # 0.01mm tipped that touch 0.005mm into an overlap, which rejected every
+        # side of the MCU and flowed its bypass caps 134mm away. A sub-quantum
+        # touch of a margin is not a collision.
+        e = _PCB_QUANTUM
+        return r[0] >= 0 and r[1] >= 0 and not any(
+            r[0] + e < t[2] and r[2] - e > t[0]
+            and r[1] + e < t[3] and r[3] - e > t[1] for t in taken)
+
+    for ref, (x, y, _r, _s) in fixed.items():
+        taken.append(rect(ref, x, y))
+
+    followers_of: dict[str, list[str]] = {}
+    for f in sorted(follows):
+        followers_of.setdefault(follows[f], []).append(f)
+
+    def seat(ref: str) -> None:
+        """Put every follower of `ref` beside it, then their followers.
+
+        Called the moment `ref` itself lands. Placing all the flow first and the
+        followers afterwards left nothing free beside the targets, and three
+        parts fell through to the fallback and were flowed 150mm from the pin
+        they were declared 2mm from — worse than the row they replaced.
+        """
+        tx, ty, _tr, _ts, _tl = out[ref]
+        thw, thh = half(ref)
+        for f in followers_of.get(ref, ()):
+            if f in out:
+                continue
+            rhw, rhh = half(f)
+            gap = want_of.get(f, _CELL_GAP)
+            # Round TOWARD the target, so the quantum can only ever shorten the
+            # gap. Rounding away made a declared 2mm land at 2.005mm — 5um, far
+            # under any fab tolerance, but the declared number is the one thing
+            # here that is not an approximation, and it costs nothing to honour.
+            for x, y, rx, ry in (
+                (tx + thw + gap + rhw, ty, ROUND_FLOOR, ROUND_FLOOR),
+                (tx - thw - gap - rhw, ty, ROUND_CEILING, ROUND_FLOOR),
+                (tx, ty + thh + gap + rhh, ROUND_FLOOR, ROUND_FLOOR),
+                (tx, ty - thh - gap - rhh, ROUND_FLOOR, ROUND_CEILING),
+            ):
+                px = x.quantize(_PCB_QUANTUM, rounding=rx)
+                py = y.quantize(_PCB_QUANTUM, rounding=ry)
+                r = rect(f, px, py)
+                if free(r):
+                    out[f] = (px, py, _D(0), "top", False)
+                    taken.append(r)
+                    seat(f)
+                    break
+
+    # followers of a FIXED part get their space before anything flows into it
+    for ref in sorted(fixed):
+        seat(ref)
+
+    # width of the board the design implies, via the parts pinned to it
+    if fixed:
+        target_w = max(t[2] for t in taken) - min(t[0] for t in taken)
+    else:
+        area = sum((cw * ch for cw, ch in map(cell_of, sorted(auto_refs))), _D(0))
+        target_w = _ceil_grid(area.sqrt())
+    target_w = max(target_w, _D(20))
+
+    # ---- flow every part that is not a near-follower ----
+    cursor_x, cursor_y, row_h = _ORIGIN_X, _ORIGIN_Y, _D(0)
     for gname in sorted(groups):
         for ref in groups[gname]:
-            place(ref)
-        cursor += _GROUP_GAP
-    for ref in sorted(follows):  # follower whose target chain never placed (cycle)
-        place(ref)
+            cw, ch = cell_of(ref)
+            if cursor_x > _ORIGIN_X and cursor_x + cw > _ORIGIN_X + target_w:
+                cursor_x, cursor_y, row_h = _ORIGIN_X, _mm(cursor_y + row_h), _D(0)
+            # step past anything already there; bounded by the occupancy count
+            for _ in range(len(taken) + 1):
+                r = rect(ref, cursor_x + cw / 2, cursor_y + ch / 2)
+                if free(r):
+                    break
+                blocking = [t for t in taken
+                            if r[0] < t[2] and r[2] > t[0] and r[1] < t[3] and r[3] > t[1]]
+                cursor_x = _mm(max(t[2] for t in blocking))
+                if cursor_x + cw > _ORIGIN_X + target_w:
+                    cursor_x, cursor_y, row_h = _ORIGIN_X, _mm(cursor_y + row_h), _D(0)
+            x, y = _mm(cursor_x + cw / 2), _mm(cursor_y + ch / 2)
+            out[ref] = (x, y, _D(0), "top", False)
+            taken.append(rect(ref, x, y))
+            seat(ref)
+            cursor_x = _mm(cursor_x + cw)
+            row_h = max(row_h, ch)
+        cursor_x, cursor_y, row_h = _ORIGIN_X, _mm(cursor_y + row_h + _GROUP_GAP), _D(0)
+
+    # ---- anything seat() could not fit: flow it, do not stack it ----
+    # Only parts still unplaced. An earlier draft re-ran this over EVERY
+    # follower and overwrote the positions seat() had already found, which is
+    # how a bypass cap ended up 134mm from a pin it was sitting 2mm from.
+    for ref in sorted(follows, key=lambda r: (depth_of[r], r)):
+        if ref in out:
+            continue
+        target = follows[ref]
+        if target not in out:  # a cycle: nothing to sit beside
+            continue
+        tx, ty, _tr, _ts, _tl = out[target]
+        thw, thh = half(target)
+        rhw, rhh = half(ref)
+        gap = want_of.get(ref, _CELL_GAP)
+        for x, y in ((tx + thw + gap + rhw, ty), (tx - thw - gap - rhw, ty),
+                     (tx, ty + thh + gap + rhh), (tx, ty - thh - gap - rhh)):
+            if free(rect(ref, _mm(x), _mm(y))):
+                out[ref] = (_mm(x), _mm(y), _D(0), "top", False)
+                taken.append(rect(ref, _mm(x), _mm(y)))
+                break
+        else:  # every side taken — flow it rather than stack it on a neighbour
+            cw, ch = cell_of(ref)
+            x, y = _mm(cursor_x + cw / 2), _mm(cursor_y + ch / 2)
+            while not free(rect(ref, x, y)):
+                x = _mm(x + cw)
+                if x > _ORIGIN_X + target_w:
+                    x, cursor_y = _mm(_ORIGIN_X + cw / 2), _mm(cursor_y + ch)
+                    y = _mm(cursor_y + ch / 2)
+            out[ref] = (x, y, _D(0), "top", False)
+            taken.append(rect(ref, x, y))
+            cursor_x = _mm(x + cw / 2)
     return out
 
 

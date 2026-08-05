@@ -191,4 +191,57 @@ def check_quant(design: ir.Design, path: str = "<string>",
                     f"(25degC ambient + {p_hi}W × theta_ja={theta}degC/W) "
                     f"but tmax={tmax.iv.lo}degC",
                     comp.span or _NO_SPAN, file=path))
+    diags += _check_unsized_netclasses(low, design, path)
     return diags
+
+
+def _check_unsized_netclasses(low, design, path) -> list[Diagnostic]:
+    """Q007: a `netclass` Ohm cannot size, because nothing declares the current.
+
+    `netclass(rail, "power")` states an intent about routing, and Ohm sizes the
+    class's track width from the current the design declares on that net
+    (IPC-2221A, see ohm/trace_width.py). A net where nothing declares a draw
+    leaves the class at KiCad's 0.25mm default — a rail routed at signal width
+    under a rule that says "power". Saying nothing here is how the class stays
+    decorative, which is exactly the defect the sizing exists to remove.
+
+    Lives in the quantitative tier, not the manufacturing one: it is a statement
+    about a declared current, and the DFM tier deliberately stays silent until a
+    design has a BOM — which would hide this on every pre-BOM board.
+    """
+    from ohm.trace_width import net_currents
+
+    sized = net_currents(low, design)
+    # Only a net with somewhere to PUT the declaration can be missing it. A rail
+    # that reaches nothing but passives has no `current=` to write — a resistor's
+    # draw is a property of the circuit, not of the part — and warning there
+    # would fire on a divider, which is how a check teaches people to ignore it.
+    comps = {c.name: c for c in design.components}
+    part_comp = {p.ref: comps.get(p.component) for p in low.parts}
+    declarable: set[str] = set()
+    for net in low.nets:
+        for node in net.nodes:
+            comp = part_comp.get(node.part_ref)
+            pin = next((q for q in comp.pins if q.name == node.pin), None) if comp else None
+            if pin is not None and pin.role in ("power_in", "input"):
+                declarable.add(net.name)
+                break
+
+    unsized: set[str] = set()
+    for c in low.constraints:
+        if c.kind != "netclass":
+            continue
+        if not any(n in sized for n in c.nets):
+            unsized.update(n for n in c.nets if n in declarable)
+    if not unsized:
+        return []
+    shown = ", ".join(f"'{n}'" for n in sorted(unsized)[:6])
+    more = "" if len(unsized) <= 6 else f" and {len(unsized) - 6} more"
+    return [Diagnostic(
+        "warning", "Q007",
+        f"{len(unsized)} net(s) carry a `netclass` but declare no current, so "
+        f"their track width stays KiCad's 0.25mm default: {shown}{more}",
+        _NO_SPAN, file=path,
+        help="declare the draw on the pins that take it, e.g. "
+             "`pin VDD: role=power_in, current=250mA` — the width then follows "
+             "from IPC-2221A")]

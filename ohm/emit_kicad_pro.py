@@ -10,10 +10,12 @@ json.dumps(sort_keys=True), class list name-sorted after "Default".
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 from ohm import ir
 from ohm.emit_kicad import _uid, diffpair_renames, sheet_groups
+from ohm.trace_width import net_currents, trace_width_mm
 
 _DEFAULTS = {
     "bus_width": 12,
@@ -37,9 +39,14 @@ def _class(name: str, **over) -> dict:
     return {"name": name, **_DEFAULTS, **over}
 
 
-def emit_kicad_pro(low: ir.IRLow, source: str = "<string>") -> str:
+def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
+                   design: ir.Design | None = None) -> str:
     classes: dict[str, dict] = {}
     patterns: list[tuple[str, str]] = []  # (class, net pattern)
+    # A class carries the current of the WORST net in it: one rule governs every
+    # net it matches, so it has to hold for the heaviest.
+    currents = net_currents(low, design)
+    class_amps: dict[str, Decimal] = {}
     for c in low.constraints:
         if c.kind != "netclass":
             continue
@@ -49,6 +56,15 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>") -> str:
             continue
         classes.setdefault(name, _class(name))
         patterns += [(name, net) for net in c.nets]
+        for net in c.nets:
+            if (amps := currents.get(net)) is not None:
+                class_amps[name] = max(class_amps.get(name, Decimal(0)), amps)
+    # Size the copper. Only ever WIDER than the default — sizing may not quietly
+    # relax a rule — and only where the design actually declared a draw, because
+    # a width computed from no current is a default wearing a standard's name.
+    for name, amps in class_amps.items():
+        classes[name]["track_width"] = float(
+            max(Decimal(str(classes[name]["track_width"])), trace_width_mm(amps)))
     renames = diffpair_renames(low)
     if renames:
         classes.setdefault("DiffPair", _class(
