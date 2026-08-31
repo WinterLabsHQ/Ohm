@@ -131,11 +131,11 @@ def _xy(node: Sexpr | None) -> tuple[Decimal, Decimal] | None:
 def _rot(node: Sexpr) -> Decimal:
     """The optional third field of `(at x y [rot])`.
 
-    Deliberately tolerant: rotation is absent on every unrotated part, and KiCad
-    has also printed a trailing keyword in that slot (`unlocked`). An absent or
-    unreadable angle means "not rotated", which is true of the overwhelming
-    majority of parts and is locally recoverable — unlike a missing position,
-    which is not.
+    Deliberately tolerant: the angle is absent on every unrotated part, and KiCad
+    prints trailing keywords in these forms elsewhere (`(at x y 90 unlocked)` on
+    footprint text). An absent or unreadable angle means "not rotated", which is
+    true of the overwhelming majority of parts and is locally recoverable — a
+    missing POSITION is not, which is why only that one is reported.
     """
     return (_num(node[3]) if len(node) > 3 else None) or Decimal(0)
 

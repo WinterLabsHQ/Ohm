@@ -393,3 +393,89 @@ def test_datasheet_provenance_is_not_fuzzy_matched():
     assert status == "unverifiable", f"expected abstention, got {status}: {findings}"
     assert "datasheet" in detail
     assert findings == []
+
+
+# ---------- a library that could not be READ is not a part that was not found ----------
+#
+# `verify_against_libs` reads .kicad_sym files the user's KiCad installed, so it
+# is exposed to format change exactly like `signoff` (ADR-021). It already
+# abstains rather than guessing — but an abstention whose reason is wrong is its
+# own defect: "no candidate symbol found" is a statement about the ECOSYSTEM,
+# and printing it when the truth is "Ohm could not parse the library" sends the
+# author looking for a symbol that is sitting right there.
+
+_GOOD_LIB = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol "Widget"
+    (symbol "Widget_1_1"
+{pins}    )))"""
+
+
+def _lib_text(pads=8, name="P{n}"):
+    pins = "".join(
+        f'      (pin passive line (at 0 0 0) (length 1) '
+        f'(name "{name.format(n=n)}" ) (number "{n}" ))\n' for n in range(1, pads + 1))
+    return _GOOD_LIB.format(pins=pins)
+
+
+def _lib_dir(tmp_path, **files):
+    d = tmp_path / "syms"
+    d.mkdir()
+    for stem, text in files.items():
+        (d / f"{stem}.kicad_sym").write_text(text, encoding="utf-8")
+    return str(d)
+
+
+def _rows(src, lib_dir):
+    from ohm.provenance import verify_against_libs
+
+    return verify_against_libs(compile_source(src, "t.ohm").design, lib_dir)
+
+
+def test_a_matching_library_still_verifies(tmp_path):
+    """The control: the happy path is untouched by the defensive reading."""
+    src = _part(source="kicad:Lib:Widget")
+    [(name, status, detail, findings)] = _rows(src, _lib_dir(tmp_path, Lib=_lib_text()))
+    assert (name, status, findings) == ("Widget", "ok", []), detail
+
+
+def test_a_transposition_is_still_caught(tmp_path):
+    """...and so is the failure the tool exists for, through the same reader."""
+    src = _part(source="kicad:Lib:Widget", swap=True)
+    [(_n, status, _d, findings)] = _rows(src, _lib_dir(tmp_path, Lib=_lib_text()))
+    assert status == "mismatch" and findings
+
+
+def test_an_unparsable_library_is_reported_as_unread_not_as_absent(tmp_path):
+    """The named library exists and holds the symbol; Ohm just cannot parse it.
+    Reporting "not found in <dir>" would send the author hunting for a symbol
+    that is right there — and would hide that the READER is what failed."""
+    src = _part(source="kicad:Lib:Widget")
+    lib_dir = _lib_dir(tmp_path, Lib="this is not an s-expression library at all\n")
+    [(_n, status, detail, _f)] = _rows(src, lib_dir)
+    assert status == "unverifiable"
+    assert "could not be read" in detail and "kicad_symbol_lib" in detail, detail
+
+
+def test_when_no_library_can_be_read_the_mpn_search_says_so(tmp_path):
+    """Nothing was searched, because nothing could be read. "No candidate symbol
+    found" would be an answer about the parts."""
+    src = _part(mpn=True)
+    lib_dir = _lib_dir(tmp_path, A="garbage", B="also garbage")
+    [(_n, status, detail, _f)] = _rows(src, lib_dir)
+    assert status == "unverifiable"
+    assert "none of the 2 libraries" in detail and "could be read" in detail, detail
+    assert "kicad_symbol_lib" in detail, detail  # WHY, not just that it happened
+
+
+def test_a_symbol_whose_pins_are_unreadable_is_not_reported_as_pinless(tmp_path):
+    """"has no pins" describes a graphic symbol. A symbol whose pins carry no
+    readable `(number "N")` is a reader problem, and only one of the two is a
+    statement about the part."""
+    src = _part(source="kicad:Lib:Widget")
+    lib = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol "Widget" (symbol "Widget_1_1"
+      (pin passive line (at 0 0 0) (length 1) (name "P1" ))
+      (pin passive line (at 0 0 0) (length 1) (name "P2" )))))"""
+    lib_dir = _lib_dir(tmp_path, Lib=lib)
+    [(_n, status, detail, _f)] = _rows(src, lib_dir)
+    assert status == "unverifiable" and "number" in detail, detail

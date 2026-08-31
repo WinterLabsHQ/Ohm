@@ -140,14 +140,27 @@ def test_fmt_leaves_broken_source_untouched():
 
 # ---------- explain ----------
 def test_every_emitted_code_has_an_explanation():
+    """Every diagnostic code Ohm can emit must be answerable by `ohm explain`.
+
+    The tier letters, and one that was missing for a long time. `V` — signoff —
+    was NOT in this character class, so V001 through V007 were never covered by
+    this gate at all: the check that every code carries a cause and a fix skipped
+    the entire tier that runs last, on a routed board, immediately before
+    fabrication. Adding V here is the whole reason this docstring exists; the
+    class is now the tier letters from `ohm/diagnostics.py`'s own EXPLAIN table
+    rather than a hand-kept subset of them.
+    """
     import re
 
     ohm_pkg = Path(__file__).parent.parent / "ohm"
     emitted = set()
     for py in ohm_pkg.rglob("*.py"):
-        emitted |= set(re.findall(r'"([PRUSICQZKBM]\d{3})"', py.read_text()))
+        emitted |= set(re.findall(r'"([PRUSICQZKBMVD]\d{3})"', py.read_text(encoding="utf-8")))
     missing = emitted - set(EXPLAIN)
     assert not missing, f"codes without explain entries: {sorted(missing)}"
+    # ...and the gate must actually be looking at something. A regex that matched
+    # nothing would pass this test forever, which is how V went unnoticed.
+    assert len(emitted) > 50, f"only {len(emitted)} codes found — is the pattern right?"
 
 
 def test_explain_cli():

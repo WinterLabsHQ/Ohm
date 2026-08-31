@@ -104,3 +104,75 @@ def test_every_role_emitted_is_valid():
         if line.strip().startswith("pin "):
             role = line.split("role=")[1].split(",")[0]
             assert role in VALID_ROLES, line
+
+
+# ---------- the library shapes this reader stands on (ADR-021) ----------
+#
+# `import_symbol` reads a file the USER's KiCad wrote, so the shapes it assumes
+# are the exposure. Each fixture below breaks exactly one of them and asserts the
+# error NAMES it. The failure being designed out is the confident wrong answer:
+# every one of these used to come back as "graphic-only symbol?" or an
+# IndexError, which are statements about the part, or about nothing at all.
+
+DIRECT_PINS = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol "Direct"
+    (property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm" (at 0 0 0))
+    (pin passive line (at 0 0 0) (length 1) (name "A" ) (number "1" ))
+    (pin passive line (at 0 0 0) (length 1) (name "B" ) (number "2" ))))"""
+
+NO_NUMBERS = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol "NoNum"
+    (symbol "NoNum_1_1"
+      (pin passive line (at 0 0 0) (length 1) (name "A" ))
+      (pin passive line (at 0 0 0) (length 1) (name "B" )))))"""
+
+NO_SYMBOL_NAMES = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol (property "Reference" "R" (at 0 0 0))))"""
+
+EXTENDS_NOTHING = """(kicad_symbol_lib (version 20220914) (generator test)
+  (symbol "Base" (symbol "Base_1_1"
+      (pin passive line (at 0 0 0) (length 1) (name "A" ) (number "1" ))))
+  (symbol "Der" (extends)))"""
+
+
+def test_pins_declared_directly_on_the_symbol_are_imported():
+    """KiCad 6-10 keep every pin in a unit sub-symbol (`Name_1_1`), and reading
+    only that shape is a layout assumption: a library that declares pins on the
+    symbol itself came back with no pins at all, and the user was told the part
+    was graphic-only — a claim about the SYMBOL produced by a failure to read the
+    FILE. Both shapes are now collected."""
+    text = import_symbol(DIRECT_PINS, "Direct", "Test")
+    assert "pin A: role=passive, pad=1" in text
+    assert "pin B: role=passive, pad=2" in text
+
+
+def test_pins_without_a_readable_number_are_not_called_graphic_only():
+    """The number IS the pad. A pin Ohm cannot number is not a pin it may guess
+    at — and 'this symbol has no pins' is the wrong thing to say about a symbol
+    whose pins simply were not in the shape the reader knows."""
+    with pytest.raises(SymbolError, match=r'number'):
+        import_symbol(NO_NUMBERS, "NoNum", "Test")
+    with pytest.raises(SymbolError) as exc:
+        import_symbol(NO_NUMBERS, "NoNum", "Test")
+    assert "graphic-only" not in str(exc.value)
+    assert "2 `(pin" in str(exc.value)
+
+
+def test_a_library_whose_symbols_are_not_named_says_which_shape_is_missing():
+    """`(symbol "Name" …)` is positional. A library where no form carries a name
+    there is a library Ohm cannot read, which must not present as an empty
+    library (`list_symbols` returning [] is a fact about the ecosystem)."""
+    with pytest.raises(SymbolError, match=r"none naming the symbol"):
+        list_symbols(NO_SYMBOL_NAMES)
+
+
+def test_extends_with_no_base_name_is_named_not_an_indexerror():
+    with pytest.raises(SymbolError, match=r"extends"):
+        import_symbol(EXTENDS_NOTHING, "Der", "Test")
+
+
+def test_a_well_formed_library_is_unaffected():
+    """The guard against over-tightening: every shape KiCad 7-10 actually writes
+    still imports, and imports the same text as before."""
+    assert list_symbols(FIXTURE) == ["Derived", "OpAmpish"]
+    assert import_symbol(FIXTURE, "OpAmpish", "Test").count("pin ") == 5
