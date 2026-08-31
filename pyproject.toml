@@ -47,9 +47,23 @@ license-files = ["LICENSE", "NOTICE"]
 [tool.setuptools.package-data]
 ohm = ["*.lark", "std/*.ohm", "templates/*", "fpdata/*.json.gz"]
 
+[tool.pytest.ini_options]
+# There was no pytest configuration at all until now: no testpaths, no marker
+# registration, no strictness. The suite gates every change (AGENTS.md), so the
+# ways it can quietly stop gating are worth closing.
+#   --strict-markers  a typo'd @pytest.mark.foo is an error, not a silent no-op
+#   --strict-config   an unknown key here is an error, not ignored
+#   xfail_strict      an xfail that starts passing FAILS, so a fixed bug cannot
+#                     leave a permanently-green test that proves nothing
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+xfail_strict = true
+
 [tool.mypy]
 python_version = "3.12"
-files = ["ohm", "shared"]
+# tools/ is author-time acquisition, off the build path — but it writes the pad
+# table `ohm check` reads (ADR-021), so it is gated like everything else.
+files = ["ohm", "shared", "tools"]
 
 [[tool.mypy.overrides]]
 module = "lark.*"

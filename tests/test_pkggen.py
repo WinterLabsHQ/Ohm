@@ -16,8 +16,9 @@ from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import PkgError, build
 from ohm.pkggen.symbol import emit_symbol
 
-from tests.conftest import (KICAD_CLI, KICAD_SYMBOLS, first_footprint, footprint,
-                            requires_footprint, requires_kicad_cli, requires_kicad_sym)
+from tests.conftest import (KICAD_CLI, KICAD_SYMBOLS, NOT_APPLICABLE, first_footprint,
+                            footprint, requires_footprint, requires_kicad_cli,
+                            requires_kicad_sym)
 
 SOIC8_MOD = "Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm.kicad_mod"
 KICAD_SOIC8 = footprint(SOIC8_MOD)
@@ -430,7 +431,13 @@ def test_generated_symbol_parses_in_kicad(tmp_path):
         low = out.lower()
         if any(m in low for m in ("unknown command", "invalid command", "unrecognized",
                                   "no such command", "usage:")):
-            pytest.skip(f"kicad-cli 'sym upgrade' unsupported here: {out.strip()[:200]}")
+            # NOT_APPLICABLE: `sym upgrade` is a capability some supported KiCads
+            # genuinely lack, not a broken environment. Without the sentinel this
+            # skip's reason contains "kicad", so OHM_REQUIRE_KICAD converts it to a
+            # FAILURE on exactly the versions where the command does not exist —
+            # the certification run would fail for the one reason it must not.
+            pytest.skip(f"{NOT_APPLICABLE} kicad-cli 'sym upgrade' unsupported here: "
+                        f"{out.strip()[:200]}")
         pytest.fail(out)
 
 

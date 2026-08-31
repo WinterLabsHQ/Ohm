@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check ohm/ shared/ tests/
+      - run: ruff check ohm/ shared/ tests/ tools/
       - run: mypy
       - run: pytest -q
 
@@ -99,6 +99,7 @@ jobs:
           .venv/bin/python -m pytest -q \
             tests/test_import_symbol.py \
             tests/test_provenance.py \
+            tests/test_verify_footprints.py \
             tests/test_std_analog.py \
             tests/test_std_connect.py \
             tests/test_std_connectors.py \
@@ -116,6 +117,16 @@ jobs:
           .venv/bin/python -m pytest -q \
             tests/test_signoff_readback.py \
             tests/test_kicad_plot.py
+
+      - name: Version-resolution gates — discovery and the shipped pad table
+        # These need no KiCad to pass, but they are the code that DECIDES which
+        # KiCad the rest of the suite talks to, and which pad ids it expects. Run
+        # them where a real KiCad exists so a resolver that answers correctly on a
+        # bare runner and wrongly in front of an installation cannot hide.
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_kicad_env.py \
+            tests/test_fpdata.py
 
       - name: Dump this KiCad's footprint pad ids
         # Feeds the `fpdata` job below. Ohm ships a table of these because a
