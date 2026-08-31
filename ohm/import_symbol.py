@@ -31,36 +31,91 @@ class SymbolError(Exception):
 
 
 def _symbols(lib_text: str) -> dict[str, Sexpr]:
+    """Every named symbol in a .kicad_sym library.
+
+    Like `signoff.read_board`, this reads a file the USER's KiCad wrote — 7.0
+    through 10.0 — so it walks to named forms and never anchors on layout
+    (ADR-021). Where a shape it depends on is absent it says so: an empty result
+    would mean "this library has no symbols", which is a claim about the library
+    rather than about Ohm's ability to read it, and a wrong pad map imported from
+    a misread library ends up on copper.
+    """
     root = parse_sexpr(lib_text)
     lib = next((n for n in root if isinstance(n, list) and n
                 and n[0] == "kicad_symbol_lib"), None)
     if lib is None:
         raise SymbolError("not a .kicad_sym library (no kicad_symbol_lib form)")
-    return {str(s[1]): s for s in _kids(lib, "symbol")}
+    forms = _kids(lib, "symbol")
+    # The name is positional — `(symbol "Device:R" …)`. A form that does not
+    # carry one there is not a symbol this reader can name, and a library where
+    # NONE of them do is a library Ohm cannot read at all, which must not present
+    # as an empty library.
+    out = {str(s[1]): s for s in forms if len(s) > 1 and isinstance(s[1], str)}
+    if forms and not out:
+        raise SymbolError(
+            f'{len(forms)} `(symbol …)` forms, none naming the symbol as a bare '
+            'string in the first field (`(symbol "Name" …)`) — this library does '
+            "not have the shape Ohm reads; please report the KiCad version that "
+            "wrote it")
+    return out
 
 def list_symbols(lib_text: str) -> list[str]:
     return sorted(_symbols(lib_text))
 
 
 def _prop(sym: Sexpr, name: str) -> str | None:
+    """A symbol property's value, or None.
+
+    Tolerant by design: `Footprint` and `Datasheet` are optional, and a symbol
+    that declares neither is imported with a `package = "TODO"` line the author
+    has to fill in. Nothing here is guessed, and nothing silently wrong follows
+    from a miss — unlike a pad number.
+    """
     for p in _kids(sym, "property"):
-        if len(p) >= 3 and p[1] == name:
+        if len(p) >= 3 and p[1] == name and isinstance(p[2], str):
             v = str(p[2])
             return v if v not in ("", "~") else None
     return None
 
 
-def _pins(sym: Sexpr) -> list[tuple[str, str, str]]:
-    """(number, name, kicad_type) across ALL units — a component is the package."""
-    out = []
+def _pin_forms(sym: Sexpr) -> list[Sexpr]:
+    """Every `(pin …)` form of a symbol, wherever the library keeps it.
+
+    KiCad 6-10 put every pin inside a unit sub-symbol (`Name_1_1`), so the old
+    reader looked only there. That is a layout assumption in the same family as
+    the ones ADR-021 is about: a library that declares pins directly on the
+    symbol came back with NO pins, and `import_symbol` then told the user the
+    part was "graphic-only" — a confident claim about the SYMBOL produced by a
+    failure to read the FILE. Collecting both shapes costs one recursive call and
+    cannot mis-read either.
+    """
+    out = list(_kids(sym, "pin"))
     for unit in _kids(sym, "symbol"):  # unit sub-symbols "Name_1_1"
-        for pin in _kids(unit, "pin"):
-            num_n, name_n = _kid(pin, "number"), _kid(pin, "name")
-            if num_n is None:
-                continue
-            out.append((str(num_n[1]),
-                        str(name_n[1]) if name_n is not None else "~",
-                        str(pin[1]) if len(pin) > 1 else "passive"))
+        out.extend(_pin_forms(unit))
+    return out
+
+
+def _pins(sym: Sexpr) -> list[tuple[str, str, str]]:
+    """(number, name, kicad_type) across ALL units — a component is the package.
+
+    A pin with no readable `(number "N")` is skipped rather than guessed at: the
+    number IS the pad, and inventing one is how a transposition reaches copper.
+    Callers distinguish "no pins" from "pins Ohm could not read" through
+    `_pin_forms` — see `import_symbol`.
+    """
+    out = []
+    for pin in _pin_forms(sym):
+        num_n, name_n = _kid(pin, "number"), _kid(pin, "name")
+        if num_n is None or len(num_n) < 2 or not isinstance(num_n[1], str):
+            continue
+        # The electrical type is positional — `(pin power_in line …)`. Anything
+        # else in that slot is left unmapped on purpose: it lands in the emitted
+        # source as `role=free` with an "unmapped KiCad type" comment, which the
+        # author sees, rather than being silently read as `passive`.
+        ktype = str(pin[1]) if len(pin) > 1 and isinstance(pin[1], str) else "(unreadable)"
+        name = (str(name_n[1]) if name_n is not None and len(name_n) > 1
+                and isinstance(name_n[1], str) else "~")
+        out.append((str(num_n[1]), name, ktype))
     return out
 
 
@@ -89,6 +144,9 @@ def import_symbol(lib_text: str, symbol: str, lib_name: str = "") -> str:
     ext = _kid(sym, "extends")  # derived symbol: pins live on the base
     pin_src = sym
     if ext is not None:
+        if len(ext) < 2 or not isinstance(ext[1], str):
+            raise SymbolError(f"'{symbol}' declares `(extends …)` with no base symbol "
+                              "name Ohm can read, so its pins cannot be found")
         base = str(ext[1])
         if base not in syms:
             raise SymbolError(f"'{symbol}' extends '{base}' which is not in this library")
@@ -109,6 +167,17 @@ def import_symbol(lib_text: str, symbol: str, lib_name: str = "") -> str:
 
     pins = _pins(pin_src)
     if not pins:
+        # "No pins" and "pins in a shape Ohm does not read" are opposite
+        # statements — the first is about the symbol, the second about this
+        # reader — and telling the user the first when the second is true is how
+        # a format change becomes a wrong answer about a part.
+        forms = len(_pin_forms(pin_src))
+        if forms:
+            raise SymbolError(
+                f"'{symbol}' has {forms} `(pin …)` forms, none carrying a readable "
+                '`(number "N")` — Ohm cannot tell which pad each pin is on, and '
+                "will not guess; please report the KiCad version that wrote this "
+                "library")
         raise SymbolError(f"'{symbol}' has no pins (graphic-only symbol?)")
     seen_nums: dict[str, str] = {}
     taken: set[str] = set()

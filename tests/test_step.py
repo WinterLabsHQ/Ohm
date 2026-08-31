@@ -116,12 +116,28 @@ def test_a_generated_package_body_meshes(tmp_path):
 
 
 # ---------- structure / determinism ----------
-def test_header_is_iso_10303_21_ap214():
+def test_header_is_iso_10303_21_ap242():
     text = emit_step_box("X", Decimal(2), Decimal(2), Decimal(1))
     assert text.startswith("ISO-10303-21;")
     assert text.rstrip().endswith("END-ISO-10303-21;")
-    assert "AUTOMOTIVE_DESIGN" in text
+    assert "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF" in text
+    assert "{ 1 0 10303 442 1 1 4 }" in text  # AP242 edition 1, not 2 or 3
+    assert "AUTOMOTIVE_DESIGN" not in text  # AP214 is superseded (ADR-022)
     assert "SI_UNIT(.MILLI.,.METRE.)" in text  # dimensions are millimetres
+
+
+def test_the_ap242_triple_agrees_with_the_file_schema():
+    """A header claiming AP242 over a DATA section still describing AP214 is a
+    file that lies about itself: FILE_SCHEMA, APPLICATION_CONTEXT and
+    APPLICATION_PROTOCOL_DEFINITION are one identity in three places. The
+    protocol-definition schema name deliberately lacks the `_mim_lf` suffix the
+    FILE_SCHEMA name carries — that asymmetry is what OpenCASCADE's IsAP242()
+    matches on, so it is asserted rather than left to look like a slip."""
+    text = emit_step_box("X", Decimal(2), Decimal(2), Decimal(1))
+    assert "APPLICATION_CONTEXT('Managed model based 3d engineering')" in text
+    assert ("APPLICATION_PROTOCOL_DEFINITION('international standard',"
+            "'ap242_managed_model_based_3d_engineering',2013,") in text
+    assert "automotive_design" not in text
 
 
 def test_six_faces_one_closed_shell():

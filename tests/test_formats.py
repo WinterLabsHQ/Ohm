@@ -24,6 +24,7 @@ from ohm.emit_allegro import emit_allegro
 from ohm.emit_constraints import emit_constraints
 from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.emit_netlist import emit_netlist
+from ohm.emit_zen import emit_zen
 from ohm.formats import FormatVersion
 from ohm.pkggen.altium import SchSymbol, emit_pcblib, emit_schlib
 from ohm.pkggen.eagle import emit_eagle_library
@@ -107,6 +108,14 @@ def test_step_carries_its_stamp():
     assert formats._HEADER_SCHEMA in text
 
 
+def test_zen_carries_its_stamp(built):
+    """`.zen` is the one artifact with no manifest of its own to carry a version,
+    so the lane is written into the generated file's header comment — which is what
+    makes this entry checkable the same way as the other fourteen."""
+    text = emit_zen(built.low, "led.ohm")
+    assert f'pcb-version = "{formats._ZEN_PCB_VERSION}"' in text
+
+
 def test_ohm_netlist_carries_its_stamp(built):
     text = emit_netlist(built.low, "led.ohm")
     assert f'(version "{formats._NETLIST_VERSION}")' in text
@@ -148,12 +157,13 @@ EXPECTED_OWNERS = {
     "ohm.emit_allegro",
     "ohm.pkggen.step",
     "ohm.emit_netlist",
+    "ohm.emit_zen",
     "shared.constraints_schema",
 }
 
 
 def test_registry_owners_match_the_known_emitter_set():
-    """A new external format means a ninth owner shows up here, unregistered —
+    """A new external format means a new owner shows up here, unregistered —
     this must fail until someone adds its FormatVersion entry, not pass quietly
     the way a bare literal buried in the new emitter would."""
     assert {entry.owner for entry in formats.REGISTRY} == EXPECTED_OWNERS
@@ -162,8 +172,9 @@ def test_registry_owners_match_the_known_emitter_set():
 def test_registry_has_exactly_the_documented_stamps():
     """Pinned count, not just a pinned owner set — .PcbLib and .SchLib each
     carry two stamps (header + version) under the same owner, so the owner
-    check alone would not catch one of those four going missing."""
-    assert len(formats.REGISTRY) == 14
+    check alone would not catch one of those four going missing. 14 -> 15 when
+    `.zen` gained a version to record (ADR-002 sec 5 closed, ADR-022)."""
+    assert len(formats.REGISTRY) == 15
 
 
 # ---------- hermeticity (N1): stdlib + shared only, nothing else, no I/O ----------

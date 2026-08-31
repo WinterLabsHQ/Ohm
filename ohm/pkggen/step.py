@@ -1,4 +1,4 @@
-"""Package body → STEP AP214 solid (ISO 10303-21).
+"""Package body → STEP AP242 solid (ISO 10303-21).
 
 This is the mechanical counterpart to the land pattern: the volume the part
 occupies, so placement collision, height and enclosure-fit checks have something to
@@ -137,10 +137,30 @@ def emit_step_box(name: str, x: Decimal, y: Decimal, z: Decimal,
     shape = d.add("ADVANCED_BREP_SHAPE_REPRESENTATION('"
                   f"{name}',({placement},{brep}),{context})")
 
+    # AP242's identifying triple, and it has to agree with FILE_SCHEMA above or the
+    # file claims one protocol in the header and another in the data. All three
+    # strings are copied verbatim out of OpenCASCADE's own AP242 write lane
+    # (STEPConstruct_ContextTool.cxx, AddAPD(), `mySchema == 5`), for the same
+    # reason the Altium constants in ohm/formats.py are copied off an
+    # Altium-authored file: what the tool itself writes is a fact, what we compose
+    # from prose is a guess. This is not a new habit — the AP214 triple these lines
+    # replace was OCC's `mySchema == 4` lane, right down to the 2000.
+    #
+    # Two of the strings are load-bearing in opposite ways:
+    #   * 'ap242_managed_model_based_3d_engineering' — note NO `_mim_lf` suffix,
+    #     unlike the FILE_SCHEMA name. OCC's STEPConstruct_ContextTool::IsAP242()
+    #     lower-cases this field and compares it against exactly that spelling, so
+    #     "correcting" it to match FILE_SCHEMA would make OCC stop recognising the
+    #     file as AP242 on read-back.
+    #   * 2013 is the year OCC stamps: it dates from the AP242 DIS that OCC
+    #     implemented, where ISO published edition 1 in 2014. Nothing reads the
+    #     year — it is descriptive — so it is left agreeing with the one AP242
+    #     writer Ohm's output can actually be diffed against rather than silently
+    #     diverging from it.
     app_context = d.add("APPLICATION_CONTEXT("
-                        "'core data for automotive mechanical design processes')")
+                        "'Managed model based 3d engineering')")
     d.add(f"APPLICATION_PROTOCOL_DEFINITION('international standard',"
-          f"'automotive_design',2000,{app_context})")
+          f"'ap242_managed_model_based_3d_engineering',2013,{app_context})")
     product_context = d.add(f"PRODUCT_CONTEXT('',{app_context},'mechanical')")
     product = d.add(f"PRODUCT('{name}','{name}','',({product_context}))")
     formation = d.add(f"PRODUCT_DEFINITION_FORMATION('','',{product})")

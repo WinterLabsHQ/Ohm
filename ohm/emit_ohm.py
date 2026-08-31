@@ -5,9 +5,23 @@ imported netlist into `.ohm` source a human or LLM annotates with intent
 (interfaces, kinds, roles, operating points, `expects`) — which is what lights
 up the checking tiers. The skeleton compiles as-is; its TODOs are the work list.
 
-Honesty: zen carries no pad numbers. Numeric-looking pins ("1", "P2") keep
-their number; everything else gets a sequential placeholder pad and a loud
-TODO — placeholder pads are for compilation, never for fabrication.
+Honesty about pads, in three tiers, best first:
+
+1. A pad the `.zen` actually stated. Since 2026-08-31 `imp_zen` reads Zener's
+   `pin_defs` (pin -> pad) into `ir.NetNode.pad`, so for a file written against the
+   current surface the map is real data and is used verbatim. This tier did not
+   exist when this module was written — the docstring used to open "zen carries no
+   pad numbers", which was true of the subset the importer then read and is not
+   true any more.
+2. A pad guessable from the pin's NAME ("1", "P2") — the number is taken.
+3. Neither: a sequential placeholder and a loud TODO. Placeholder pads are for
+   compilation, never for fabrication.
+
+Tier 1 is only trusted where it is unambiguous. Two instances that share a
+component declaration must agree about every pad, and a declaration's pads must be
+distinct from each other, or the imported map is dropped for that declaration and
+it falls back to tiers 2 and 3 — a skeleton that compiles with a visible TODO beats
+one that silently ships one instance's pinout under another instance's name.
 """
 
 from __future__ import annotations
@@ -52,12 +66,32 @@ def emit_ohm(low: ir.IRLow, source: str = "<string>") -> str:
             decl_pkg[name] = p.package if isinstance(p.package, str) else None
         decl_of_part[p.ref] = sigs[sig]
 
+    # ---- tier 1: pads the .zen actually stated (see module docstring) ----
+    seen_pads: dict[tuple[str, str], set[str]] = {}  # (decl, pin) -> pads observed
+    for net in low.nets:
+        for node in net.nodes:
+            decl = decl_of_part.get(node.part_ref)
+            if decl is not None and node.pad is not None:
+                seen_pads.setdefault((decl, node.pin), set()).add(node.pad)
+    stated: dict[str, dict[str, str]] = {}
+    for (decl, pin), pads in seen_pads.items():
+        if len(pads) == 1:  # every instance sharing this decl agreed
+            stated.setdefault(decl, {})[pin] = next(iter(pads))
+    for decl, by_pin in list(stated.items()):
+        # two pins on one part cannot share a pad; an inconsistent map is no map
+        if len(set(by_pin.values())) != len(by_pin):
+            del stated[decl]
+
     out = ["# converted from " + source + " by `ohm convert` — a skeleton, not a sign-off:",
            "# every TODO below is intent the .zen source could not express.", ""]
     for (comp, pin_sig), name in sorted(sigs.items(), key=lambda kv: kv[1]):
         pins = sorted(pin_sig)
-        numeric = {pin: _pad_of(pin) for pin in pins}
-        next_pad = max([int(v) for v in numeric.values() if v] or [0]) + 1
+        known = stated.get(name, {})
+        numeric = {pin: known.get(pin) or _pad_of(pin) for pin in pins}
+        # A stated pad may be a name, not a number ("A1" on a BGA, or the pin's own
+        # name where the exporter had no mapped pad), so the high-water mark the
+        # placeholders count up from only looks at the numeric ones.
+        next_pad = max([int(v) for v in numeric.values() if v and v.isdigit()] or [0]) + 1
         out.append(f"component {name}:")
         pkg = decl_pkg[name]
         out.append(f'    package = "{pkg}"' if pkg

@@ -72,24 +72,34 @@ def verify_against_libs(design: ir.Design, lib_dir: str) -> list[tuple[str, str,
     """
     from pathlib import Path
 
-    from ohm.import_symbol import SymbolError, _pin_ohm_name, _pins, _symbols
+    from ohm.import_symbol import SymbolError, _pin_forms, _pin_ohm_name, _pins, _symbols
 
     libs = sorted(Path(lib_dir).glob("*.kicad_sym"))
     cache: dict[Path, dict] = {}
+    # Why a library came back empty. A library Ohm could not PARSE and a library
+    # that simply lacks the symbol are indistinguishable once both are `{}`, and
+    # the report would call both "no candidate symbol found" — which reads as a
+    # fact about the ecosystem rather than as this tool failing to read a file
+    # some KiCad wrote. Kept so the report can say which one happened.
+    unreadable: dict[Path, str] = {}
 
     def symbols_in(lib: Path) -> dict:
         if lib not in cache:
             try:
                 cache[lib] = _symbols(lib.read_text(encoding="utf-8", errors="replace"))
-            except (SymbolError, OSError):
+            except (SymbolError, OSError) as exc:
                 cache[lib] = {}
+                unreadable[lib] = str(exc)
         return cache[lib]
 
-    def real_padmap(lib: Path, sym_name: str) -> dict[str, str] | None:
+    def real_padmap(lib: Path, sym_name: str) -> tuple[dict[str, str] | None, str]:
+        """(pad -> pin name, or None with the reason it could not be built)."""
         syms = symbols_in(lib)
         sym = syms.get(sym_name)
         if sym is None:
-            return None
+            why = unreadable.get(lib)
+            return None, (f"{lib.name} could not be read: {why}" if why
+                          else f"{sym_name} is not in {lib.name}")
         ext = _kid_local(sym)
         src = syms.get(ext, sym) if ext else sym
         out: dict[str, str] = {}
@@ -99,12 +109,20 @@ def verify_against_libs(design: ir.Design, lib_dir: str) -> list[tuple[str, str,
                 continue
             out[number] = _pin_ohm_name(name, number, taken)
             taken.add(out[number])
-        return out or None
+        if out:
+            return out, ""
+        # Same distinction as `import_symbol` makes: a symbol with no pins is a
+        # graphic, a symbol whose pins Ohm cannot read is a reader problem, and
+        # only one of those is a statement about the part.
+        forms = len(_pin_forms(src))
+        return None, (f'{sym_name} has {forms} `(pin …)` forms, none carrying a '
+                      'readable `(number "N")`' if forms
+                      else f"{sym_name} has no pins")
 
     def _kid_local(sym) -> str | None:
         for n in sym:
             if isinstance(n, list) and n and n[0] == "extends":
-                return str(n[1])
+                return str(n[1]) if len(n) > 1 and isinstance(n[1], str) else None
         return None
 
     results: list[tuple[str, str, str, list[str]]] = []
@@ -121,8 +139,12 @@ def verify_against_libs(design: ir.Design, lib_dir: str) -> list[tuple[str, str,
             if path.exists() and sym_name in symbols_in(path):
                 target = (path, sym_name)
             else:
+                why = unreadable.get(path)
                 results.append((comp.name, "unverifiable",
-                                f"pinout_source names {parsed[1]}, not found in {lib_dir}", []))
+                                f"pinout_source names {parsed[1]}, but {path.name} "
+                                f"could not be read: {why}" if why else
+                                f"pinout_source names {parsed[1]}, not found in {lib_dir}",
+                                []))
                 continue
         elif isinstance(src, str) and (declared_src := parse_source(src)):
             # The author has SAID where this map came from and it is not a
@@ -152,13 +174,19 @@ def verify_against_libs(design: ir.Design, lib_dir: str) -> list[tuple[str, str,
         else:
             continue  # no mpn: a generic shape block, not a claim about silicon
         if target is None:
-            results.append((comp.name, "unverifiable", "no candidate symbol found", []))
+            detail = "no candidate symbol found"
+            if libs and len(unreadable) == len(libs):
+                # Nothing was searched, because nothing could be read. Reporting
+                # that as "no candidate" would be an answer about the parts.
+                detail += (f" — none of the {len(libs)} libraries in {lib_dir} could "
+                           f"be read ({next(iter(unreadable.values()))})")
+            results.append((comp.name, "unverifiable", detail, []))
             continue
 
         lib, sym_name = target
-        real = real_padmap(lib, sym_name)
+        real, why = real_padmap(lib, sym_name)
         if real is None:
-            results.append((comp.name, "unverifiable", f"{sym_name} has no pins", []))
+            results.append((comp.name, "unverifiable", why, []))
             continue
         ref = f"{lib.stem}:{sym_name}"
         # Disjoint pad namespaces mean the generated package FAMILY is wrong (a

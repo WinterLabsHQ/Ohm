@@ -31,7 +31,13 @@ Changelog = "https://github.com/WinterLabsHQ/Ohm/blob/master/CHANGELOG.md"
 # Altium compound-file container itself (ohm/pkggen/cfb.py). It is here so the test
 # suite reads that container back with an implementation Ohm did not write — a
 # self-written reader would agree with a self-written writer about a broken file.
-dev = ["pytest>=8", "ruff==0.15.22", "mypy==2.3.0", "olefile==0.47"]
+# gmsh is TEST-ONLY, and it is the ONLY reader in the suite that opens a file
+# Ohm emits with an implementation Ohm did not write: it meshes the .step body
+# through OpenCASCADE, which only succeeds on a watertight, correctly-oriented
+# shell, and the volume is then checked to rel=1e-9. It was absent from here,
+# so a fresh checkout skipped the STEP oracle -- which is exactly how the AP214
+# schema went unexamined until 2026-08-31.
+dev = ["pytest>=8", "ruff==0.15.22", "mypy==2.3.0", "olefile==0.47", "gmsh>=4.13"]
 
 [project.scripts]
 ohm = "ohm.cli:main"

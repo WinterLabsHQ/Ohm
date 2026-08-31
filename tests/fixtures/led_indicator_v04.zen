@@ -1,0 +1,46 @@
+# The same LED indicator as led_indicator.zen, written against the CURRENT
+# diodeinc/pcb surface (0.4.41, checked 2026-08-31) instead of the older one.
+# Its sibling fixture is deliberately left on the legacy form: between them they
+# are the two shapes ohm/imp_zen.py promises to read (ADR-002), and a file nobody
+# generated is the only way to prove the importer reads more than its own output.
+load("@stdlib/interfaces.zen", "Ground", "Power")
+
+Resistor = Module("@stdlib/generics/Resistor.zen")
+Led = Module("@stdlib/generics/Led.zen")
+
+color = config(str, default = "red")
+r_value = config(str, default = "330ohms")
+
+VCC = io(Power)
+GND = io(Ground)
+
+led_anode = Net("LED_ANODE")
+
+Resistor(name = "R1", value = r_value, package = "0603", P1 = VCC, P2 = led_anode)
+Led(name = "D1", color = color, package = "0603", A = led_anode, K = GND)
+
+# `part=Part(...)` is the current spelling of the sourcing fields, and the spec's
+# own example binds it to a variable rather than writing it inline.
+u1_part = Part(mpn = "TPS22918", manufacturer = "Texas Instruments")
+
+Component(
+    name = "U1",
+    footprint = "SOT-23-5",
+    prefix = "U",
+    # `pin_defs` is the symbol-free way to declare the pin -> pad map; a file that
+    # has a symbol library to point at would write `symbol = Symbol(...)` instead,
+    # and Ohm's importer accepts either (it can only read pads out of this one).
+    pin_defs = {
+        "VCC": "1",
+        "GND": "2",
+        "EN": "3",
+        "NC": "5",
+    },
+    pins = {
+        "VCC": VCC,
+        "GND": GND,
+        "EN": Net("EN"),
+        "NC": NotConnected(),
+    },
+    part = u1_part,
+)

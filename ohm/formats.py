@@ -1,12 +1,13 @@
 """One registry for every external-format version stamp Ohm writes.
 
-Ohm emits eight external file formats, and every one of them carries a version
-stamp of some kind — a numbered file-format revision, a schema string, a header
-line an authoring tool itself writes. Before this module those stamps were bare
-literals scattered across nine emitter files: some named locally, most not, none
-of them explaining *why that value* to a reader who did not also read the format's
-spec. A literal nobody named is a literal anybody can change in one place with
-nothing noticing.
+Ohm emits eight external file formats on the build path, plus `.zen` on the
+interop path, and every one of them carries a version stamp of some kind — a
+numbered file-format revision, a schema string, a header line an authoring tool
+itself writes. Before this module those stamps were bare literals scattered across
+nine emitter files (ten, now that `.zen` has a version to record at all): some
+named locally, most not, none of them explaining *why that value* to a reader who
+did not also read the format's spec. A literal nobody named is a literal anybody
+can change in one place with nothing noticing.
 
 THE POLICY, stated once instead of nine times: write the oldest stamp a current
 reader accepts; bump only when a reader proves the new one is needed. A newer
@@ -15,9 +16,13 @@ always costs something: an older installation's ability to open the file, or (fo
 the CFB/Altium constants) agreement with what the authoring tool itself writes,
 which is the only ground truth a reverse-engineered binary format has. ADR-021
 states this for the four KiCad constants specifically, with the KiCad-9/KiCad-10
-breakage history that motivated it; ADR-022 (a later loop) generalises the policy
-this module already encodes for the other four formats. Nothing here changes a
-value — this is the registry those nine files now point at, not a new decision.
+breakage history that motivated it; ADR-022 generalises the policy to every format
+in this table and tabulates, stamp by stamp, which ones a real reader has actually
+been run against. Of the fifteen entries below, ADR-022 moved exactly one — STEP,
+from AP214 to AP242 — and added one that had never had a version to record, `.zen`.
+Both are the entries whose readers can be executed here: gmsh/OpenCASCADE meshes
+the STEP, and `pcbc` 0.4.41 builds the `.zen`. The other thirteen are unchanged,
+and the reasons say why rather than leaving that to a reader's charity.
 
 Hermetic (N1): stdlib only, plus `shared` for the one stamp that belongs to the
 open/proprietary seam rather than to Ohm. No subprocess, no network, no clock,
@@ -93,12 +98,49 @@ _CFB_VERSION = 3
 _PST_VERSION = "PST_HDL_CENTRIC_VERSION_0"
 
 # ---------------------------------------------------------------- STEP
-# ISO 10303-214 (AP214, "Automotive Design") — the schema every STEP reader Ohm
-# has tested against (gmsh/OpenCASCADE) accepts for a bare FACETED_BREP solid.
-# AP242 supersedes AP214 in newer STEP tooling; a later loop evaluates bumping to
-# it under the same forward-compat argument ADR-021 makes for KiCad. Not this one:
-# this loop is registry-only and changes no value.
-_HEADER_SCHEMA = "AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }"
+# ISO 10303-242 (AP242, "Managed model based 3D engineering"), FIRST edition —
+# the `{ 1 0 10303 442 1 1 4 }` object identifier, not edition 2's `3 1 4` or
+# edition 3's `4 1 4`. This is the one stamp in the table that moved, and it moved
+# because it is the one with a real reader to move it: ISO/TC 184/SC 4 stopped work
+# on AP203 and AP214 when AP242 published in 2014, so "the oldest stamp a current
+# reader accepts" now means the oldest AP242 edition rather than the superseded
+# protocol. AP214 was never wrong — it was the first-edition AUTOMOTIVE_DESIGN
+# identifier `{ 1 0 10303 214 1 1 1 1 }` and gmsh still reads it — but the policy
+# asks for the oldest *current* protocol, and AP214 stopped being current.
+#
+# The evidence, and the reason this bump shipped when the other six did not:
+# tests/test_step.py meshes the emitted file with gmsh, which embeds OpenCASCADE,
+# and checks the resulting solid's volume to rel=1e-9. A schema string a reader
+# rejects does not merely warn; the file yields no solid and the volume check has
+# nothing to compare. Bumping AP214 -> AP242 changed nothing about that number, so
+# the new stamp is proved read, not assumed read.
+#
+# Spelling: canonical brace spacing, matching every non-OCC writer and the AP214
+# line this replaces. OCC's own literal is `{1 0 10303 442 1 1 4 }` (no space after
+# the brace) — a typo in schemaAP242DIS, not a distinct identifier; readers match
+# the leading name token, and gmsh reads both.
+_HEADER_SCHEMA = "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }"
+
+# ---------------------------------------------------------------- Zener (.zen)
+# The diodeinc/pcb toolchain lane the export targets. `pcb.toml` names one of
+# "0.3", "0.4" or "nightly"; 0.4 is the current released lane (0.4.41, 2026-08-31)
+# and the oldest one whose `Component()` surface Ohm's export has been run against,
+# which is the whole of the reason for the value: before this loop there was no
+# entry here at all, because no `pcb` binary had ever been available to this project
+# and pinning a version nothing had executed would have been a decoration.
+#
+# ADR-002 section 5 recorded that cross-check as deferred. It is now done —
+# tests/test_zen_pcb.py builds Ohm's emitted `.zen` with the real binary — and what
+# it found is why `ohm/emit_zen.py` changed: the "universal Component() form" Ohm
+# had been writing since P7 does not load in 0.4.x at all. So unlike every other row
+# in this table, this is not a stamp inherited from a format's history; it is the
+# first version of the .zen surface Ohm has ever been able to claim it writes.
+#
+# Written into the generated file's header comment rather than into a manifest,
+# because `emit_zen` produces one `.zen` and no workspace around it: the lane belongs
+# with the bytes it describes, so a file that outlives this repo still says which
+# surface it was written against.
+_ZEN_PCB_VERSION = "0.4"
 
 # ---------------------------------------------------------------- Ohm's own netlist
 # The export-format version letter in Ohm's KiCad-style s-expression netlist
@@ -176,9 +218,15 @@ REGISTRY: tuple[FormatVersion, ...] = (
     FormatVersion(
         artifact=".step", constant="_HEADER_SCHEMA", value=_HEADER_SCHEMA,
         owner="ohm.pkggen.step",
-        reason="ISO 10303-214 (AP214), which every STEP reader Ohm has tested "
-               "against accepts; AP242 supersedes it and a later loop evaluates "
-               "the bump — this loop changes no value."),
+        reason="ISO 10303-242 (AP242) first edition — the oldest edition of the "
+               "protocol that superseded AP203/AP214 in 2014; proved read by "
+               "gmsh/OpenCASCADE meshing the solid (ADR-022)."),
+    FormatVersion(
+        artifact=".zen", constant="_ZEN_PCB_VERSION", value=_ZEN_PCB_VERSION,
+        owner="ohm.emit_zen",
+        reason="the diodeinc/pcb toolchain lane the export targets and the "
+               "oldest one it has been built against — 0.4.41, the first pcb "
+               "binary this project has had (ADR-002 sec 5, ADR-022)."),
     FormatVersion(
         artifact="Ohm netlist", constant="_NETLIST_VERSION",
         value=_NETLIST_VERSION, owner="ohm.emit_netlist",

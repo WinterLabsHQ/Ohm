@@ -2,6 +2,36 @@
 
 Starlark is syntactically a subset of Python, so the stdlib `ast` parses .zen
 files directly. Interop only (D1/N5): never called from `ohm build`.
+
+STRUCTURAL, NOT VERSION-ANCHORED. This module reads files other people wrote, and
+the argument ADR-021 makes for Ohm's KiCad readers applies unchanged: a reader
+that recognises exactly one spelling of a construct is a reader that breaks on the
+next release, so the accepted vocabulary is a superset and anything outside it is
+skipped with a diagnostic rather than treated as a parse failure. Concretely, both
+Component forms are accepted side by side:
+
+  * LEGACY  — `Component(name=, footprint=, prefix=, pins={...})`, which is what
+    Ohm itself exported until 2026-08-31 and what any `.zen` written against the
+    older surface still looks like.
+  * CURRENT — `Component(name=, symbol=Symbol(...) | pin_defs={...}, pins={...},
+    part=Part(mpn=, manufacturer=), prefix=, footprint=, datasheet=, ...)` as
+    diodeinc/pcb 0.4.41 defines it.
+
+Two of the current-surface fields carry information the old walker threw away:
+
+  * `pin_defs` is a pin -> pad map, and `ir.NetNode` has a `pad` slot that this
+    importer used to leave `None` on every node. It is now filled in from
+    `pin_defs` where the file supplies one. That is why `emit_ohm.py` no longer
+    has to invent a pad from the shape of the pin's NAME for these parts.
+  * `part=Part(mpn=..., manufacturer=...)` replaced the bare `mpn=` kwarg, which
+    0.4.41 still accepts but reports as deprecated. Both spellings are read, and
+    a `Part(...)` bound to a variable first (the form the published spec's own
+    example uses) resolves through that variable.
+
+`symbol=` is accepted and deliberately NOT recorded: the pin->pad map it points at
+lives in a `.kicad_sym` this importer does not open, so there is nothing behind the
+reference for Ohm to carry, and inventing an attr out of the library path would
+put a filename where a pinout belongs.
 """
 
 from __future__ import annotations
@@ -13,6 +43,10 @@ from ohm.diagnostics import Diagnostic, Span
 
 _NET_CTORS = {"Net", "Power", "Ground", "NotConnected"}
 _SKIP_CTORS = {"interface", "config", "load", "Part", "Symbol"}
+# String-valued Component kwargs carried straight through to IR-LOW attrs.
+# `manufacturer` and `type` are new with the current surface; `mpn` stays because
+# 0.4.41 still accepts it (deprecated) and every older .zen in the wild uses it.
+_COMPONENT_ATTRS = ("prefix", "mpn", "manufacturer", "type", "datasheet")
 
 
 def _span(node: ast.AST | None) -> Span:
@@ -38,7 +72,9 @@ class _ZenImporter:
         self.config_vars: set[str] = set()  # vars bound to config(...) — not nets
         self.nonnet_vars: set[str] = set()  # NotConnected()/part-bound vars — never nets
         self.module_vars: dict[str, str] = {}  # var -> generic path
+        self.part_vars: dict[str, list[tuple[str, str]]] = {}  # var -> Part(...) attrs
         self.nets: dict[str, list[tuple[str, str]]] = {}  # net name -> [(ref, pin)]
+        self.pads: dict[tuple[str, str], str] = {}  # (ref, pin) -> pad, from pin_defs
         self.parts: list[ir.PartLow] = []
         self.anon = 0
 
@@ -78,9 +114,33 @@ class _ZenImporter:
         self.nets.setdefault(name, [])
         return name
 
+    def _part_attrs(self, node: ast.AST | None) -> list[tuple[str, str]]:
+        """Read `part=` into (mpn, manufacturer, datasheet) attrs.
+
+        Two spellings, because the current spec uses both: `part=Part(...)` written
+        inline, and `p = Part(...)` bound to a variable and passed by name (which is
+        what the spec's own Component example does with its symbol). Positional
+        arguments are read too — `Part`'s signature is `Part(mpn, manufacturer,
+        qualifications=[], datasheet=None)`, so the first two positions are those
+        two fields and nothing else is positional.
+        """
+        if isinstance(node, ast.Name):
+            return list(self.part_vars.get(node.id, ()))
+        if not (isinstance(node, ast.Call) and _call_name(node) == "Part"):
+            return []
+        found: dict[str, str] = {}
+        for key, arg in zip(("mpn", "manufacturer"), node.args):
+            if (v := _str_const(arg)) is not None:
+                found[key] = v
+        for k in node.keywords:
+            if k.arg in ("mpn", "manufacturer", "datasheet"):
+                if (v := _str_const(k.value)) is not None:
+                    found[k.arg] = v
+        return [(k, found[k]) for k in ("mpn", "manufacturer", "datasheet") if k in found]
+
     def _add_part(self, ref: str, component: str, package: str | None,
                   attrs: list[tuple[str, str]], pins: list[tuple[str, str | None]],
-                  node: ast.AST) -> None:
+                  node: ast.AST, pads: dict[str, str] | None = None) -> None:
         if any(p.ref == ref for p in self.parts):
             self.diags.append(Diagnostic(
                 "error", "Z005", f"duplicate instance name '{ref}'", _span(node), file=self.path))
@@ -90,15 +150,35 @@ class _ZenImporter:
         for pin, net in pins:
             if net is not None:
                 self.nets.setdefault(net, []).append((ref, pin))
+        # Pads are recorded HERE, past the duplicate check, and not by the caller:
+        # `(ref, pin)` is the key, so a rejected duplicate that reused a name would
+        # otherwise overwrite the kept part's pads with the skipped part's — "keep
+        # first" has to mean the whole of the first part, pinout included.
+        for pin, pad in (pads or {}).items():
+            if any(p == pin for p, _ in pins):
+                self.pads[(ref, pin)] = pad
 
     def _component_call(self, call: ast.Call) -> None:
         kw = {k.arg: k.value for k in call.keywords if k.arg}
         ref = _str_const(kw.get("name")) or f"U${len(self.parts) + 1}"
         package = _str_const(kw.get("footprint"))
-        attrs = []
-        for key in ("prefix", "mpn", "datasheet"):
+        attrs: dict[str, str] = {}
+        for key in _COMPONENT_ATTRS:
             if (v := _str_const(kw.get(key))) is not None:
-                attrs.append((key, v))
+                attrs[key] = v
+        # `part=Part(...)` wins over a bare `mpn=` on the same call: the bare kwarg is
+        # the deprecated spelling of the same field, so if a file carries both, the
+        # one the tool would honour is the one Ohm records.
+        attrs.update(self._part_attrs(kw.get("part")))
+        # `pin_defs` is a pin -> pad map. It only ever adds knowledge — a pin absent
+        # from it (or a file that uses `symbol=` instead) keeps pad=None, exactly as
+        # before — so it is read straight, with no diagnostic for a partial map.
+        pads: dict[str, str] = {}
+        if isinstance(defs_node := kw.get("pin_defs"), ast.Dict):
+            for knode, vnode in zip(defs_node.keys, defs_node.values):
+                pin, pad = _str_const(knode), _str_const(vnode)
+                if pin is not None and pad is not None:
+                    pads[pin] = pad
         pins: dict[str, str | None] = {}
         pins_node = kw.get("pins")
         if isinstance(pins_node, ast.Dict):
@@ -114,7 +194,8 @@ class _ZenImporter:
                 "warning", "Z004",
                 f"component '{ref}' has no statically-readable pins dict",
                 _span(call), file=self.path))
-        self._add_part(ref, "Component", package, attrs, list(pins.items()), call)
+        self._add_part(ref, "Component", package, list(attrs.items()),
+                       list(pins.items()), call, pads)
 
     def _generic_call(self, call: ast.Call, generic: str) -> None:
         kw = {k.arg: k.value for k in call.keywords if k.arg}
@@ -161,6 +242,11 @@ class _ZenImporter:
                     self.nets.setdefault(var, [])
                 elif fn == "config":
                     self.config_vars.add(var)
+                elif fn == "Part":  # `p = Part(...)` then `Component(..., part=p)`
+                    self.part_vars[var] = self._part_attrs(stmt.value)
+                    self.nonnet_vars.add(var)
+                elif fn == "Symbol":  # a symbol handle: never a net, never an attr
+                    self.nonnet_vars.add(var)
                 elif fn == "Component":  # assignment-form part: import it, bind var as non-net
                     self._component_call(stmt.value)
                     self.nonnet_vars.add(var)
@@ -179,7 +265,7 @@ class _ZenImporter:
                         "info", "Z003", f"skipped unsupported construct '{fn}(...)'",
                         _span(stmt), file=self.path))
         nets = tuple(sorted(
-            (ir.NetLow(name, tuple(ir.NetNode(ref, ref, pin, None)
+            (ir.NetLow(name, tuple(ir.NetNode(ref, ref, pin, self.pads.get((ref, pin)))
                                    for ref, pin in sorted(endpoints)), ())
              for name, endpoints in self.nets.items() if endpoints),
             key=lambda n: n.name))

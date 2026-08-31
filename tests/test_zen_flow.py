@@ -26,6 +26,52 @@ def test_convert_skeleton_compiles_and_preserves_structure():
     assert endpoints(r.low) == endpoints(zlow)  # same multi-endpoint net partition
 
 
+def test_convert_uses_pads_the_zen_actually_stated():
+    """`emit_ohm`'s tier 1 (see its docstring). Pins named VCC/GND/EN tell you
+    nothing about which pad they land on, so before `pin_defs` was readable this
+    skeleton got placeholder pads and a TODO saying so. With the map present the
+    real pads come through and the TODO is gone — which is the whole difference
+    between a skeleton you can annotate and one you must re-derive from a
+    datasheet."""
+    stated = ('V = Net("V")\n'
+              'G = Net("G")\n'
+              'Component(name="U1", footprint="SOT-23-5",\n'
+              '          pin_defs={"VCC": "1", "GND": "2"},\n'
+              '          pins={"VCC": V, "GND": G})\n'
+              'Component(name="U2", footprint="SOT-23-5",\n'
+              '          pin_defs={"VCC": "1", "GND": "2"},\n'
+              '          pins={"VCC": V, "GND": G})\n')
+    text = emit_ohm(import_zen(stated, "p.zen")[0], "p.zen")
+    assert "pin VCC: role=passive, pad=1" in text
+    assert "pin GND: role=passive, pad=2" in text
+    assert "placeholder" not in text  # nothing was invented, so nothing to warn about
+    assert compile_source(text, "p.ohm").ok
+
+    # the same board on the legacy surface: no map, so the pads are placeholders
+    # and the TODO that says never to fabricate from them is back
+    legacy = stated.replace('          pin_defs={"VCC": "1", "GND": "2"},\n', "")
+    text = emit_ohm(import_zen(legacy, "p.zen")[0], "p.zen")
+    assert "placeholder" in text
+    assert compile_source(text, "p.ohm").ok
+
+
+def test_convert_drops_a_stated_pad_map_the_instances_disagree_about():
+    """Two instances of one declaration that name different pads for the same pin
+    are not a pinout, they are a contradiction. Better a visible placeholder TODO
+    than one instance's pinout shipped silently under the other's name."""
+    src = ('V = Net("V")\n'
+           'G = Net("G")\n'
+           'Component(name="U1", footprint="X", pin_defs={"A": "1", "B": "2"},\n'
+           '          pins={"A": V, "B": G})\n'
+           'Component(name="U2", footprint="X", pin_defs={"A": "7", "B": "2"},\n'
+           '          pins={"A": V, "B": G})\n')
+    low, _ = import_zen(src, "p.zen")
+    text = emit_ohm(low, "p.zen")
+    assert "placeholder" in text
+    assert "pad=7" not in text and "pad=1" not in text  # neither map is trusted
+    assert compile_source(text, "p.ohm").ok
+
+
 def test_convert_is_deterministic():
     zlow, _ = import_zen(ZEN, "x.zen")
     assert emit_ohm(zlow, "x.zen") == emit_ohm(zlow, "x.zen")
