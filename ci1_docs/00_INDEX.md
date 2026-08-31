@@ -25,6 +25,63 @@ several of the decisions below are decided *by* them.
 | # | Part | Loop | State |
 |---|---|---|---|
 | 01 | [Baseline and gate hygiene](01_baseline_and_gates.md) | 1 | done |
+| 02 | [Version registry (`ohm/formats.py`)](02_version_registry.md) | 2 | done |
+| 03 | [`--target-kicad`, the range, and discovery](03_kicad_target_range.md) | 3, 4, 7 | done |
+| 05 | [Pad translation, S012 and the shipped table](05_lower_and_fpdata.md) | 5 | done |
+| 06 | [The four KiCad stamps](06_emit_kicad.md) | 6 | done |
+| 07 | [DRC/ERC rule-id drift — closing F6](07_drc_erc_rule_drift.md) | 8 | done |
+| 08 | [`ohm signoff --target-kicad`](08_signoff.md) | 9 | done |
+| 09 | [Read-back hardening](09_readback_hardening.md) | 10 | done |
+| 10 | [Container-tag currency](10_container_tag_currency.md) | 11 | done |
+| 11 | [`Edge.Cuts` — producible to orderable](11_edge_cuts.md) | 12, 13 | done |
+| 12 | [Multi-EDA version policy (ADR-022)](12_multi_eda_version_policy.md) | 14 | done |
+| 13 | [STEP AP214 to AP242](13_step_ap242.md) | 15 | done |
+| 14 | [Zener `.zen`, both directions](14_zener_zen.md) | 16, 17 | done |
+| 15 | [Eagle](15_eagle.md) | 18 | done |
+| 16 | [Altium](16_altium.md) | 19 | done |
+| 17 | [Allegro, netlist, constraints](17_allegro_netlist_constraints.md) | 20 | done |
+| 18 | [`pkggen` and IPC-7351](18_pkggen_ipc7351.md) | 20 | done |
+| 19 | [The CI workflow](19_ci_workflow.md) | 21, 23 | done |
+| 20 | [Cross-platform determinism](20_cross_platform_determinism.md) | 22 | done |
+| 21 | [The compatibility matrix — measured](21_compatibility_matrix.md) | — | done |
+| 22 | [What Ohm can do now that it could not](22_latest_capabilities.md) | — | done |
+| 23 | [What is still not proven](23_not_proven.md) | — | done |
+| 24 | [V007 — the one job nobody had run](24_v007_headless.md) | 24 | done |
+
+## The headline
+
+**Docker was available, so this round stopped being wiring and became
+measurement.** The KiCad matrix was executed here, all four versions, with
+`OHM_REQUIRE_KICAD=1` so zero skips means zero skips:
+
+| KiCad | Passed | Failed | Skipped |
+|---|---|---|---|
+| **7.0.11** | 337 | 0 | 0 |
+| 8.0.9 | 337 | 0 | 0 |
+| 9.0.9 | 337 | 0 | 0 |
+| 10.0.5 | 337 | 0 | 0 |
+
+Measuring found seven defects that no existing test could see:
+
+1. **The repo's premise about KiCad 7 was false** — five documents said no
+   container image existed below 8.0.4; `kicad/kicad:7.0.11` is real, and a
+   decision to drop KiCad 7 had already been taken on that premise.
+2. **Ohm's own standard library named a footprint KiCad 7 does not have**, on the
+   default target, leaving two connector parts' pins unconnected.
+3. **S012 called a never-added footprint "removed"** — opposite fixes, and the
+   help text sent readers hunting for a removal that never happened.
+4. **Schematic uuids depended on the path you typed**, so two checkouts at
+   different paths produced different files — and KiCad identifies a sheet by its
+   uuid.
+5. **`ohm signoff` ran with pad translation off**, so a mismatch in the last gate
+   before fabrication was silently unverified rather than reported.
+6. **`pcbnew.WriteDRCReport` segfaults on KiCad 10**, taking `ohm signoff` with
+   it — and the CI job was pinned to exactly that version, and had never run.
+7. **A Windows-only test failure** in the UTF-8 invariant, which would have
+   red-lit the new Windows leg on its first run.
+
+---|---|---|---|
+| 01 | [Baseline and gate hygiene](01_baseline_and_gates.md) | 1 | done |
 | 02 | Version registry (`ohm/formats.py`) | 2 | pending |
 | 03 | ~~KiCad floor → 8~~ **withdrawn** — floor stays at 7, 7.0.11 joins the matrix | 3, 7 | see decision 1 |
 | 04 | Environment discovery (`kicad_env.py`) | 4 | pending |

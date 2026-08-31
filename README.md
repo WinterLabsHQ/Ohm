@@ -148,7 +148,7 @@ tools/          author-time generators (never on the build path)
 
 ## Status
 
-Pre-release (v0.1.0). Language and compiler are feature-complete through
+Pre-release (v0.1.1). Language and compiler are feature-complete through
 signoff — see [`CHANGELOG.md`](CHANGELOG.md).
 
 Ohm writes the KiCad 7 file format, and KiCad reads it forward. That is
