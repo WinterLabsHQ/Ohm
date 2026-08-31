@@ -23,6 +23,7 @@ already name-sorted by P-LOWER.
 from __future__ import annotations
 
 from ohm import __version__, ir
+from ohm.formats import _PST_VERSION
 
 # Ohm role -> Allegro PINUSE. Allegro's closed set is
 # IN/OUT/BI/TRI/OCA/OCL/POWER/GROUND/UNSPEC/NC. As with the KiCad and Eagle maps,
@@ -148,7 +149,7 @@ def emit_pstxprt(low: ir.IRLow, root: str, stamp: str) -> str:
     """Part list: designator -> primitive, with the occurrence path Allegro binds by."""
     out = ["FILE_TYPE=EXPANDEDPARTLIST;", stamp,
            "DIRECTIVES",
-           " PST_VERSION='PST_HDL_CENTRIC_VERSION_0';",
+           f" PST_VERSION='{_PST_VERSION}';",
            f" ROOT_DRAWING={_q(root)};",
            f" SOURCE_TOOL={_q('ohm ' + __version__)};",
            "END_DIRECTIVES;", ""]

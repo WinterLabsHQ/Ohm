@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-_HEADER_SCHEMA = "AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }"
+from ohm.formats import _HEADER_SCHEMA
 
 
 def _num(value: Decimal) -> str:

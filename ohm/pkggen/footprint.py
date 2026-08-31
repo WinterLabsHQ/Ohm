@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ohm.formats import _FP_VERSION
 from ohm.pkggen.packages import PackageModel
-
-_FP_VERSION = 20221018  # KiCad 7 board/footprint format
 
 _SILK_INSET = Decimal("0.25")  # body outline, in from the courtyard
 _SILK_CLEAR = Decimal("0.2")  # silk-to-pad clearance (KLC F5.1)

@@ -25,6 +25,8 @@ from __future__ import annotations
 import struct
 from collections.abc import Mapping
 
+from ohm.formats import _CFB_VERSION
+
 _SECTOR = 512
 _MINI_SECTOR = 64
 _MINI_CUTOFF = 4096
@@ -222,7 +224,7 @@ def write_cfb(entries: Mapping[str, bytes]) -> bytes:
     header = (
         _SIGNATURE
         + b"\x00" * 16  # CLSID
-        + struct.pack("<HHH", 0x003E, 3, 0xFFFE)  # minor, major, little-endian
+        + struct.pack("<HHH", 0x003E, _CFB_VERSION, 0xFFFE)  # minor, major, little-endian
         + struct.pack("<HH", 9, 6)  # sector shift (512), mini sector shift (64)
         + b"\x00" * 6  # reserved
         + struct.pack("<I", 0)  # directory sector count: 0 for version 3

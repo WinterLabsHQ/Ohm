@@ -45,6 +45,7 @@ from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
 
+from ohm.formats import _PCB_HEADER, _PCB_LIB_VERSION, _SCH_HEADER, _SCH_LIB_MINOR_VERSION
 from ohm.pkggen.cfb import write_cfb
 from ohm.pkggen.footprint import silk_pin1, silk_segments
 from ohm.pkggen.packages import PackageModel
@@ -224,8 +225,6 @@ def footprint_records(model: PackageModel) -> list[bytes]:
 
 # ---------------------------------------------------------------- .PcbLib
 
-_PCB_HEADER = "PCB 6.0 Binary Library File"
-
 
 def _param_block(text: str) -> bytes:
     """A parameter collection: length-prefixed, NUL-terminated."""
@@ -245,7 +244,7 @@ def _library_parameters() -> str:
                 f"|LAYER{i}COPTHICK=1.4mil|LAYER{i}DIELTYPE=0|LAYER{i}DIELCONST=4.800"
                 f"|LAYER{i}DIELHEIGHT=12.6mil|LAYER{i}DIELMATERIAL=FR-4")
 
-    head = ("|KIND=Protel_Advanced_PCB_Library|VERSION=3.00"
+    head = (f"|KIND=Protel_Advanced_PCB_Library|VERSION={_PCB_LIB_VERSION}"
             "|TOPTYPE=3|TOPCONST=3.500|TOPHEIGHT=0.4mil|TOPMATERIAL=Solder Resist"
             "|BOTTOMTYPE=3|BOTTOMCONST=3.500|BOTTOMHEIGHT=0.4mil"
             "|BOTTOMMATERIAL=Solder Resist|LAYERSTACKSTYLE=0"
@@ -318,9 +317,6 @@ _PIN_BASE_FLAGS = 0x20  # set on every pin in Altium-authored libraries
 _PIN_FLIPPED = 0x02  # pin grows in -x: the left-hand column of the box
 _PIN_SHOW_NAME = 0x08
 _PIN_SHOW_DESIGNATOR = 0x10
-
-_SCH_HEADER = ("Protel for Windows - Schematic Library Editor Binary File "
-               "Version 5.0")
 
 
 class SchSymbol(NamedTuple):
@@ -431,7 +427,8 @@ def emit_schlib(symbols: Sequence[SchSymbol]) -> bytes:
     bodies = {name: _symbol_records(by_name[name]) for name in sorted(by_name)}
     weight = sum(len(r) for r in bodies.values())
 
-    header = (f"|HEADER={_SCH_HEADER}|Weight={weight}|MinorVersion=2"
+    header = (f"|HEADER={_SCH_HEADER}|Weight={weight}"
+              f"|MinorVersion={_SCH_LIB_MINOR_VERSION}"
               f"|UniqueID={_unique_id(*sorted(by_name))}"
               "|FontIdCount=1|Size1=10|FontName1=Times New Roman"
               "|UseMBCS=T|IsBOC=T|SheetStyle=9|BorderOn=T|SheetNumberSpaceSize=4"

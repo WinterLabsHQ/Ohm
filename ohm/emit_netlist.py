@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ohm import ir
 from ohm import __version__
+from ohm.formats import _NETLIST_VERSION
 
 
 # Ohm attr -> the field name a BOM tool expects to find it under. Ordered, so
@@ -31,7 +32,7 @@ def _value_text(v: ir.Value) -> str:
 
 
 def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
-    out = ["(export (version \"E\")"]
+    out = [f'(export (version "{_NETLIST_VERSION}")']
     out.append(f"  (design (source {_q(source)}) (tool {_q('ohm ' + __version__)}))")
     out.append("  (components")
     for p in low.parts:

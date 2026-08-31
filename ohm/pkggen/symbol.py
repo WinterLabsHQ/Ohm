@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from decimal import ROUND_CEILING, Decimal
 
-_SYM_VERSION = 20220914  # KiCad 7 symbol format
+from ohm.formats import _SYM_VERSION
 
 # role -> KiCad pin electrical type. ERC is only as good as this map, so every
 # role in ohm.resolve.VALID_ROLES must appear: anything falling through to

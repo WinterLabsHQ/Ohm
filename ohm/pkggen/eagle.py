@@ -18,10 +18,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ohm.formats import _EAGLE_VERSION
 from ohm.pkggen.packages import PackageModel
 from ohm.pkggen.symbol import box_half_w, symbol_layout
-
-_EAGLE_VERSION = "6.3"  # the schema revision that introduced XML libraries
 
 # Eagle layer numbers we emit on.
 _L_TOP, _L_PLACE, _L_NAMES, _L_VALUES = 1, 21, 25, 27

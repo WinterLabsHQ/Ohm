@@ -44,6 +44,7 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
 from ohm import ir, units
+from ohm.formats import _PCB_VERSION, _SCH_VERSION
 
 _NS = uuid.UUID("00000000-0000-0000-0000-00000000006f")  # fixed Ohm namespace
 # THE VERSION POLICY, in the one place the stamps live. Ohm writes the KiCad 7
@@ -55,8 +56,9 @@ _NS = uuid.UUID("00000000-0000-0000-0000-00000000006f")  # fixed Ohm namespace
 # KiCad wrote, and a line-anchored parser has already been broken twice by
 # nothing more than a pretty-printer change (KiCad 9 and again KiCad 10).
 # Gated by .github/workflows/ci.yml's `kicad` job at 8.0.9, 9.0.9 and 10.0.5.
-_SCH_VERSION = 20230121  # KiCad 7 schematic format
-_PCB_VERSION = 20221018  # KiCad 7 board format
+# The two constants themselves live in `ohm/formats.py` now, alongside every
+# other external-format stamp Ohm writes; imported here under their original
+# names so this file's diff — and every f-string below — stays unchanged.
 
 _D = Decimal
 _STUB_W = _D(5)  # default courtyard for string-footprint stubs, mm
