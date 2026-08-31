@@ -77,6 +77,18 @@ FORBIDDEN = {"socket", "requests", "urllib", "http", "subprocess",
 # path), so the gate stays strict for every other file, including cli.py.
 _SETUP_ONLY = {"gitutil.py"}
 
+# drc.py is the second exception, and for the same reason stated differently: it
+# is the V007 geometry gate, reached only from `ohm signoff`, never from
+# parse→emit. It ran KiCad's DRC by importing `pcbnew` IN-PROCESS until KiCad 10,
+# where `pcbnew.WriteDRCReport` segfaults (measured on 10.0.5 and 10.0.6) and
+# took `ohm signoff` with it — verdict and all, before anything could be printed.
+# A crash in a delegated engine cannot be caught, only contained, so the engine
+# now runs in a child process and `subprocess` is the tool for that. The
+# exemption is by name here and paid for by a test:
+# tests/test_drc_gate.py::test_only_the_cli_reaches_the_geometry_gate proves
+# nothing on the build path imports it, exactly as the gitutil case does below.
+_OFF_BUILD_PATH = {"drc.py"}
+
 
 def test_no_forbidden_imports_in_build_path():
     """Real import statements only (ast-based) — prose mentioning a module name
@@ -84,7 +96,7 @@ def test_no_forbidden_imports_in_build_path():
     import ast as pyast
 
     for py in OHM_PKG.rglob("*.py"):
-        if py.name in _SETUP_ONLY:
+        if py.name in _SETUP_ONLY or py.name in _OFF_BUILD_PATH:
             continue
         tree = pyast.parse(py.read_text())
         for node in pyast.walk(tree):

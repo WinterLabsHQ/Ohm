@@ -50,8 +50,14 @@ jobs:
   # gerbers`, `pcb export drill`, `sch export pdf` and `sym upgrade` all predate
   # KiCad 8, so there is no capability here that 7 lacks. What it does NOT
   # cover: `kicad-cli pcb upgrade`, which is KiCad 10 only — the read-back gate
-  # re-saves through `pcbnew` at 7 exactly as it already does at 8 and 9 — and
-  # the in-process geometry gate, which is one version everywhere (`v007`).
+  # re-saves through `pcbnew` at 7 exactly as it already does at 8 and 9.
+  #
+  # The geometry gate (V007) IS covered here, at all four versions, as of
+  # 2026-08-31. It used to be covered only by the `v007` job below, on the one
+  # KiCad where it happened to crash; and `ohm/drc.py` now picks between two
+  # routes by what the installed KiCad has — `kicad-cli pcb drc` from 8 onwards,
+  # a `pcbnew` child interpreter at 7 — which is a choice only a four-version
+  # matrix can check.
   # ------------------------------------------------------------------
   kicad:
     if: github.event_name != 'pull_request'
@@ -127,6 +133,18 @@ jobs:
             tests/test_std_passives.py \
             tests/test_std_pcb.py
 
+      - name: Geometry gate — V007, at every version
+        # `ohm/drc.py` runs KiCad's DRC engine OUT OF PROCESS and picks the route
+        # this KiCad supports. Both halves of that choice need a real KiCad to
+        # mean anything: 7 is the only version with no `kicad-cli pcb drc` (its
+        # `kicad-cli pcb` offers `export` and nothing else), and 10 is the only
+        # version where the `pcbnew` route segfaults. A gate proven on one
+        # version is a gate proven on the version that happened to work.
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_signoff.py \
+            tests/test_drc_gate.py
+
       - name: Read-back and plot gates
         # Split out so a failure here reads as "KiCad changed what it WRITES",
         # distinct from the emit gates' "KiCad changed what it READS".
@@ -167,11 +185,30 @@ jobs:
           path: pads-*.json
 
   # ------------------------------------------------------------------
-  # V007 — the geometry gate, which imports pcbnew IN-PROCESS. Only runs
-  # where the system Python matches Ohm's: ubuntu-24.04 is 3.12 and the
-  # KiCad 10 PPA builds pcbnew against it. `ubuntu-latest` is deliberately
-  # NOT used here — when that label moves to a newer Ubuntu the system
-  # Python moves with it and pcbnew silently stops importing.
+  # V007 against a PACKAGED KiCad rather than a container image — the shape a
+  # user actually installs, where `kicad-cli`, `pcbnew` and Ohm's own venv are
+  # three separate decisions instead of one image's.
+  #
+  # This job had never been run when it was written. Running it on 2026-08-31
+  # gave `1 failed, 16 passed`, and the reason was not the job: KiCad 10's
+  # `pcbnew.WriteDRCReport` SEGFAULTS, and the gate imported pcbnew in-process,
+  # so `ohm signoff` died with exit 139 and printed no verdict at all. The gate
+  # now runs the engine in a child process (`ohm/drc.py`), which is why the
+  # verdict step below asserts an exit STATUS: 0 or 1 is an answer, 139 is the
+  # bug back.
+  #
+  # `ubuntu-24.04`, still pinned, but for a different reason than before. The
+  # old reason was that the gate imported pcbnew into Ohm's own interpreter, so
+  # the system Python had to be Ohm's 3.12 — that constraint went with the
+  # in-process import. What remains is the PPA: `ppa:kicad/kicad-10.0-releases`
+  # publishes per Ubuntu series, and `ubuntu-latest` moving to a series it has
+  # not built for would fail at apt. A pin whose reason has changed is worth
+  # restating rather than silently keeping.
+  #
+  # The PPA serves 10.0.6 while the container matrix above is pinned at 10.0.5,
+  # and the two drift on KiCad's schedule. That is coverage, not an oversight —
+  # the segfault was measured on BOTH — but it does mean this job can go red for
+  # a version nothing else in this file has ever seen.
   # ------------------------------------------------------------------
   v007:
     if: github.event_name != 'pull_request'
@@ -183,6 +220,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: KiCad 10 from the PPA
+        # The `import pcbnew` line is evidence, not a dependency: it records that
+        # this runner HAS the pcbnew that used to kill signoff, which is what
+        # makes the steps below a regression test rather than a smoke test.
         run: |
           sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
           sudo apt-get update
@@ -190,12 +230,14 @@ jobs:
           kicad-cli version
           python3 -c "import pcbnew; print('pcbnew', pcbnew.GetBuildVersion())"
 
-      - name: Install Ohm against the system interpreter
-        # --system-site-packages so the venv can see KiCad's pcbnew. ohm/drc.py
-        # also appends /usr/lib/python3/dist-packages itself, but requiring both
-        # means a failure here is a real failure, not a path accident.
+      - name: Install Ohm in a PLAIN venv
+        # Deliberately NOT --system-site-packages. The gate no longer imports
+        # pcbnew into Ohm's interpreter — it spawns one that can — so a venv with
+        # no sight of KiCad's bindings is the honest environment to test, and it
+        # is the one most users have. If this ever needs --system-site-packages
+        # again, something has moved the import back in-process.
         run: |
-          python3 -m venv --system-site-packages .venv
+          python3 -m venv .venv
           .venv/bin/pip install -e ".[dev]"
 
       - name: Geometry gate
@@ -203,6 +245,31 @@ jobs:
           .venv/bin/python -m pytest -q \
             tests/test_signoff.py \
             tests/test_drc_gate.py
+
+      - name: ohm signoff gives a verdict, not a signal
+        # The end-to-end shape of the bug, asserted on the exit status the shell
+        # sees. 0 (clean) and 1 (findings) are verdicts; 139 is 128+SIGSEGV, and
+        # is what this job produced before the gate moved out of process.
+        run: |
+          .venv/bin/python -m ohm.cli build examples/divider_led.ohm -o out --emit kicad
+          set +e
+          .venv/bin/python -m ohm.cli signoff \
+            examples/divider_led.ohm out/divider_led.kicad_pcb > verdict.txt 2>&1
+          status=$?
+          set -e
+          cat verdict.txt
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "::error::ohm signoff exited $status — 139 is the KiCad 10 segfault"
+            exit 1
+          fi
+          if ! grep -q "V007" verdict.txt; then
+            echo "::error::no V007 line: the geometry gate did not run on KiCad 10"
+            exit 1
+          fi
+          if grep -q "geometry gate skipped" verdict.txt; then
+            echo "::error::the gate was skipped on a runner that has KiCad 10 installed"
+            exit 1
+          fi
 
   # ------------------------------------------------------------------
   # The shipped pad table must not rot. Rebuild it from the libraries the
