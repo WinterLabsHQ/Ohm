@@ -31,7 +31,8 @@ The board carries real footprints (Milestone F Part D):
   canonical name) in the .kicad_sch/.kicad_pcb net tables ONLY — the netlist
   and constraints JSON keep canonical names.
 
-Deterministic: uuid5 from a fixed namespace + stable path strings, Decimal
+Deterministic: uuid5 from a fixed namespace + the source FILE NAME (never the
+caller's path -- see _source_id), Decimal
 arithmetic on a fixed grid — no clock, no floats, no randomness (hermeticity
 N1: nothing outside the IR is ever read at emit time).
 """
@@ -77,6 +78,35 @@ _PWR_REF_RE = re.compile(r'\(property "Reference" "(#PWR\d+)"')
 def _pwr_ref(seq: int) -> str:
     """KiCad's own spelling for the nth power symbol: #PWR01, #PWR02, ..."""
     return f"#PWR{seq:02d}"
+
+
+def _source_id(source: str) -> str:
+    """The stable identity of a source file, for uuid derivation.
+
+    Every uuid and tstamp in the emitted schematic and board is
+    `uuid5(_NS, source + role + ...)`, and `source` used to be the path string
+    the CALLER typed. So the same design emitted different bytes depending on
+    how it was named:
+
+        ohm build tests/golden/divider.ohm       -> uuid 5d81bef0-7da1-57ac-...
+        ohm build D:/repo/tests/golden/divider.ohm -> uuid 7998f527-d7fb-5a58-...
+
+    Two consequences, and the second is the serious one. It broke the promise
+    that "the same source is the same bytes on any machine, any day" — two
+    developers whose checkouts sit at different paths got different files. And
+    KiCad identifies a sheet BY its uuid, so rebuilding from another directory
+    reads to KiCad as a different sheet, which is how per-sheet state gets
+    silently orphaned. Found by the cross-platform determinism gate
+    (`tools/emit_manifest.py`), which is what that gate is for.
+
+    The file name alone is the stable part: it survives a move, a checkout at
+    another path, and a Windows caller typing backslashes. Two designs sharing
+    a basename cannot collide, because a uuid only has to be unique WITHIN the
+    file it appears in and each build writes its own.
+    """
+    # Accept either separator: a Windows caller types backslashes and a POSIX
+    # one forward slashes, and the same file must hash the same either way.
+    return source.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 def _uid(*parts: str) -> str:
@@ -378,6 +408,105 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
     return out
 
 
+# ---------- board outline (Edge.Cuts) ----------
+# The layer was in the stackup from this emitter's first version and nothing was
+# ever drawn on it: `grep -rn "Edge\.Cuts" ohm/` returned exactly the one line of
+# the layer table. KiCad plots such a board perfectly happily — the gerbers come
+# out well-formed, which is what `tests/test_kicad_plot.py` proved — but every
+# fab reads the profile layer to know what to CUT, so a package without one is
+# producible and not orderable. That gap is what KICAD_CI_IMPLEMENTATION.md
+# recorded under "what is still not proven".
+#
+# The outline is DERIVED, because the language cannot state one. A `board` block
+# carries title-block strings only (`ohm.lark`: `board_item: NAME "=" STRING`,
+# and `resolve._BOARD_FIELDS` is a closed set of seven document-identity fields
+# guarded by R027), `ir.BoardDef` holds nothing but those (key, value) pairs, and
+# `emit_kicad_pcb` is not even handed the Design. So the only fact available is
+# the one the board itself states: where the parts ended up.
+_EDGE_MARGIN = _D(2)  # mm, courtyard edge -> board edge
+_EDGE_W = _D("0.1")   # mm, profile line weight (the cut is the centreline)
+
+
+_Pose = tuple[Decimal, Decimal, Decimal, str, bool]
+
+
+def board_extents(low: ir.IRLow, poses: dict[str, _Pose] | None = None
+                  ) -> tuple[Decimal, Decimal, Decimal, Decimal] | None:
+    """(x1, y1, x2, y2) mm of the board rectangle, or None if there is no board.
+
+    The bounding box of every placed part's COURTYARD, grown by `_EDGE_MARGIN`.
+    Courtyard rather than pad extents because that is what a courtyard is: the
+    area the part is entitled to, keep-out included. It is also the very
+    rectangle S011 compares parts against, so `_extent` is imported from that
+    check rather than written a second time — that is what keeps the outline and
+    the overlap verdict from disagreeing about how big a rotated part is (90/270
+    transposes the courtyard; any other angle is bounded by its diagonal, which
+    can only ever make the board bigger).
+
+    None means "no board", not "a zero-size board". The emitter draws nothing and
+    check_mfg says so out loud (M012); guessing a default rectangle here would
+    put a profile on a gerber package that encloses nothing.
+    """
+    if not low.parts:
+        return None
+    from ohm.check_placement import _extent  # rotated axis-aligned half-extent
+
+    if poses is None:
+        poses = placement(low)
+    boxes: list[tuple[Decimal, Decimal, Decimal, Decimal]] = []
+    for part in low.parts:
+        pose = poses.get(part.ref)
+        if pose is None:
+            continue
+        x, y, rot, _side, _locked = pose
+        w, h, _model = _courtyard(part.package)
+        hw, hh = _extent(w, h, rot)
+        boxes.append((x - hw, y - hh, x + hw, y + hh))
+    if not boxes:
+        return None
+    # Round the box OUTWARD, not to nearest. `_mm` rounds half-even, and on a
+    # 0.005mm tie that would spend the quantum shrinking the board onto a
+    # courtyard edge. The margin is a promise made to the part, so rounding may
+    # only ever make the board larger — the same reasoning as `seat()` rounding
+    # a declared `near` gap toward its target rather than away from it.
+    return (
+        (min(b[0] for b in boxes) - _EDGE_MARGIN).quantize(_PCB_QUANTUM, ROUND_FLOOR),
+        (min(b[1] for b in boxes) - _EDGE_MARGIN).quantize(_PCB_QUANTUM, ROUND_FLOOR),
+        (max(b[2] for b in boxes) + _EDGE_MARGIN).quantize(_PCB_QUANTUM, ROUND_CEILING),
+        (max(b[3] for b in boxes) + _EDGE_MARGIN).quantize(_PCB_QUANTUM, ROUND_CEILING),
+    )
+
+
+def _edge_cuts(low: ir.IRLow, source: str,
+               poses: dict[str, _Pose] | None = None) -> list[str]:
+    """The closed Edge.Cuts rectangle, as four `gr_line`s.
+
+    Four segments rather than one `gr_rect` because a board outline is what the
+    fab's mill follows, and KiCad's own outline handling (DRC's "board edge",
+    the profile plot) is written against segments joined end to end; the closure
+    is then an assertable property of the file — every corner is the start of one
+    segment and the end of exactly one other.
+
+    Deterministic by construction: the corner order is fixed clockwise from the
+    top-left, and each segment's tstamp is derived from the source path and its
+    own index, so two builds of one source emit the same four lines.
+    """
+    box = board_extents(low, poses)
+    if box is None:
+        return []
+    x1, y1, x2, y2 = box
+    corners = ((x1, y1), (x2, y1), (x2, y2), (x1, y2))
+    out: list[str] = []
+    for i, (sx, sy) in enumerate(corners):
+        ex, ey = corners[(i + 1) % 4]
+        out.append(
+            f"  (gr_line (start {sx} {sy}) (end {ex} {ey})"
+            f" (stroke (width {_EDGE_W}) (type solid))"
+            f' (layer "Edge.Cuts") (tstamp "{_uid(source, "edge", str(i))}"))'
+        )
+    return out
+
+
 # ---------- schematic ----------
 def schematic_value(part: ir.PartLow) -> str:
     """What the Value field shows: the value AND what qualifies it.
@@ -609,6 +738,10 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     electrical graph, survive re-generation, and are what a human draws for dense
     MCU/FPGA sheets anyway. KiCad's net highlighting makes them navigable.
     """
+    # `source` seeds every uuid in this file, so normalise it to the file NAME
+    # before anything derives one: the caller's path must not decide the bytes.
+    # See _source_id. Idempotent, so the recursive sheet calls stay correct.
+    source = _source_id(source)
     from ohm.emit_netlist import BOM_FIELDS, _value_text
     from ohm.pkggen.pindata_iface import DeclaredPinData
     from ohm.pkggen.symbol import emit_symbol, glyph_for, symbol_layout
@@ -1958,6 +2091,10 @@ def emit_kicad_sheets(low: ir.IRLow, source: str = "<string>",
     a plotter size; reviews happen on printed or paged PDFs, and a reviewer needs
     to hold the power section and the MCU section side by side.
     """
+    # `source` seeds every uuid in this file, so normalise it to the file NAME
+    # before anything derives one: the caller's path must not decide the bytes.
+    # See _source_id. Idempotent, so the recursive sheet calls stay correct.
+    source = _source_id(source)
     stem = Path(source).stem
     groups = sheet_groups(low)
     if len(groups) < 2:
@@ -2058,6 +2195,10 @@ def _footprint(part: ir.PartLow, pose, pad_net, source: str) -> list[str]:
 
 
 def emit_kicad_pcb(low: ir.IRLow, source: str = "<string>") -> str:
+    # `source` seeds every uuid in this file, so normalise it to the file NAME
+    # before anything derives one: the caller's path must not decide the bytes.
+    # See _source_id. Idempotent, so the recursive sheet calls stay correct.
+    source = _source_id(source)
     renames = diffpair_renames(low)
     out = [
         "(kicad_pcb",
@@ -2090,6 +2231,10 @@ def emit_kicad_pcb(low: ir.IRLow, source: str = "<string>") -> str:
             pad_net[(node.part_ref, node.pad or node.pin)] = (code, name)
 
     poses = placement(low)
+    # The board profile. Emitted before the footprints so it reads first, and
+    # from the SAME `poses` the footprints are placed from — deriving it from a
+    # second placement() run would let the outline and the parts drift apart.
+    out += _edge_cuts(low, source, poses)
     for part in low.parts:
         out += _footprint(part, poses[part.ref], pad_net, source)
 

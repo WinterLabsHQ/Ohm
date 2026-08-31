@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from ohm.driver import compile_source
+from ohm.formats import REGISTRY, _EAGLE_VERSION
 from ohm.pkggen.eagle import _DIRECTION, emit_eagle_library
 from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import build
@@ -31,6 +32,35 @@ SOIC8 = build("SOIC", {"pins": Decimal(8)})
 
 def _tree(xml: str) -> ET.Element:
     return ET.fromstring(xml)
+
+
+def test_eagle_version_stamp_is_the_xml_library_schema_revision():
+    """6.3 is not an Eagle *release* — it is the schema revision that introduced
+    XML libraries (Eagle moved off a binary .lbr at 6.0), so it is the oldest
+    spelling any XML-reading Eagle understands and there is no older XML value to
+    fall back to (ohm/formats.py:57-61). Autodesk EAGLE itself reached end of life
+    on 7 June 2026 — Autodesk stopped selling and supporting it and shut down the
+    licence servers, so no version of the application runs at all any more, and
+    the successor reader is Autodesk Fusion Electronics, which still opens .lbr.
+    None of that is a reason to bump the stamp: a newer number only costs an older
+    Eagle install the ability to open the file, and buys nothing back, per the
+    forward-read policy this module states once for all eight formats."""
+    xml = emit_eagle_library(SOIC8, "MCP6002", PINS)
+    assert '<!DOCTYPE eagle SYSTEM "eagle.dtd">' in xml
+    assert f'<eagle version="{_EAGLE_VERSION}">' in xml
+    assert _EAGLE_VERSION == "6.3"  # pin the literal too, so a registry-only edit is caught
+
+
+def test_eagle_version_matches_the_formats_registry():
+    """ohm/formats.py is the one place this value is supposed to be decided, and
+    ohm/pkggen/eagle.py imports it rather than defining its own literal. This test
+    exists so a future edit to either side — the registry entry or the emitted
+    XML — that stops agreeing with the other fails loudly here, in the module a
+    person maintaining the Eagle emitter would actually look at."""
+    entry = next(f for f in REGISTRY if f.constant == "_EAGLE_VERSION")
+    assert entry.artifact == ".lbr" and entry.owner == "ohm.pkggen.eagle"
+    xml = emit_eagle_library(SOIC8, "MCP6002", PINS)
+    assert f'<eagle version="{entry.value}">' in xml
 
 
 def test_library_is_well_formed_and_has_the_three_sections():

@@ -229,6 +229,44 @@ def test_m008_explicit_pitch_and_coarse_clear():
     assert "M008" not in m_codes(coarse)
 
 
+# ---------- M012 no board outline ----------
+# The board Ohm emits declares Edge.Cuts and, until this check existed, could
+# draw nothing on it — a gerber package with an empty profile layer, which plots
+# perfectly and which no fab can quote. M012 is asked of `board_extents`, the
+# same function the emitter draws from, so the warning and the file agree.
+M012_SRC = ("interface Pair:\n"
+            "    a: signal\n"
+            "    b: signal\n"
+            "module top:\n"
+            "    p = io(Pair)\n"
+            "    q = io(Pair)\n"
+            "    p ~ q\n")
+
+
+def test_m012_fires_once_on_a_board_with_nothing_to_enclose():
+    found = [d for d in m_diags(M012_SRC) if d.code == "M012"]
+    assert len(found) == 1 and found[0].severity == "warning"
+    assert "not orderable" in found[0].message
+
+
+def test_m012_clears_as_soon_as_there_is_a_part():
+    src = (RESISTOR + "module M:\n    r1 = Resistor(value=1kohm)\n"
+           "    r2 = Resistor(value=2kohm)\n    r1.P1 ~ r2.P1\n")
+    assert "M012" not in m_codes(src)
+
+
+def test_m012_sits_above_the_bom_stage_gate():
+    """It is the one M-code that is not BOM lint, so gate 2 must not swallow it.
+
+    `M012_SRC` has no part at all and therefore no mpn/dnp anywhere, which is
+    exactly the shape the pre-BOM gate returns early on. Whether the board has a
+    profile for the fab to cut is not a property of the BOM, and a board with no
+    outline is unorderable at every stage of the design — including the stage
+    where nobody has chosen orderable parts yet.
+    """
+    assert m_codes(M012_SRC) == ["M012"]  # nothing else escapes the gate with it
+
+
 # ---------- corpus stays clean: std + examples, no M-code ERRORS ----------
 def test_std_and_examples_emit_no_m_errors():
     files = sorted(STD.glob("*.ohm")) + sorted(EXAMPLES.glob("*.ohm"))

@@ -29,6 +29,13 @@ import olefile
 import pytest
 
 from ohm.driver import compile_source
+from ohm.formats import (
+    REGISTRY,
+    _CFB_VERSION,
+    _PCB_LIB_VERSION,
+    _SCH_HEADER,
+    _SCH_LIB_MINOR_VERSION,
+)
 from ohm.pkggen import cfb
 from ohm.pkggen.altium import (
     _ETYPE,
@@ -133,6 +140,39 @@ def test_container_is_a_real_compound_file_an_independent_reader_can_open():
     assert _storages(blob) == {"Library", "FileVersionInfo", "SOIC-8"}
 
 
+def test_ms_cfb_container_version_field_is_3_read_by_olefile_not_by_ohm():
+    """[MS-CFB] 2.2 puts Minor Version at header offset 24 and Major Version
+    ("Major Version" is what the spec calls the field this repo calls _CFB_VERSION)
+    at offset 26, both little-endian u16. olefile — an independent implementation,
+    per the module docstring and pyproject.toml:31-33 on why a self-written reader
+    would only agree with a self-written writer about a broken file — parses the
+    header itself and exposes the major-version field as `OleFileIO.dll_version`
+    (the name comes from olefile's own history, not from the spec). Using it here,
+    rather than re-deriving the field from raw bytes, is exactly the "independent
+    reader" verification the rest of this module already relies on for streams and
+    storages.
+
+    olefile does not expose a spec-named "minor version" accessor either — it keeps
+    it as `minor_version`, an internal-looking attribute name we'd rather not lean
+    on for an assertion — so the minor version (0x003E, the value Altium's own
+    writer uses and not one this registry names) is instead pinned by reading the
+    header bytes directly, per the spec offsets above.
+    """
+    blob = emit_pcblib([SOIC8])
+    ole = olefile.OleFileIO(io.BytesIO(blob))
+    try:
+        assert ole.dll_version == _CFB_VERSION == 3
+        # version 3 implies 512-byte sectors; olefile derives sector_size from the
+        # sector-shift field independently and would refuse to open the file if the
+        # two disagreed, so this is corroborating, not the same fact twice.
+        assert ole.sector_size == 512
+    finally:
+        ole.close()
+    minor, major = struct.unpack_from("<HH", blob, 24)
+    assert major == _CFB_VERSION == 3
+    assert minor == 0x003E  # Altium's own minor-version value; not a registry entry
+
+
 def test_every_stream_survives_the_round_trip_through_another_implementation():
     """The writer is ours; the reader is not. Agreement means the file is real."""
     payloads = {
@@ -162,6 +202,19 @@ def test_pcblib_has_the_streams_altium_looks_for():
     # the Header stream is the primitive count, and it has to agree with the Data
     assert int.from_bytes(got["SOIC-8/Header"], "little") == \
         len(_records(got["SOIC-8/Data"]))
+
+
+def test_pcb_library_version_is_the_value_altium_itself_writes():
+    """VERSION=3.00 sits right next to KIND=Protel_Advanced_PCB_Library in the same
+    head string (ohm/pkggen/altium.py:247) but was never itself asserted — the
+    existing KIND check in test_pcblib_has_the_streams_altium_looks_for stops one
+    field short of it. Like PCB_HEADER, this is not an Altium Designer release
+    number: it is the VERSION= Altium Designer itself writes into the
+    library-parameters block of a PCB library it authored, read off a real one
+    rather than chosen (ohm/formats.py:63-71)."""
+    data = _streams(emit_pcblib([SOIC8]))["Library/Data"]
+    assert f"VERSION={_PCB_LIB_VERSION}".encode() in data
+    assert _PCB_LIB_VERSION == "3.00"
 
 
 def test_library_data_lists_every_footprint_by_name():
@@ -333,6 +386,53 @@ def test_schlib_binds_the_symbol_to_its_footprint():
     assert f"|OwnerIndex={list_index}".encode() in model
     datafile = next(p for p in payloads if b"RECORD=46" in p)
     assert f"|OwnerIndex={list_index + 1}".encode() in datafile
+
+
+def test_schlib_header_carries_the_file_kind_string_altium_itself_writes():
+    """Same rule as the .PcbLib's FileHeader, unasserted until now: "Protel for
+    Windows - Schematic Library Editor Binary File Version 5.0" is not an Altium
+    Designer release string — it is read verbatim off a real Altium-authored
+    .SchLib's header record, the same "unknown field set to what Altium writes is
+    a fact" rule ohm/pkggen/altium.py:14-15 states for every constant in this file
+    (ohm/formats.py:73-76)."""
+    header = _streams(_symbol())["FileHeader"]
+    assert f"|HEADER={_SCH_HEADER}".encode() in header
+
+
+def test_schlib_minor_version_is_the_value_altium_itself_writes():
+    """MinorVersion=2 in the same header record — again read off a real
+    Altium-authored .SchLib, not chosen (ohm/formats.py:77)."""
+    header = _streams(_symbol())["FileHeader"]
+    assert f"|MinorVersion={_SCH_LIB_MINOR_VERSION}".encode() in header
+    assert _SCH_LIB_MINOR_VERSION == 2
+
+
+def test_altium_version_stamps_match_the_formats_registry():
+    """ohm/formats.py is the one place these five values are supposed to be
+    decided, and ohm/pkggen/altium.py + ohm/pkggen/cfb.py import them rather than
+    defining their own literals. This pins every Altium-owned registry entry to
+    the bytes actually emitted, so a future edit to either side that stops
+    agreeing with the other fails here rather than silently drifting."""
+    by_constant = {f.constant: f for f in REGISTRY}
+    for name in ("_PCB_HEADER", "_PCB_LIB_VERSION", "_SCH_HEADER",
+                "_SCH_LIB_MINOR_VERSION", "_CFB_VERSION"):
+        assert by_constant[name].owner in ("ohm.pkggen.altium", "ohm.pkggen.cfb")
+
+    pcb_data = _streams(emit_pcblib([SOIC8]))
+    assert pcb_data["FileHeader"].endswith(str(by_constant["_PCB_HEADER"].value).encode())
+    assert f"VERSION={by_constant['_PCB_LIB_VERSION'].value}".encode() \
+        in pcb_data["Library/Data"]
+
+    sch_header = _streams(_symbol())["FileHeader"]
+    assert f"|HEADER={by_constant['_SCH_HEADER'].value}".encode() in sch_header
+    assert f"|MinorVersion={by_constant['_SCH_LIB_MINOR_VERSION'].value}".encode() \
+        in sch_header
+
+    ole = olefile.OleFileIO(io.BytesIO(emit_pcblib([SOIC8])))
+    try:
+        assert ole.dll_version == by_constant["_CFB_VERSION"].value
+    finally:
+        ole.close()
 
 
 def test_schlib_header_indexes_every_symbol():

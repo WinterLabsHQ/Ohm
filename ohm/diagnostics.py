@@ -173,4 +173,5 @@ EXPLAIN: dict[str, str] = {
     "M006": "The board mixes SMT and through-hole parts — assembly needs two processes (reflow + wave/selective solder). Informational.",
     "M007": "The board has SMT parts but no Fiducial — pick-and-place optical registration needs fiducial marks. Informational.",
     "M008": "Generated packages with lead pitch <= 0.65mm (SSOP/TSSOP, or an explicit pitch=) — stencil/paste/inspection process care. Informational summary.",
+    "M012": "The board has no Edge.Cuts outline, because there is nothing to draw one around: the design places no parts, so there are no extents to derive a profile from. Ohm derives the outline rather than reading it, because the language cannot state a board size — a `board` block carries title-block strings only (R027 keeps that set closed) — so the bounding box of the placed courtyards, grown by a 2mm margin, is the only honest source. The layer is declared in every board Ohm emits; a board with the layer and no geometry on it plots perfectly well and is still not ORDERABLE, because the profile is how a fab knows what to cut. Advisory like the rest of the M tier — it never blocks a build.",
 }

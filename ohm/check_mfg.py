@@ -11,6 +11,7 @@
   M009  no `board` block — the document has no title/rev/owner (ONE warning)
   M010  nets named after a component pin — nobody named the signal (ONE warning)
   M011  a capacitor across a supply rail with no vmax declared (ONE warning)
+  M012  no board outline can be derived — nothing to cut (ONE warning)
 
 Never error severity: these are advisory, they must not block a build.
 
@@ -21,6 +22,9 @@ Design-skip heuristic (two gates, both required):
      that has not started assigning orderable parts is schematic-stage; DFM
      lint there is pure noise (and the frozen example corpus asserts zero
      diagnostics on such designs). Once one MPN appears, the whole pass runs.
+     M012 is the single exception and sits ABOVE this gate: whether the board
+     has a profile for the fab to cut is not a property of the BOM, and a
+     wired design with no parts emits an outline-less board at every stage.
 
 Part-identity heuristic (documented per plan): std.pcb features (TestPoint,
 Fiducial, MountingHole...) are PLAIN components WITHOUT kinds, so they are
@@ -93,16 +97,36 @@ def check_mfg(design: ir.Design, path: str = "<string>",
         return []  # unwired design: catalog/test context, stay silent
     if low is None:  # standalone use; the driver passes its single lower() result
         low, _ = lower(design, path)
+    diags: list[Diagnostic] = []
+
+    # ---- M012: no board outline can be derived (ONE warning) ----
+    # Above the BOM-stage gate on purpose. Whether anyone has started assigning
+    # orderable parts has nothing to do with whether the board has a profile for
+    # the fab to cut, and this is the one M-code that is not BOM lint. Asked of
+    # the emitter's own `board_extents`, so the verdict and the file cannot
+    # disagree: when this fires, `emit_kicad_pcb` writes an Edge.Cuts layer
+    # declaration with nothing on it — a gerber package no fab can quote.
+    from ohm.emit_kicad import board_extents
+
+    if board_extents(low) is None:
+        diags.append(Diagnostic(
+            "warning", "M012",
+            "no board outline: the design places no parts, so Ohm has no extents "
+            "to derive Edge.Cuts from — the emitted board declares the layer and "
+            "draws nothing on it, and a gerber package with no profile is not "
+            "orderable", _NO_SPAN, file=path,
+            help="instantiate the parts the board carries; the outline is the "
+                 "bounding box of their placed courtyards plus a 2mm margin"))
+
     comps = {c.name: c for c in design.components}
     kinds = {k.name: k for k in design.kinds}
     parts = [p for p in low.parts if p.component in comps]
     part_comp = {p.ref: comps[p.component] for p in parts}
     attrs_of = {p.ref: dict(p.attrs) for p in parts}  # incl. instance overrides
     if not any("mpn" in a or "dnp" in a for a in attrs_of.values()):
-        return []  # pre-BOM design: no DFM lint yet (gate 2, see docstring)
+        return diags  # pre-BOM design: no DFM lint yet (gate 2, see docstring)
     lineage_of = {c.name: _lineage(c, kinds) for c in design.components}
     pins_of = {c.name: {pin.name: pin for pin in c.pins} for c in design.components}
-    diags: list[Diagnostic] = []
 
     # ---- M001: BOM lines with no mpn and no dnp (summary, PCB features exempt) ----
     no_mpn = [p.ref for p in parts

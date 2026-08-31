@@ -20,6 +20,7 @@ import pytest
 from ohm.driver import compile_source
 from ohm.emit_allegro import PINUSE, _seg, emit_allegro
 from ohm.emit_netlist import emit_netlist
+from ohm.formats import REGISTRY, _PST_VERSION
 from ohm.resolve import VALID_ROLES
 
 SRC = """board demo:
@@ -70,6 +71,40 @@ def test_the_three_files_allegro_asks_for(files):
     assert files["pstxprt.dat"].startswith("FILE_TYPE=EXPANDEDPARTLIST;")
     assert files["pstxnet.dat"].startswith("FILE_TYPE = EXPANDEDNETLIST;")
     assert all(text.rstrip().endswith("END.") for text in files.values())
+
+
+def test_pst_version_is_the_string_a_real_orcad_triplet_carries(files):
+    """PST_VERSION is the one format-version token in this triplet, and it is the
+    directive Allegro's own logic importer string-matches against — so unlike
+    everything else this emitter generates, it is not derived from Ohm's IR at
+    all. It is copied verbatim from a real OrCAD-written pstxprt.dat
+    (ohm/emit_allegro.py:1-21, ohm/formats.py:88-93); inventing a plausible-looking
+    value here would not fail loudly, it would just fail to import."""
+    assert f" PST_VERSION='{_PST_VERSION}';" in files["pstxprt.dat"]
+    assert _PST_VERSION == "PST_HDL_CENTRIC_VERSION_0"
+
+
+def test_file_type_header_lines_are_exact_including_the_one_that_looks_like_a_typo(files):
+    """All three FILE_TYPE lines, pinned to their exact text rather than merely
+    their prefix (the existing .startswith checks in
+    test_the_three_files_allegro_asks_for already cover the prefix). pstxnet.dat's
+    line carries spaces around the `=` — 'FILE_TYPE = EXPANDEDNETLIST;' — while
+    pstchip.dat's and pstxprt.dat's do not. That asymmetry looks like a typo but is
+    copied verbatim from a real OrCAD-written triplet (ohm/emit_allegro.py:1-21)
+    and is deliberate: normalizing it to match the other two would produce a file
+    that no longer matches what real Allegro-adjacent tooling writes."""
+    assert files["pstchip.dat"].splitlines()[0] == "FILE_TYPE=LIBRARY_PARTS;"
+    assert files["pstxprt.dat"].splitlines()[0] == "FILE_TYPE=EXPANDEDPARTLIST;"
+    assert files["pstxnet.dat"].splitlines()[0] == "FILE_TYPE = EXPANDEDNETLIST;"
+
+
+def test_allegro_version_stamp_matches_the_formats_registry(files):
+    """ohm/formats.py is the one place PST_VERSION is supposed to be decided, and
+    ohm/emit_allegro.py imports it rather than defining its own literal. This pins
+    the emitted directive to that registry entry so the two cannot drift apart."""
+    entry = next(f for f in REGISTRY if f.constant == "_PST_VERSION")
+    assert entry.artifact == "Allegro pstxprt.dat" and entry.owner == "ohm.emit_allegro"
+    assert f" PST_VERSION='{entry.value}';" in files["pstxprt.dat"]
 
 
 def test_every_primitive_block_is_closed(files):
