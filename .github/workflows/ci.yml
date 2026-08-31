@@ -268,9 +268,65 @@ jobs:
   # The claim, with provenance. "Verified through 10.0.5" should be a file
   # a machine wrote, not a sentence someone typed.
   # ------------------------------------------------------------------
+  # ------------------------------------------------------------------
+  # The determinism invariant, measured across platforms for the first time.
+  #
+  # Page 8 of the architecture document promises that a build is "reproducible
+  # forever: no network, no clock, no subprocess, no solver in the compiler, so
+  # the same source is the same bytes on any machine, any day." The suite has
+  # always checked the WITHIN-machine half — test_double_build_byte_identical
+  # rebuilds and compares on whatever machine is running — and never the
+  # ACROSS-machine half, which is the half the invariant is actually about and
+  # the half a float, an unsorted set, os.linesep or a locale-dependent encode
+  # can break without any single machine noticing.
+  #
+  # No KiCad, no image pull, so it runs on every PR: this is the gate most likely
+  # to catch a determinism regression at the moment it is introduced.
+  # ------------------------------------------------------------------
+  determinism:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Hash every artifact Ohm can emit
+        # Every emit kind, not just `all` — `all` covers netlist, kicad, zen and
+        # constraints, while package (which carries the STEP body), eagle, altium
+        # and allegro are opt-in. A determinism gate that silently skipped the
+        # binary formats would be checking the easy half.
+        run: python tools/emit_manifest.py --out manifest-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest-${{ matrix.os }}
+          path: manifest-${{ matrix.os }}.txt
+
+  determinism-compare:
+    needs: [determinism]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-*
+          merge-multiple: true
+      - name: The three platforms must agree byte for byte
+        # A differing hash means one platform wrote different bytes for the same
+        # source. The tool prints which artifact and both hashes, because "the
+        # manifests differ" is not actionable and "divider.kicad_sch differs
+        # between ubuntu and windows" is.
+        run: |
+          ls -l manifest-*.txt
+          python tools/emit_manifest.py --check manifest-*.txt
+
   certify:
     if: github.event_name != 'pull_request'
-    needs: [kicad, v007, fpdata]
+    needs: [kicad, v007, fpdata, determinism-compare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -282,6 +338,7 @@ jobs:
             echo "run:     ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "kicad:   7.0.11, 8.0.9, 9.0.9, 10.0.5 — emit, libraries, read-back, plot"
             echo "v007:    10.0.5 — pcbnew in-process (ubuntu-24.04 PPA)"
+            echo "determ:  ubuntu, windows, macos — all eight emit kinds, byte-identical"
             echo "not run: the geometry gate at 7, 8 and 9 — pcbnew is a compiled"
             echo "         extension built against each image's own Python, not Ohm's 3.12"
           } > kicad-certification.txt
