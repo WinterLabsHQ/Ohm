@@ -78,9 +78,14 @@ library out of band. The footprint side now works the same way.
 
 - **Unknown footprint → abstain.** Users reference their own and third-party
   libraries. Guessing about those is how a checker earns the right to be ignored.
-- **Unknown major → abstain, never "clean".** KiCad 7 has no official container
-  image, so the table has no KiCad 7 data. A KiCad 7 target is *unchecked*, and
-  must be reported as such rather than silently passing.
+- **Unknown major → abstain, never "clean".** The table answers only for the
+  majors it was generated against (`kicad_majors`), and a target outside that
+  set is *unchecked*, reported as such rather than silently passing. This was
+  first written as "KiCad 7 has no official container image, so the table has no
+  KiCad 7 data", which stated a fact about Docker Hub that is **false** — see
+  the correction below. The rule itself is unchanged and does not depend on it:
+  a major with no dump is unanswerable whatever the reason, and the day KiCad 11
+  ships, the table abstains on 11 for exactly the same reason it abstained on 7.
 - **Renames are derived old→new only.** Ten of the 163 footprints MERGE two
   shield pads into one `SH`; the reverse direction is genuinely ambiguous after a
   merge, so it is not offered.
@@ -94,12 +99,50 @@ library out of band. The footprint side now works the same way.
   the emit, library, read-back and plot gates against 8.0.9, 9.0.9 and 10.0.5 in
   the official containers, with `OHM_REQUIRE_KICAD=1` so a skipped KiCad test
   fails the run instead of quietly passing it.
-- **KiCad 7 is the weak leg.** No container image exists below 8.0.4, so 7 is
-  certified by hand or not at all, and carries no pad data. If that is not
-  acceptable, the honest move is to raise the supported floor to 8 rather than
-  keep claiming a version nothing exercises.
+- **KiCad 7 is a measured leg like the others.** `.github/workflows/ci.yml`
+  runs the same gates in `kicad/kicad:7.0.11`. The supported floor stays at 7:
+  raising it to 8 was proposed here on the strength of a claim that turned out
+  to be false, and there is now no evidence-based reason to drop a version.
 - The table is a maintenance obligation: a new KiCad major means a new dump and a
   reviewed diff. The CI job makes that obligation visible rather than optional.
+
+## Correction — 2026-08-31
+
+This ADR asserted twice, as fact, that **no official KiCad container image
+exists below 8.0.4**. It does. `kicad/kicad` carries `7.0`, `7.0.8`, `7.0.9`,
+`7.0.10` and `7.0.11`; `kicad/kicad:7.0.11` is linux/amd64, 440 MB, pushed
+2024-02-23, and `Dockerfile.7.0-stable` in the same
+`gitlab.com/kicad/packaging/kicad-cli-docker` repo that builds the 8, 9 and 10
+images clones `kicad-symbols`, `kicad-footprints` and `kicad-templates` at the
+matching `7.0` branch. So KiCad 7 is containerised **with version-matched
+libraries**, which is the exact property decision 2 depends on, and on the same
+Debian 12 base as 8 and 9.
+
+The error came from reading page one of Docker Hub's tag listing, which is
+ordered by `last_updated` and returns 50 rows: 7.x was last pushed in February
+2024 and is not on it. `tools/check_kicad_tags.py` paginates the whole list and
+is what found this; it now runs in CI against every pinned tag, so the same
+mistake cannot be made by eye again.
+
+What follows, and what does not:
+
+- **The support floor stays at 7.** `SUPPORTED_KICAD = ("7", "8", "9", "10")`.
+  The proposal above to raise it to 8 rested entirely on the false claim.
+- **The CI matrix gains a 7.0.11 leg**, running the same emit, library,
+  read-back and plot gates as the other three, with no step excluded: every
+  `kicad-cli` subcommand those gates use predates KiCad 8.
+- **Decision 3's abstain rule is unaffected.** It was always a rule about
+  majors the table has no dump for; only the example was wrong. The 7 leg dumps
+  KiCad 7's pad ids like every other leg, and the CI `fpdata` job fails unless
+  the committed table and the matrix name the same majors — so the two move
+  together. Where the table has no data, it still abstains, and that is the rule
+  behaving correctly rather than a gap.
+- **The V007 geometry gate still runs at one version.** That constraint is the
+  `pcbnew` Python ABI, was measured, and has nothing to do with image tags.
+
+Kept as a dated section rather than folded into the text above, because a
+version policy that quietly rewrites what it once asserted about the outside
+world is exactly the document nobody can trust the next time it says "measured".
 
 ## Alternatives rejected
 

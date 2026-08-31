@@ -26,7 +26,7 @@ several of the decisions below are decided *by* them.
 |---|---|---|---|
 | 01 | [Baseline and gate hygiene](01_baseline_and_gates.md) | 1 | done |
 | 02 | Version registry (`ohm/formats.py`) | 2 | pending |
-| 03 | KiCad floor → 8 (`cli.py`, `project.py`, docs) | 3, 7 | pending |
+| 03 | ~~KiCad floor → 8~~ **withdrawn** — floor stays at 7, 7.0.11 joins the matrix | 3, 7 | see decision 1 |
 | 04 | Environment discovery (`kicad_env.py`) | 4 | pending |
 | 05 | Pad translation and the shipped table (`lower.py`, S012, `fpdata/`) | 5 | pending |
 | 06 | The four KiCad stamps (`emit_kicad.py`, `pkggen/`) | 6 | pending |
@@ -52,10 +52,27 @@ several of the decisions below are decided *by* them.
 
 ## The four decisions this round rests on
 
-1. **The KiCad floor rises to 8.** No official container image exists below
+1. ~~**The KiCad floor rises to 8.** No official container image exists below
    8.0.4, so KiCad 7 had no CI leg, no pad data and no pad translation — a
    `--target-kicad 7` build was *unchecked*, not *checked and clean*. ADR-021
-   itself recommended this. Every supported version is now measured.
+   itself recommended this. Every supported version is now measured.~~
+
+   **WITHDRAWN, 2026-08-31 — the premise was false.** `kicad/kicad:7.0.11`
+   exists (linux/amd64, 440 MB, pushed 2024-02-23) and is built by
+   `Dockerfile.7.0-stable` in the same `kicad-cli-docker` repo as the 8, 9 and 10
+   images, cloning `kicad-symbols` and `kicad-footprints` at the matching `7.0`
+   branch — so KiCad 7 is containerised *with version-matched libraries*, which
+   is the exact property this whole strategy rests on. The claim came from
+   reading page one of Docker Hub's tag listing, which is ordered by
+   `last_updated` and returns 50 rows; 7.x last moved in February 2024.
+   `tools/check_kicad_tags.py` paginates and now runs in CI against every pin.
+
+   **So: the floor stays at 7.** `SUPPORTED_KICAD = ("7", "8", "9", "10")` is
+   unchanged, ADR-021's recommendation to raise it is withdrawn there too, and
+   the `kicad` matrix is **7.0.11, 8.0.9, 9.0.9, 10.0.5** with no step excluded
+   — every `kicad-cli` subcommand the gates use predates KiCad 8. Every
+   supported version really is measured now, which is what decision 1 wanted;
+   dropping one was never the only way to get it.
 2. **The KiCad version policy extends to every emitted format** (ADR-022):
    *write the oldest stamp a current reader accepts; bump only when a reader
    proves the new one is needed.* Two bumps have evidence; the rest are recorded

@@ -509,10 +509,11 @@ with no `--output`; the read-back gate therefore falls back to `pcbnew`
 Load/Save, which every version ships. The KiCad 10 image is Debian 13 / Python
 3.13, not bookworm / 3.11 like 8 and 9.
 
-**Not proven, and said so in the README:** KiCad 7 (no container image exists
-below 8.0.4, so it is hand-verified and carries no pad data), V007 at more than
-one version (pcbnew is built against the distro's Python), and the workflow YAML
-itself running on a GitHub runner. Separately, worth its own issue: **Ohm's
+**Not proven, and said so in the README:** KiCad 7 (~~no container image exists
+below 8.0.4, so it is hand-verified and carries no pad data~~ — **the first half
+of that is false; corrected 2026-08-31, see the section at the end of this
+log**), V007 at more than one version (pcbnew is built against the distro's
+Python), and the workflow YAML itself running on a GitHub runner. Separately, worth its own issue: **Ohm's
 boards carry no `Edge.Cuts` outline**, so the gerber package is not orderable
 as-is — found while proving the plot claim.
 
@@ -553,3 +554,49 @@ design; this log is where the deviation is recorded, per the standing ritual.
 The language and compiler are no longer the open half of D6 — the boundary that
 survives is the one that always mattered: Meridian and the convergence solver are
 separate products consuming the `shared/` seam, never in this repo.
+
+## KiCad 7 was containerised all along (2026-08-31)
+
+A correction, recorded rather than quietly applied, because five files stated it
+as fact and one of them turned it into an `exit 2`.
+
+**The claim.** "No official KiCad container image exists below 8.0.4." It
+appeared in `KICAD_CI_PLAN.md` (four times, once as a "hard ceiling"),
+`KICAD_CI_IMPLEMENTATION.md`, ADR-021 (twice), `README.md`, this log, the
+`ci.yml` matrix comment and `tests/kicad_in_docker.sh`, which rejected any 7.x
+before it reached `docker`.
+
+**The fact.** `kicad/kicad` carries `7.0`, `7.0.8`, `7.0.9`, `7.0.10` and
+`7.0.11`. `kicad/kicad:7.0.11` is linux/amd64, 440 MB, pushed 2024-02-23.
+`Dockerfile.7.0-stable`, in the same `kicad-cli-docker` repo that builds the 8, 9
+and 10 images, clones `kicad-symbols`, `kicad-footprints` and `kicad-templates`
+at the matching `7.0` branch — so the property the whole container strategy rests
+on, *the binary and the libraries are the same version by construction*, holds at
+7 exactly as it does at 8, 9 and 10. Debian 12 base, like 8 and 9, so the
+uv-installs-3.12 step needed no change.
+
+**How it went wrong.** Docker Hub's tag listing is ordered by `last_updated` and
+returns 50 rows per page. 7.x last moved in February 2024, so it is not on page
+one, and page one is what somebody looked at. It was then copied from document to
+document without being re-checked, which is the failure mode this repo's own
+"corrections forced by measurement" habit exists to interrupt — and did not,
+because nothing re-measured it. `tools/check_kicad_tags.py` paginates properly
+and is what found it; it now runs in CI (`tags` job) against every pinned tag, so
+the same mistake cannot be made by eye a second time.
+
+**What changed.** The floor stays at **7** — `SUPPORTED_KICAD = ("7","8","9",
+"10")` is unchanged, and the proposal in ADR-021 and `KICAD_CI_PLAN.md` to raise
+it to 8 is withdrawn, since it rested entirely on the false claim. The `kicad`
+matrix is now **7.0.11, 8.0.9, 9.0.9, 10.0.5** with no step excluded and no step
+conditional: every `kicad-cli` subcommand the gates use — `sch export netlist`,
+`sch export pdf`, `pcb export pos`, `pcb export gerbers`, `pcb export drill`,
+`sym upgrade` — predates KiCad 8. `pcb upgrade` is still KiCad 10 only, so the
+read-back gate re-saves through `pcbnew` at 7 as it already does at 8 and 9.
+
+**The pad table follows.** The 7 leg dumps KiCad 7's pad ids like every other
+leg, and the `fpdata` job rebuilds the table from every matrix dump and fails on
+any difference — so a 7 leg and a `pads.json.gz` carrying major 7 have to land
+together, in either order, and the job is loud if they do not. Wherever the table
+has no data for a major, `ohm/fpdata/__init__.py` abstains and S012 reports
+*unchecked* rather than clean; that was never a statement about KiCad 7 in
+particular.

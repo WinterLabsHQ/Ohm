@@ -17,6 +17,11 @@ MICROSD = "Connector_Card:microSD_HC_Hirose_DM3AT-SF-PEJM5"
 # removed from KiCad's own libraries after 8 — a different, more serious defect
 # than a renamed pad, and the table records it as absent rather than unknown
 REMOVED = "Button_Switch_SMD:SW_SPST_EVQP2"
+# the opposite direction: KiCad ADDED this after 7, so on a KiCad 7 target it is
+# missing for a reason that needs the opposite fix from a removal. 728 footprints
+# are in this class; Ohm's own stdlib named one of them until 2026-08-31.
+ADDED_AFTER_7 = ("TerminalBlock_CUI:"
+                 "TerminalBlock_CUI_TB007-508-02_1x02_P5.08mm_Horizontal")
 
 SRC = """component MicroSD:
     package = "{fp}"
@@ -72,10 +77,44 @@ def test_the_loader_abstains_on_an_unknown_footprint():
 
 
 def test_the_loader_abstains_on_an_unknown_major():
-    # KiCad 7 has no data in the table; abstaining is the only honest answer
-    assert "7" not in fpdata.kicad_majors()
-    assert fpdata.pads(MICROSD, "7") is None
-    assert not fpdata.present_in(MICROSD, "7")
+    """A major the table has no dump for is UNKNOWN, never clean.
+
+    This test used KiCad 7 as its unknown, on the premise that 7 could not be
+    dumped because no container image existed below 8.0.4. That premise was
+    false — `kicad/kicad:7.0.11` is real — and the table now carries 7 data, so
+    the case moved to KiCad 11. The rule never depended on the example: a major
+    with no dump is unanswerable whatever the reason it has no dump.
+    """
+    assert "11" not in fpdata.kicad_majors()
+    assert fpdata.pads(MICROSD, "11") is None
+    assert not fpdata.present_in(MICROSD, "11")
+    assert fpdata.absence(MICROSD, "11") is None      # unknown, not "removed"
+
+
+def test_every_supported_kicad_is_covered_by_the_table():
+    """The table must answer for every version `--target-kicad` accepts.
+
+    While these two sets disagreed, a target Ohm advertised as supported was one
+    S012 silently abstained on — which is how Ohm's own standard library came to
+    name a connector footprint that KiCad 7 does not have, on the DEFAULT target,
+    with every gate green.
+    """
+    from ohm.cli import SUPPORTED_KICAD
+    assert set(fpdata.kicad_majors()) == set(SUPPORTED_KICAD)
+
+
+def test_absence_tells_added_later_from_removed():
+    """The two reasons a footprint can be missing need opposite fixes.
+
+    REMOVED means the part is gone and needs replacing. ADDED_LATER means the
+    part is fine and this KiCad is older than it. S012 called both "no longer
+    ships" until KiCad 7 data existed to tell them apart.
+    """
+    assert fpdata.absence(ADDED_AFTER_7, "7") == "added_later"
+    assert fpdata.absence(ADDED_AFTER_7, "10") is None       # present
+    assert fpdata.absence(REMOVED, "10") == "removed"
+    assert fpdata.absence(REMOVED, "8") is None              # present
+    assert fpdata.absence("MyLib:Thing", "10") is None       # unknown, not a verdict
 
 
 def test_the_loader_abstains_on_a_footprint_that_version_removed():

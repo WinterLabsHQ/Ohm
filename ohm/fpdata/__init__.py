@@ -121,6 +121,45 @@ def majors_lacking(footprint: str, pad: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def absence(footprint: str, major: str) -> str | None:
+    """WHY `footprint` is missing from KiCad `major` — "added_later", "removed",
+    "gap", or None if it is present (or the footprint/major is unknown).
+
+    The distinction is not pedantry, it is the difference between two opposite
+    instructions to the author. A footprint KiCad REMOVED means "this part is
+    gone, name its replacement". A footprint KiCad had not ADDED YET means "this
+    part is fine, your KiCad is older than it" — and the fix is to upgrade KiCad
+    or pick a footprint that predates it, not to go hunting for a removal that
+    never happened.
+
+    Both directions are real and neither is rare. Against the shipped table:
+    **728** footprints exist in KiCad 8, 9 and 10 but not in 7 (added since), and
+    **379** that KiCad 7 shipped are gone by 10 (removed). S012 called both "no
+    longer ships" until KiCad 7 data existed to make the difference visible — and
+    the first thing that data found was Ohm's own standard library naming a
+    connector footprint added after KiCad 7, on the DEFAULT target.
+
+    "gap" is the honest answer for a footprint present on both sides of `major`
+    but not in it. Nothing in the shipped table exhibits it today; it is here so
+    that a future removal-and-reinstatement is reported as the odd thing it is
+    rather than being forced into one of the two clean stories.
+    """
+    if not known(footprint) or major not in kicad_majors():
+        return None
+    if present_in(footprint, major):
+        return None
+    live = [m for m in kicad_majors() if present_in(footprint, m)]
+    if not live:                       # known to the table, present in no major
+        return "removed"               # cannot arise from _merge, kept total
+    order = {m: i for i, m in enumerate(kicad_majors())}
+    here = order[major]
+    if here < min(order[m] for m in live):
+        return "added_later"
+    if here > max(order[m] for m in live):
+        return "removed"
+    return "gap"
+
+
 def summarise(footprint: str, major: str, limit: int = 12) -> str:
     """A short, readable rendering of a footprint's pads, for a diagnostic."""
     have = pads(footprint, major)

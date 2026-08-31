@@ -153,10 +153,11 @@ signoff — see [`CHANGELOG.md`](CHANGELOG.md).
 
 Ohm writes the KiCad 7 file format, and KiCad reads it forward. That is
 **measured, not assumed**: CI runs the emit, library, read-back and plot gates
-inside the official KiCad containers at **8.0.9, 9.0.9 and 10.0.5**, with a
-switch that makes a skipped KiCad test fail the run rather than pass it quietly.
-KiCad 7 has no published container image, so it is verified by hand and carries
-no footprint-pad data — unchecked, not checked and clean.
+inside the official KiCad containers at **7.0.11, 8.0.9, 9.0.9 and 10.0.5** —
+the whole supported range — with a switch that makes a skipped KiCad test fail
+the run rather than pass it quietly. The in-process geometry gate (V007) runs at
+10.0.5 only, because `pcbnew` is a compiled extension built against each
+distribution's own Python.
 
 Where KiCad renames a pad between releases — it moved shield and shell pads to
 `SH` across 163 footprints in KiCad 10 — `--target-kicad` writes that version's

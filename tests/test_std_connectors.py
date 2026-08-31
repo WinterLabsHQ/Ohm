@@ -141,6 +141,47 @@ def test_pad_ids_spot_checks():
     assert cc_pads <= _pads_on_disk(comps["CoinCellHolder"].package)
 
 
+def test_every_stdlib_footprint_exists_in_every_supported_kicad():
+    """A stdlib footprint is a GENERIC placeholder, so it has to exist in every
+    KiCad Ohm supports — otherwise a standard part binds to a footprint the
+    user's library does not have, and the pin arrives unconnected.
+
+    This gate did not exist, and two things had already slipped through it. The
+    first was caught by hand: `TerminalBlock_bornier-*` was renamed by KiCad 9
+    and fixed one part at a time. The second was invisible until KiCad 7 pad data
+    existed — `TerminalBlock_CUI:*` was added to KiCad's libraries AFTER 7, so on
+    the DEFAULT target both screw-terminal parts named a footprint the user did
+    not have, with every gate green. Fixing the two parts again would have left
+    the third instance to be found by whoever hits it; this is the rule instead.
+
+    Silent on `generate(...)` packages, which Ohm builds itself, and on any
+    library the shipped table does not know — a third-party footprint is
+    unknown, not wrong (ADR-021 section 3).
+    """
+    from ohm import fpdata
+
+    majors = fpdata.kicad_majors()
+    assert majors, "the shipped pad table must cover at least one KiCad"
+
+    offenders = []
+    for src in sorted((Path(ohm.__file__).parent / "std").glob("*.ohm")):
+        for lineno, line in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
+            m = re.search(r'package\s*=\s*"([^"]+)"', line)
+            if not m:
+                continue
+            fp = m.group(1)
+            if ":" not in fp or not fpdata.known(fp):
+                continue
+            missing = tuple(x for x in majors if not fpdata.present_in(fp, x))
+            if missing:
+                why = ", ".join(f"KiCad {x} ({fpdata.absence(fp, x)})" for x in missing)
+                offenders.append(f"{src.name}:{lineno} {fp} -> missing in {why}")
+
+    assert not offenders, (
+        "stdlib footprints must exist in every supported KiCad:\n  "
+        + "\n  ".join(offenders))
+
+
 def test_example_power_input_builds_clean(tmp_path, capsys):
     rc = cli_main(["build", "--strict", "--emit", "netlist",
                    str(EXAMPLE), "-o", str(tmp_path)])

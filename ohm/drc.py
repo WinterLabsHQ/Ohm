@@ -4,8 +4,9 @@ ADR-011 makes `ohm signoff` verify a routed board against the SOURCE, and keeps
 `ohm/signoff.py` pure (no I/O, no subprocess, N1). Geometry — clearance, silk
 over pads, courtyard overlap, board outline — is a property of the board alone,
 so signoff delegated it. It delegated it to `kicad-cli pcb drc`, a subcommand
-that **does not exist in KiCad 7**, the oldest KiCad Ohm supports: the advice was
-unrunnable there, so in practice nothing checked geometry at all.
+that **does not exist in KiCad 7**, still the oldest KiCad Ohm supports
+(`ohm.cli.SUPPORTED_KICAD`): the advice was unrunnable there, so in practice
+nothing checked geometry at all.
 
 Every KiCad from 8 onwards does ship `kicad-cli pcb drc`, but this module stays
 on the Python route deliberately. `pcbnew.WriteDRCReport` has existed since
@@ -34,14 +35,54 @@ from pathlib import Path
 from ohm.diagnostics import Diagnostic, Span
 
 # KiCad rule ids whose violations are NOT board defects in Ohm's flow.
+#
+# A rule id is a VERSION-SENSITIVE key. KiCad renames them between releases —
+# KiCad 10 renamed the ERC rule `label_dangling` to `isolated_pin_label`, which
+# is why `ohm/emit_kicad_pro.py` now writes both spellings — and a renamed id
+# drops out of this set in silence. The day that happens, a finding Ohm has
+# already judged harmless starts failing the geometry gate as a warning or an
+# error, and nothing in the output points at the rename as the cause.
+#
+# So this set is a UNION over every KiCad Ohm supports (`ohm.cli.SUPPORTED_KICAD`
+# — 7, 8, 9, 10), not a snapshot of the one that happened to be installed, and
+# each entry records the versions it was OBSERVED under rather than the versions
+# it is assumed to hold for. A union is the only classification that can be
+# right here: a DRC report carries no version stamp (`WriteDRCReport` writes a
+# date and a violation count, nothing more), so at classification time Ohm does
+# not know which KiCad wrote the text it was handed and cannot pick a spelling.
+# `tests/test_kicad_rule_ids.py` fails if a spelling is dropped.
+
+# Observed: KiCad 7 (the report text in tests/test_drc_gate.py is a real KiCad 7
+# run), and unchanged through 8, 9 and 10.
 # "unconnected" on a board Ohm emitted means "not routed yet", which is the
 # expected state until a router runs; reporting it as an error would make the
 # gate cry wolf on every board.
 _INFO_RULES = {"unconnected_items"}
+# Observed: KiCad 7 (same report).
 # Ohm embeds full footprint geometry in the board; KiCad still wants a
 # fp-lib-table to resolve the ORIGINAL library, which a generated board has no
 # reason to carry. Not a defect in the board.
 _INFO_RULES |= {"lib_footprint_issues"}
+# Observed: KiCad 9 and 10, where KiCad 10 reports 39 MORE of these than KiCad 9
+# on the same FMUv2 board (recorded in CHANGELOG.md and PROGRESS.md under the
+# KiCad 10.0.5 certification, and previously nowhere in code). Info for exactly
+# the reason `lib_footprint_issues` is info, and the changelog's own reading of
+# those 39 is that reason stated: "library-resolution and rule-naming
+# differences in an environment with no footprint tables configured, not
+# findings about the design". A footprint that cannot be linked back to the
+# library it came from is not a geometry defect — the geometry is already in the
+# board file, and V007 gates geometry. Leaving it unclassified would mean the
+# same board passes the gate on KiCad 9 and fails it on KiCad 10 over a library
+# table neither KiCad was given.
+#
+# NOT established, and deliberately not asserted anywhere: whether KiCad 10
+# RENAMED `lib_footprint_issues` to this or whether the two are distinct rules
+# that both fire in this environment. The recorded evidence is a count on one
+# board, not a mapping, and no KiCad is installed on the machine this was
+# written on to settle it. It does not change the verdict — both spellings are
+# info, so the union is correct either way — but it would matter the day either
+# one is promoted to a defect, and that is the day to go and find out.
+_INFO_RULES |= {"footprint_link_issues"}
 
 # where distros put KiCad's Python bindings for the system interpreter
 _DIST_PACKAGES = (

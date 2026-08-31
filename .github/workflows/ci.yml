@@ -35,8 +35,23 @@ jobs:
   # construction — the failure mode where a KiCad 10 binary is checked
   # against KiCad 8 libraries cannot occur.
   #
-  # No KiCad 7 leg: the official images begin at 8.0.4 and no 7.x tag has
-  # ever existed. KiCad 7 is certified against a local install or not at all.
+  # KiCad 7 IS containerised, contrary to what this file and four other
+  # documents asserted until 2026-08-31: `kicad/kicad:7.0.11` exists (pushed
+  # 2024-02-23, linux/amd64, 440 MB), built from `Dockerfile.7.0-stable` in the
+  # same kicad-cli-docker repo as 8, 9 and 10 and cloning kicad-symbols and
+  # kicad-footprints at the matching `7.0` branch — so the binary and the
+  # libraries agree by construction here too. The claim came from reading page
+  # one of Docker Hub's tag listing, which is ordered by `last_updated` and
+  # returns 50 rows; 7.x was last pushed in February 2024 and falls off it.
+  # `tools/check_kicad_tags.py` paginates properly and is what found the error.
+  #
+  # What the 7 leg covers: every gate below, with no step excluded and no step
+  # made conditional. `sch export netlist`, `pcb export pos`, `pcb export
+  # gerbers`, `pcb export drill`, `sch export pdf` and `sym upgrade` all predate
+  # KiCad 8, so there is no capability here that 7 lacks. What it does NOT
+  # cover: `kicad-cli pcb upgrade`, which is KiCad 10 only — the read-back gate
+  # re-saves through `pcbnew` at 7 exactly as it already does at 8 and 9 — and
+  # the in-process geometry gate, which is one version everywhere (`v007`).
   # ------------------------------------------------------------------
   kicad:
     if: github.event_name != 'pull_request'
@@ -45,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false          # one version failing must not hide the others
       matrix:
-        kicad: ["8.0.9", "9.0.9", "10.0.5"]
+        kicad: ["7.0.11", "8.0.9", "9.0.9", "10.0.5"]
     env:
       # A skipped test is not a passed test. Without this the job is green when
       # KiCad is missing, which is the exact failure this job exists to prevent:
@@ -65,9 +80,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Python 3.12
-        # The image is Debian 12 bookworm -> Python 3.11, and Ohm is
-        # requires-python >= 3.12, so the image interpreter cannot install it.
-        # uv fetches a standalone 3.12 and is already this repo's lock tool.
+        # KiCad 7, 8 and 9 are Debian 12 bookworm -> Python 3.11; KiCad 10 is
+        # Debian 13 -> Python 3.13. Ohm is requires-python >= 3.12, so no image
+        # interpreter in the matrix will do: 3.11 is too old and 3.13 is not the
+        # version the rest of the repo is tested on. uv fetches a standalone
+        # 3.12 and is already this repo's lock tool.
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -132,6 +149,14 @@ jobs:
         # Feeds the `fpdata` job below. Ohm ships a table of these because a
         # `package = "Lib:Footprint"` reference emits a pad-LESS stub and only
         # the pad id travels — so a pad KiCad renamed silently unbinds a pin.
+        #
+        # Runs at 7 as well, deliberately. The matrix and the committed table
+        # must name the same majors: the `fpdata` job below rebuilds the table
+        # from every dump this matrix produced and fails on any difference, so a
+        # 7 leg without 7 in `ohm/fpdata/pads.json.gz` and a table with 7 that
+        # no leg dumps BOTH report the table out of date. That is the gate
+        # working — a matrix version whose libraries nothing has read is exactly
+        # the state it exists to make visible — so the two land together.
         run: |
           python3 tools/gen_fpdata.py dump "${{ matrix.kicad }}" \
             "pads-$(echo '${{ matrix.kicad }}' | cut -d. -f1).json"
@@ -214,6 +239,32 @@ jobs:
           echo "pad table matches the installed libraries at every matrix version"
 
   # ------------------------------------------------------------------
+  # The matrix pins images; KiCad keeps releasing. A pin is only as honest as
+  # it is current — the day KiCad ships a release that has an image and the
+  # matrix does not name it, this repo certifies a version nobody runs any more
+  # and says nothing about the one they do. Nothing noticed that before, and
+  # nothing would have noticed when the image appeared.
+  #
+  # Kept OFF the certify chain on purpose. A KiCad release must not invalidate
+  # the certification of what actually ran; drift is a separate signal that says
+  # "bump the matrix", not "the run proved nothing". Kept off the PR path for
+  # the same reason as the KiCad jobs: someone else's release is not a reason
+  # to fail a contributor's pull request.
+  # ------------------------------------------------------------------
+  tags:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is every pinned image still the newest for its major?
+        # Exit 1 = a newer image exists (bump the matrix, re-certify, regenerate
+        # the pad table — a KiCad release is exactly when a library rename
+        # lands). Exit 2 = a pin does not exist at all, or Docker Hub could not
+        # be read; the first would mean the matrix names an image nobody can
+        # pull and the job never ran. stdlib-only, so no venv is needed.
+        run: python3 tools/check_kicad_tags.py 7.0.11 8.0.9 9.0.9 10.0.5
+
+  # ------------------------------------------------------------------
   # The claim, with provenance. "Verified through 10.0.5" should be a file
   # a machine wrote, not a sentence someone typed.
   # ------------------------------------------------------------------
@@ -229,9 +280,10 @@ jobs:
             echo "commit:  ${GITHUB_SHA}"
             echo "date:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "run:     ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "kicad:   8.0.9, 9.0.9, 10.0.5 — emit, libraries, read-back, plot"
+            echo "kicad:   7.0.11, 8.0.9, 9.0.9, 10.0.5 — emit, libraries, read-back, plot"
             echo "v007:    10.0.5 — pcbnew in-process (ubuntu-24.04 PPA)"
-            echo "not run: 7.0.x — no official container image exists"
+            echo "not run: the geometry gate at 7, 8 and 9 — pcbnew is a compiled"
+            echo "         extension built against each image's own Python, not Ohm's 3.12"
           } > kicad-certification.txt
           cat kicad-certification.txt
       - uses: actions/upload-artifact@v4

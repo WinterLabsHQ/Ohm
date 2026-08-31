@@ -543,6 +543,17 @@ def main(argv: list[str] | None = None) -> int:
     p_sign.add_argument("board", help="the routed .kicad_pcb")
     p_sign.add_argument("--no-geometry", action="store_true",
                         help="skip the V007 geometry gate (KiCad's DRC engine)")
+    # The board being signed off was laid out in ONE KiCad, and its pads carry
+    # that KiCad's names. Without this flag signoff compiled the source with no
+    # target, so `pin SHIELD: pad=11` stayed "11" while a KiCad 10 board calls
+    # the same copper "SH" — and ohm/signoff.py skips a source pad the board
+    # does not have (it is a stub, not a mismatch), so the shield was not
+    # checked AT ALL. Not a false V001: silence, on the last gate before
+    # fabrication. The flag is the same one `ohm build` takes, and must be the
+    # same value that built the board.
+    p_sign.add_argument("--target-kicad", default=None,
+                        help="KiCad major version to target (default: ohm.toml 'target', "
+                             "else 7), which decides how footprint pad ids are read")
     p_sign.add_argument("--json-diagnostics", action="store_true")
 
     p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
@@ -588,15 +599,23 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_refactor(args)
 
     # framework-style discovery: bare `ohm build`/`ohm check` inside a project
-    # use ohm.toml's entry/out/target. An explicit file, -o, or --target-kicad
-    # always wins, and stays independent of ohm.toml when all are given.
-    if args.command in ("build", "check"):
+    # use ohm.toml's entry/out/target, and `ohm signoff` uses its target. An
+    # explicit file, -o, or --target-kicad always wins, and stays independent of
+    # ohm.toml when all are given.
+    if args.command in ("build", "check", "signoff"):
         from ohm import project
 
-        need_entry = args.file is None
+        need_entry = args.command != "signoff" and args.file is None
         need_out = args.command == "build" and args.out is None
-        if need_entry or need_out:
-            proj, perr = project.discover()
+        # `signoff` always names its source file, so under build's "only when
+        # already relying on the project" rule it would never look at ohm.toml at
+        # all — and the project file is exactly where a team records which KiCad
+        # it targets. It discovers from the SOURCE FILE's own directory rather
+        # than the cwd: the project that owns the design is the one that says
+        # which KiCad it is for, whatever directory the command was typed in.
+        if need_entry or need_out or args.command == "signoff":
+            proj, perr = project.discover(
+                Path(args.file).parent if args.command == "signoff" else None)
             if perr:
                 print(f"error: {perr}", file=sys.stderr)
                 return 1
@@ -612,11 +631,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.file = str(proj.root / proj.entry)
             if need_out:
                 args.out = str(proj.root / proj.out) if proj else "."
-            # honor ohm.toml's target only when already relying on the project
+            # honor ohm.toml's target when relying on the project (always, for
+            # signoff); the explicit flag was set before we got here, and wins
             if args.target_kicad is None and proj is not None:
                 args.target_kicad = _target_major(proj.target)
 
-    if args.command in ("build", "check"):
+    if args.command in ("build", "check", "signoff"):
         if args.target_kicad is None:
             args.target_kicad = "7"
         if args.target_kicad not in SUPPORTED_KICAD:
@@ -814,7 +834,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "signoff":
         from ohm.signoff import signoff
 
-        result = compile_source(source, args.file, emit=True)
+        # target_kicad is what makes the source model speak the board's pad
+        # vocabulary; without it signoff compared a KiCad 10 board against
+        # KiCad 7 pad names and quietly skipped every pad that had been renamed
+        result = compile_source(source, args.file, emit=True,
+                                target_kicad=args.target_kicad)
         _report(result, source, args.json_diagnostics)
         if not result.ok:
             return 1

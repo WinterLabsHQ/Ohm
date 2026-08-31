@@ -7,9 +7,32 @@ That audit graded every compatibility claim `proven` / `assumed` / `untested` /
 `broken`. This file answers the next question: **can the `assumed` cells be turned
 into proof of work by CI, what has to change first, and what does it cost?**
 
-Matrix scope: **KiCad 8.0.9, 9.0.9, 10.0.5**, via the official container.
-Nothing in the repo is changed by this file — it is a specification, not the
-workflow itself.
+Matrix scope as written: **KiCad 8.0.9, 9.0.9, 10.0.5**, via the official
+container. Nothing in the repo is changed by this file — it is a specification,
+not the workflow itself.
+
+> **Correction, 2026-08-31 — the "no 7.x image" ceiling was not real.**
+> This document asserts in four places that no official KiCad container image
+> exists below 8.0.4. That is **false**. `kicad/kicad` carries `7.0`, `7.0.8`,
+> `7.0.9`, `7.0.10` and `7.0.11`; `kicad/kicad:7.0.11` is linux/amd64, 440 MB,
+> pushed 2024-02-23, and `Dockerfile.7.0-stable` in the same
+> `gitlab.com/kicad/packaging/kicad-cli-docker` repo that builds the 8, 9 and 10
+> images clones `kicad-symbols`, `kicad-footprints` and `kicad-templates` at the
+> matching `7.0` branch — so fact 2 below ("the image ships the libraries,
+> version-matched") holds at 7 too, on the same Debian 12 base as 8 and 9.
+>
+> The mistake was reading page one of Docker Hub's tag listing, which is ordered
+> by `last_updated` and returns 50 rows: 7.x was last pushed in February 2024
+> and falls off it. `tools/check_kicad_tags.py` paginates the whole list, found
+> this, and now runs in CI against every pinned tag.
+>
+> Each affected passage below is corrected **in place and marked**, rather than
+> rewritten to look as though the error was never made — the same treatment the
+> plan's other four wrong predictions got in
+> [`KICAD_CI_IMPLEMENTATION.md`](KICAD_CI_IMPLEMENTATION.md)'s "Corrections to
+> the plan, forced by measurement". The live matrix is
+> **7.0.11, 8.0.9, 9.0.9, 10.0.5**; `.github/workflows/ci.yml` is the authority,
+> not this file.
 
 ---
 
@@ -23,13 +46,19 @@ One — the signoff read-back gap, F3, the audit's highest-value finding — tur
 to be closable with a single `kicad-cli pcb upgrade` call rather than the fixture
 surgery it looked like.
 
-The two ceilings are real and neither is worked around by trying harder:
+One of the two "ceilings" below was not a ceiling at all. The second is real
+and is not worked around by trying harder:
 
-1. **KiCad 7 cannot be containerised.** The official `kicad/kicad` image starts at
-   8.0.4. There is no 7.x tag, so `tests/kicad_in_docker.sh` — which the CHANGELOG
-   credits with verifying "7, 9.0.9 and 10.0.5" — can only ever have supplied the
-   9 and 10 legs. The 7 leg came from a local install, and in CI it stays a dated
-   manual claim or the supported floor moves to 8.
+1. ~~**KiCad 7 cannot be containerised.** The official `kicad/kicad` image starts
+   at 8.0.4. There is no 7.x tag, so `tests/kicad_in_docker.sh` — which the
+   CHANGELOG credits with verifying "7, 9.0.9 and 10.0.5" — can only ever have
+   supplied the 9 and 10 legs. The 7 leg came from a local install, and in CI it
+   stays a dated manual claim or the supported floor moves to 8.~~
+   **WRONG — corrected 2026-08-31, see the banner above.** `kicad/kicad:7.0.11`
+   exists and ships version-matched 7.0 libraries. `tests/kicad_in_docker.sh`
+   could always have supplied the 7 leg; it was this document's claim, copied
+   into an `exit 2` guard in that script, that stopped it. The supported floor
+   stays at **7** and the matrix has a 7.0.11 leg.
 2. **`pcbnew` is importable at exactly one version per runner.** It is a compiled
    CPython extension built against the host distro's Python. Ohm requires 3.12
    (`pyproject.toml:6`); the container is Debian 12 bookworm with Python **3.11**;
@@ -49,7 +78,7 @@ The two ceilings are real and neither is worked around by trying harder:
 | V007 geometry gate (`pcbnew.WriteDRCReport`) | PPA job on `ubuntu-24.04` | **partly** — one version, not the matrix |
 | `ohm doctor` finds the libraries (F2) | unit test on the resolver | **provable with no KiCad at all** |
 | `--target-kicad <N>` accepted (F1) | unit test | **provable with no KiCad at all** |
-| Anything at KiCad 7 | — | **not feasible** in this design |
+| Anything at KiCad 7 | `container: kicad/kicad:7.0.11` | **provable** — same gates as 8/9/10 (recorded here as "not feasible"; wrong, see the banner) |
 | "the drawing reads well" (D001–D004) | — | **not automatable**; stays advisory, by design |
 
 ---
@@ -60,9 +89,14 @@ Six facts established 2026-08-26. All six are claims about software outside this
 repo and can change; each is sourced so the next person can re-check rather than
 re-derive.
 
-1. **The image tags exist, from 8.0.4 up.** `kicad/kicad` carries `10.0.5`,
-   `10.0.4`, `10.0.2`–`10.0.0`, `9.0.9` down to `9.0.0`, and `8.0.9`–`8.0.4`, each
-   with `-full` and `-amd64` variants. No 7.x.
+1. **The image tags exist, from 7.0.8 up.** `kicad/kicad` carries `10.0.5`,
+   `10.0.4`, `10.0.2`–`10.0.0`, `9.0.9` down to `9.0.0`, `8.0.9`–`8.0.4`, and —
+   ~~No 7.x.~~ **corrected 2026-08-31** — `7.0.11`, `7.0.10`, `7.0.9`, `7.0.8`
+   and the rolling `7.0`, each with `-full` and `-amd64` variants. The 7.x tags
+   are simply old (last pushed 2024-02-23) and Docker Hub sorts its tag listing
+   by `last_updated`, 50 to a page, so they are not on page one — which is as
+   far as this line looked. Check with `tools/check_kicad_tags.py`, which
+   paginates, rather than by eye.
    ([hub.docker.com/r/kicad/kicad](https://hub.docker.com/r/kicad/kicad))
 2. **The image ships the libraries, version-matched.** The Dockerfile clones
    `kicad-symbols` and `kicad-footprints` at the same `$KICAD_VERSION` branch as
@@ -106,10 +140,17 @@ already uses (`uv.lock`) — but it has one consequence that is not fixable: the
 that runs pytest. Everything subprocess-shaped (`kicad-cli`) is unaffected;
 everything in-process (`ohm/drc.py:run_geometry_drc`) is.
 
-**No 7.x image.** Stated above. The alternative — `ppa:kicad/kicad-7.0-releases`
+~~**No 7.x image.** Stated above. The alternative — `ppa:kicad/kicad-7.0-releases`
 on `ubuntu-22.04` — pins a runner image GitHub will eventually retire, and 22.04's
 system Python is 3.10, so it could only ever cover the `kicad-cli` legs, never
-V007. Out of scope per the chosen matrix; recorded so the choice is visible.
+V007. Out of scope per the chosen matrix; recorded so the choice is visible.~~
+
+**Corrected 2026-08-31: there is a 7.x image, and no PPA is needed.** KiCad 7
+joins the container matrix on the same terms as 8 and 9 — Debian 12, Python 3.11
+in the image, uv-installed 3.12 for pytest, version-matched libraries under
+`/usr/share/kicad`. The observation about `ubuntu-22.04` and V007 remains true
+about that *alternative*, and is moot: nothing needs it. V007 is still one
+version, for the reason immediately below, which was never about image tags.
 
 **One version of V007.** Following from the two above. The `v007` job proves the
 geometry gate against KiCad 10 and nothing else. That is still strictly better
@@ -384,9 +425,9 @@ jobs:
             echo "commit:    ${GITHUB_SHA}"
             echo "date:      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "run:       ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "kicad:     8.0.9, 9.0.9, 10.0.5 (container, emit + read-back)"
+            echo "kicad:     7.0.11, 8.0.9, 9.0.9, 10.0.5 (container, emit + read-back)"
             echo "v007:      10.0.5 (ubuntu-24.04 PPA, pcbnew in-process)"
-            echo "not run:   7.0.x — no official container image exists"
+            echo "not run:   the geometry gate below 10 — pcbnew's Python ABI"
           } > kicad-certification.txt
           cat kicad-certification.txt
       - uses: actions/upload-artifact@v4
@@ -435,8 +476,11 @@ private repo that is real money; if it matters, drop `schedule` and keep tags +
 Stated plainly, because a CI badge that implies more than it checks is worse than
 no badge.
 
-- **KiCad 7.** No image, no job. Either the README's floor moves to 8, or the 7
-  claim is footnoted as last verified manually on a stated date.
+- ~~**KiCad 7.** No image, no job. Either the README's floor moves to 8, or the 7
+  claim is footnoted as last verified manually on a stated date.~~
+  **Corrected 2026-08-31:** there is an image and there is a job. The floor stays
+  at 7. What genuinely remains unproven at 7 is what is unproven at 8 and 9 too —
+  the in-process geometry gate, next bullet.
 - **V007 at 8 and 9.** One version only, for the Python-ABI reason above.
 - **That a gerber is correct.** The plot gate proves files are produced, not that a
   fab could build from them. Nothing short of a fabricated board proves that — the

@@ -22,15 +22,24 @@ use std.kinds
 # ---------- screw terminal blocks ----------
 # Generic 5.08 mm rising-clamp screw terminals (bornier). Pads 1..N read from
 # the .kicad_mod. Terminals carry whatever you wire through them: role=passive.
+#
+# The family here is Phoenix MKDS rather than CUI TB007 for one reason: a stdlib
+# footprint is a GENERIC placeholder, so it has to exist in every KiCad Ohm
+# supports, and CUI TB007 was added to KiCad's libraries after 7. On the default
+# target the part bound to a footprint the user's library does not have — the
+# same class of defect as the KiCad 10 shield renames (ADR-021), running the
+# other way in time. Invisible until KiCad 7 pad data existed, because until then
+# S012 abstained on 7. `tests/test_std_connectors.py` now gates the whole stdlib
+# on it, so this cannot come back for the next family someone picks.
 
 component TerminalBlock_2(Connector):
-    package = "TerminalBlock_CUI:TerminalBlock_CUI_TB007-508-02_1x02_P5.08mm_Horizontal"
+    package = "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2
 
 component TerminalBlock_3(Connector):
-    package = "TerminalBlock_CUI:TerminalBlock_CUI_TB007-508-03_1x03_P5.08mm_Horizontal"
+    package = "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-3-5.08_1x03_P5.08mm_Horizontal"
     designator_prefix = "J"
     pin P1: role=passive, pad=1
     pin P2: role=passive, pad=2

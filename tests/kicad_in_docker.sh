@@ -21,18 +21,31 @@ set -euo pipefail
 
 VERSION="${OHM_KICAD_VERSION:-10.0.5}"
 
-# The official images start at 8.0.4 — there is no 7.x tag and there never was.
-# Asking for one used to fail as an opaque "manifest unknown" from `docker pull`
-# midway through a test run, which reads as a broken harness rather than as the
-# fact it is. KiCad 7 can only be certified against a local install.
-case "$VERSION" in
-  7|7.*)
-    echo "kicad_in_docker: no official kicad/kicad image exists for KiCad ${VERSION}" >&2
-    echo "  (the published tags begin at 8.0.4). Certify KiCad 7 against a local" >&2
-    echo "  install instead: OHM_KICAD_CLI=/path/to/kicad-cli pytest ..." >&2
-    exit 2
-    ;;
-esac
+# KiCad 7 works here. This script used to `exit 2` on any 7.x with the
+# explanation that "the official images start at 8.0.4 — there is no 7.x tag and
+# there never was". That was wrong, and it is written down rather than quietly
+# deleted because the next person will otherwise re-derive it the same way.
+#
+# What is actually true (checked 2026-08-31): kicad/kicad carries 7.0, 7.0.8,
+# 7.0.9, 7.0.10 and 7.0.11. `kicad/kicad:7.0.11` is linux/amd64, 440 MB, pushed
+# 2024-02-23, and is built by `Dockerfile.7.0-stable` in the same
+# gitlab.com/kicad/packaging/kicad-cli-docker repo as the 8, 9 and 10 images —
+# cloning kicad-symbols, kicad-footprints and kicad-templates at the matching
+# `7.0` branch, so the binary and the libraries agree by construction exactly as
+# they do at the later versions.
+#
+# How the error happened: Docker Hub's tag listing is ordered by `last_updated`
+# and returns 50 rows per page. 7.x was last pushed in February 2024, so it is
+# not on page one, and page one is what somebody looked at. Re-check with
+# `python3 tools/check_kicad_tags.py 7.0.11 8.0.9 9.0.9 10.0.5`, which paginates
+# the whole list and is the tool that found this — not by eye, and not by
+# `docker pull`, whose "manifest unknown" answer is indistinguishable from a
+# typo.
+#
+# A version that genuinely has no image still fails as `docker pull`'s
+# "manifest unknown" midway through the run. That is deliberately not guarded
+# against here any more: a hardcoded list of which tags exist is precisely the
+# thing that went stale, and the tag checker above is the honest way to ask.
 
 IMAGE="kicad/kicad:${VERSION}"
 

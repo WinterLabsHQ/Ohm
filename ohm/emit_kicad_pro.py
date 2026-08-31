@@ -94,7 +94,31 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
             "meta": {"version": 0},
             "rule_severities": {
                 "endpoint_off_grid": "warning",
-                "label_dangling": "error",
+                # One rule, two spellings, both written on purpose: KiCad 10
+                # renamed `label_dangling` to `isolated_pin_label`. A .kicad_pro
+                # carries no KiCad version and Ohm serves 7 through 10 from ONE
+                # set of bytes (ohm.cli.SUPPORTED_KICAD), so the only way a
+                # single file can hold this severity on all four is to name the
+                # rule the way each of them spells it. Writing only
+                # `label_dangling`, which is what Ohm did until now, meant that
+                # on KiCad 10 the rule silently reverted to KiCad's default
+                # severity: the promise above held on 7/8/9 and quietly did not
+                # on the version the README certifies.
+                #
+                # Believed safe because KiCad's settings loader reads the
+                # severities it KNOWS out of this object rather than
+                # enumerating the object's members, so a key belonging to
+                # another release is not rejected, it is simply never looked at
+                # — the same forward/backward tolerance Ohm already leans on to
+                # write KiCad 7 files that KiCad 10 reads. NOT verified against
+                # a running KiCad: no gate in this repo puts a .kicad_pro in
+                # front of kicad-cli (the roundtrip and plot gates hand it a
+                # bare .kicad_sch/.kicad_pcb), and no KiCad was installed on the
+                # machine this was written on. If some KiCad is ever found to
+                # reject an unknown ERC key, this is the line to look at — and
+                # the fix is to emit per-target severities, not to drop one.
+                "isolated_pin_label": "error",   # KiCad 10 spelling
+                "label_dangling": "error",       # KiCad 7/8/9 spelling
                 "no_connect_connected": "error",
                 "no_connect_dangling": "warning",
                 "pin_not_connected": "error",

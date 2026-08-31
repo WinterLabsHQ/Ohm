@@ -20,7 +20,8 @@ from decimal import Decimal
 
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
-from ohm.fpdata import kicad_majors, known, majors_lacking, pads, present_in, renamed_to, summarise
+from ohm.fpdata import (absence, kicad_majors, known, majors_lacking, pads, present_in,
+                        renamed_to, summarise)
 from ohm.provenance import parse_source, pinmap_digest
 
 _NO_SPAN = Span(1, 1, 1, 1)
@@ -119,9 +120,11 @@ def _check_pad_loop(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
 def _fpdata_target(target_kicad: str | None) -> str | None:
     """The major to check against, or None to check against every known major.
 
-    A target the shipped table has no data for — KiCad 7, which has no official
-    container image to generate a table from — is not clean, it is unknown, and
+    A target the shipped table has no data for is not clean, it is unknown, and
     unknown has to fall back to reporting across the majors that ARE covered.
+    Every version in `SUPPORTED_KICAD` is covered today; this branch is what a
+    future KiCad 11 meets before someone regenerates the table, and what a caller
+    that reaches `lower()` directly rather than through the CLI meets.
     """
     return target_kicad if target_kicad in kicad_majors() else None
 
@@ -156,12 +159,34 @@ def _check_footprint_pads(comp: ir.ComponentDef, package: ir.Value | None, owner
     mapped = [(pin, pin.pad) for pin in comp.pins if pin.pad is not None]
     if target is not None:
         if not present_in(package, target):
-            diags.append(_d("error", "S012",
-                            f"{owner} uses footprint '{package}', which KiCad {target} "
-                            f"no longer ships", span, path,
-                            "KiCad removed this footprint from its own libraries: name the "
-                            "part's current footprint, or keep the old one in a library of "
-                            "your own and reference it from there"))
+            # WHY it is missing decides what the author should do, and the two
+            # answers are opposites. A footprint KiCad REMOVED means the part is
+            # gone and needs replacing; one KiCad had not ADDED YET means the part
+            # is fine and this KiCad is older than it. Saying "no longer ships" for
+            # both sent a reader hunting for a removal that never happened — which
+            # is what this said about Ohm's OWN standard library the moment KiCad 7
+            # pad data existed to tell the cases apart.
+            why = absence(package, target)
+            if why == "added_later":
+                first = next(m for m in kicad_majors() if present_in(package, m))
+                msg = (f"{owner} uses footprint '{package}', which KiCad {target} "
+                       f"does not ship yet — it arrives in KiCad {first}")
+                help_ = (f"this is a KiCad-version floor, not a wrong footprint: build "
+                         f"with --target-kicad {first} or newer, or name a footprint "
+                         f"KiCad {target} already has")
+            elif why == "gap":
+                msg = (f"{owner} uses footprint '{package}', which KiCad {target} "
+                       f"does not ship, though older and newer KiCads both do")
+                help_ = ("a footprint dropped and later reinstated is unusual enough to "
+                         "be worth checking by hand: confirm the name against the "
+                         "library on the machine that will do the layout")
+            else:
+                msg = (f"{owner} uses footprint '{package}', which KiCad {target} "
+                       f"no longer ships")
+                help_ = ("KiCad removed this footprint from its own libraries: name the "
+                         "part's current footprint, or keep the old one in a library of "
+                         "your own and reference it from there")
+            diags.append(_d("error", "S012", msg, span, path, help_))
             return
         have = pads(package, target)
         if have is None:

@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **fix(ci)**: **KiCad 7 is in the matrix — the image existed all along.** The
+  repo asserted in five places, as fact, that "no official KiCad container image
+  exists below 8.0.4", and `tests/kicad_in_docker.sh` turned that into an
+  `exit 2` on any 7.x. It is false: `kicad/kicad` carries `7.0`, `7.0.8`,
+  `7.0.9`, `7.0.10` and `7.0.11`, and `kicad/kicad:7.0.11` (linux/amd64, 440 MB,
+  pushed 2024-02-23) is built by `Dockerfile.7.0-stable` in the same
+  `kicad-cli-docker` repo as the 8/9/10 images, cloning `kicad-symbols` and
+  `kicad-footprints` at the matching `7.0` branch — so the version-matched
+  libraries that make the container strategy honest are there too.
+  - **How it went wrong**, since it was copied between documents without ever
+    being re-checked: Docker Hub's tag listing is ordered by `last_updated` and
+    returns 50 rows per page, 7.x last moved in February 2024, and page one is
+    what somebody looked at.
+  - The matrix is now **7.0.11, 8.0.9, 9.0.9, 10.0.5**, with no step excluded
+    and no step conditional — every `kicad-cli` subcommand the gates use
+    (`sch export netlist`, `sch export pdf`, `pcb export pos`,
+    `pcb export gerbers`, `pcb export drill`, `sym upgrade`) predates KiCad 8.
+    `pcb upgrade` is still KiCad 10 only, so the read-back gate re-saves through
+    `pcbnew` at 7 as it already does at 8 and 9.
+  - **The supported floor stays at 7.** `KICAD_CI_PLAN.md` and ADR-021 both
+    proposed raising it to 8 *because* nothing could exercise 7; that proposal is
+    withdrawn, not implemented.
+  - **`tools/check_kicad_tags.py` now runs in CI** against every pinned tag. It
+    paginates the whole tag list, it is what found this, and it is why the same
+    mistake cannot be made by eye again. Kept out of the `certify` chain
+    deliberately: a KiCad release must not invalidate the certification of what
+    actually ran.
+  - The 7 leg also dumps KiCad 7's footprint pad ids, so `ohm/fpdata/` gains a
+    fourth major. The `fpdata` job rebuilds the table from every matrix dump and
+    fails on any difference, which means the matrix and the committed
+    `pads.json.gz` must name the same majors — a KiCad 7 target stops being
+    *unchecked* by S012 at the same moment the leg exists to check it.
+
 - **feat(ci)**: **KiCad compatibility is measured, and a skipped test can no
   longer pass for one.** `.github/workflows/ci.yml` runs the emit, library,
   read-back and plot gates inside the official `kicad/kicad` containers at

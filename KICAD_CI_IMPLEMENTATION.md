@@ -19,6 +19,10 @@ measuring found.
 | 9.0.9 | **342** | 0 | **0** |
 | 10.0.5 | **342** | 0 | **0** |
 
+(A 7.0.11 leg was added on 2026-08-31 and is not in this table: the table is the
+record of the 2026-08-27 certification run, not a running total. See the
+correction table below for why 7 was absent.)
+
 Zero skips is the load-bearing column. Under `OHM_REQUIRE_KICAD=1` a skipped
 KiCad test **fails** the run, so these 342 actually executed against a real KiCad
 rather than quietly standing down.
@@ -154,9 +158,10 @@ certification and noticing one test still skipped.
 | Job | Runs on | What it proves |
 |---|---|---|
 | `fast` | every push + PR | ruff, mypy, full suite. No KiCad, no image pull. Unchanged. |
-| `kicad` ×3 | schedule / tag / dispatch | `container: kicad/kicad:{8.0.9,9.0.9,10.0.5}`, `fail-fast: false`, `OHM_REQUIRE_KICAD=1`. Emit, library, read-back and plot gates. |
+| `kicad` ×4 | schedule / tag / dispatch | `container: kicad/kicad:{7.0.11,8.0.9,9.0.9,10.0.5}`, `fail-fast: false`, `OHM_REQUIRE_KICAD=1`. Emit, library, read-back and plot gates. The 7 leg was added 2026-08-31; it runs every step the others do, with nothing excluded and nothing made conditional, because every `kicad-cli` subcommand these gates use — `sch export netlist`, `sch export pdf`, `pcb export pos`, `pcb export gerbers`, `pcb export drill`, `sym upgrade` — predates KiCad 8. |
 | `v007` | `ubuntu-24.04` | The geometry gate, which imports `pcbnew` in-process. |
 | `fpdata` | after `kicad` | Rebuilds the pad table from the matrix dumps; fails on any diff. |
+| `tags` | schedule / tag / dispatch | `tools/check_kicad_tags.py` against every pinned image. Deliberately **not** in the `certify` chain: a KiCad release must not invalidate the certification of what actually ran. |
 | `certify` | after all | Writes version + commit + date as an artifact. |
 
 Two runner details that are load-bearing:
@@ -164,9 +169,9 @@ Two runner details that are load-bearing:
 - **`ubuntu-24.04` is pinned on `v007`**, not `ubuntu-latest`: `pcbnew` is a
   compiled extension built against the distro's Python, and 24.04 is the release
   whose system Python is 3.12. When that label moves, `pcbnew` stops importing.
-- **Python 3.12 comes from `uv` inside the container.** KiCad 8 and 9 images are
-  Debian 12 (Python 3.11); KiCad 10 is Debian 13 (3.13). Ohm requires ≥3.12, so
-  none of the image interpreters will do.
+- **Python 3.12 comes from `uv` inside the container.** KiCad 7, 8 and 9 images
+  are Debian 12 (Python 3.11); KiCad 10 is Debian 13 (3.13). Ohm requires ≥3.12,
+  so none of the image interpreters will do.
 
 ---
 
@@ -180,6 +185,7 @@ Stated because the plan document asserted them and they were wrong:
 | `kicad-cli pcb upgrade` exists from KiCad 8 | **KiCad 10 only.** 8 and 9 expose `drc`, `export`, `render`. The read-back gate falls back to `pcbnew` Load/Save, which every version ships — so it covers all three. |
 | `pcb upgrade` takes `--output` | It rewrites **in place**; there is no `--output`. |
 | The stdlib had 3 bad pad references on every version | An artifact of a regex scan. Parser-based: **8 and 9 are 66/66 correct; only 10 has 3**, and they are the shield renames. |
+| No official container image exists below 8.0.4, so KiCad 7 cannot be a CI leg *(added 2026-08-31 — this document repeated the plan's claim rather than checking it, which is what this table exists to catch)* | **`kicad/kicad:7.0.11` exists** — linux/amd64, 440 MB, pushed 2024-02-23 — along with `7.0.10`, `7.0.9`, `7.0.8` and a rolling `7.0`. `Dockerfile.7.0-stable` clones `kicad-symbols`, `kicad-footprints` and `kicad-templates` at the matching `7.0` branch, so the version-matched-libraries property holds at 7 as well, on the same Debian 12 base as 8 and 9. The claim came from page one of Docker Hub's tag listing, which is ordered by `last_updated`, 50 per page; 7.x last moved in Feb 2024. `tools/check_kicad_tags.py` paginates and now runs in CI. |
 
 ---
 
@@ -188,10 +194,20 @@ Stated because the plan document asserted them and they were wrong:
 Deliberately listed, because a green matrix that implies more than it checked is
 worse than no matrix.
 
-- **KiCad 7.** No official container image exists below 8.0.4, so 7 is certified
-  by hand or not at all, and the pad table has no 7 data — a KiCad 7 target is
-  *unchecked*, not *checked and clean*. If that is not acceptable, the honest
-  move is to raise the supported floor to 8.
+- ~~**KiCad 7.** No official container image exists below 8.0.4, so 7 is
+  certified by hand or not at all, and the pad table has no 7 data — a KiCad 7
+  target is *unchecked*, not *checked and clean*. If that is not acceptable, the
+  honest move is to raise the supported floor to 8.~~
+  **Corrected 2026-08-31 — see the correction table above.** `kicad/kicad:7.0.11`
+  exists, so KiCad 7 is now a matrix leg on the same terms as the other three
+  and the floor stays at 7. The pad-table half of the sentence was true only
+  because there was no 7 leg to dump from: `tools/gen_fpdata.py dump` now runs at
+  7 like everywhere else, and the `fpdata` job rebuilds from every matrix dump
+  and fails on any difference — so the 7 leg and a `pads.json.gz` carrying major
+  7 must land together, in either order, and the job says so loudly if they do
+  not. Wherever the table has no data for a major, `ohm/fpdata/__init__.py`
+  abstains and S012 reports *unchecked* rather than clean; that rule never
+  depended on which majors happened to be in it.
 - **V007 at 8 and 9.** `pcbnew` is importable only where the system Python
   matches Ohm's, so the geometry gate runs at one version.
 - **That a gerber is manufacturable.** The plot gate proves the files are
