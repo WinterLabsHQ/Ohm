@@ -110,11 +110,26 @@ provable — and that KiCad 7 had images all along.
 
 ---
 
-## And one thing that got worse before it got better
+## The geometry gate works — for the first time on a modern KiCad
 
-Running the `v007` geometry gate for the first time found that
-`pcbnew.WriteDRCReport` **segfaults on KiCad 10**, taking `ohm signoff` with it —
-no verdict at all, not even the source-fidelity checks that had already been
-computed. It works on 7, 8 and 9. The CI job was pinned to exactly the version
-where it crashes, and had never been run.
+Running the `v007` job, which nobody ever had, found two defects at once.
+`pcbnew.WriteDRCReport` **segfaults on KiCad 10**, and because the gate imported
+it in-process, `ohm signoff` died with it — exit 139, no verdict, not even the
+source-fidelity checks already computed. And since **KiCad 8** the report parser
+could not read a severity at all, so every finding fell back to `warning`: a
+courtyard overlap or a clearance violation could not fail the gate on any modern
+KiCad.
+
+The gate now delegates out-of-process — `kicad-cli pcb drc` where it exists,
+`pcbnew` in a child otherwise — so it runs at **all four** supported versions and
+a crash in KiCad's own engine degrades to a warning instead of destroying the
+run.
 → [`24_v007_headless.md`](24_v007_headless.md)
+
+## A board Ohm cannot read no longer reports that the board is wrong
+
+New **V008**. The readers were structural but not defensive: six shapes raised
+straight out of the last gate before fabrication, and four more returned a
+confident wrong verdict — including telling a user their symbol was
+"graphic-only" when the truth was that Ohm had failed to read the file.
+→ [`09_readback_hardening.md`](09_readback_hardening.md)

@@ -88,26 +88,96 @@ serve KiCad 10; it crashes on it. The reasoning is rewritten to match the
 measurement rather than deleted, in the house style this repo already uses for
 corrections.
 
-## The fix
+## The fix, and the second defect it uncovered
 
 Two parts, and the first is non-negotiable regardless of the second:
 
-1. **The geometry gate runs out-of-process, always.** A crash in a delegated
-   engine must not destroy a verdict that was already computed. A dead child
-   becomes `DrcUnavailable`, which the CLI already handles.
-2. **`kicad-cli pcb drc` where available, `pcbnew` in a child interpreter
-   otherwise** — restoring geometry coverage on KiCad 10 and keeping it on
-   KiCad 7.
+1. **The geometry gate delegates and never imports KiCad.**
+   `kicad-cli pcb drc` where one resolves — through `kicad_env.kicad_cli()`, so
+   `$OHM_KICAD_CLI` still steers it and there is no second resolver — otherwise
+   `pcbnew` in a **child interpreter**, which is KiCad 7's only route since its
+   `kicad-cli pcb` has `export` and nothing else.
+2. A crashed child becomes `DrcUnavailable`, which `ohm/cli.py` already turns
+   into `warning: geometry gate skipped`. `cli.py` needed no change at all.
+
+Two details worth keeping:
+
+- **`sys.executable` is tried LAST.** `pcbnew` is a compiled extension built for
+  the *system* Python, and the container matrix runs Ohm on a uv-managed 3.12
+  while KiCad 10's `pcbnew` is built for 3.13. The obvious choice is the wrong
+  one.
+- **A crashed child is refused even when a report file exists.** KiCad 10 dies
+  *inside* `WriteDRCReport`, and a truncated report parses fine and
+  under-reports violations — which is a worse outcome than no report.
+
+`drc.py` needed `subprocess`, which the N1 import gate forbids across all of
+`ohm/`. It is now exempt **by name**, following the precedent `gitutil.py`
+already set — and paid for rather than merely asserted: a new AST test proves
+nothing but `cli.py` imports `ohm.drc`. `FORBIDDEN` is untouched, and the gate is
+net stronger than before.
+
+### The second defect
+
+Measured across all four versions and both routes:
+
+```
+KiCad 7       "    Local override; Severity: warning"
+KiCad 8/9/10  "    Local override; warning"
+```
+
+`parse_drc_report` matched **only the KiCad 7 spelling**, having been written
+against a KiCad 7 report. So **since KiCad 8, every finding fell back to the
+default `warning`** — on every route, on every modern KiCad. A courtyard overlap
+or a clearance violation could not make V007 an error, and nothing said so.
+
+*A gate that cannot return "error" is not a gate.* This one had been unable to
+since KiCad 8, in a repo whose CI runs at 8, 9 and 10.
+
+---
+
+## What it does now
+
+`ohm signoff` on a real board:
+
+| KiCad | Route | Exit | Verdict |
+|---|---|---|---|
+| 7.0.11 | `pcbnew` child | **1** | V002 ×3, V005, **V007 ×2** |
+| 8.0.9 | `kicad-cli` | **1** | same shape |
+| 9.0.9 | `kicad-cli` | **1** | same shape |
+| **10.0.5** | `kicad-cli` | **1** | same shape — *was exit 139, no output* |
+
+The real `v007` runner was reproduced as well — `ubuntu:24.04` with the KiCad 10
+PPA — and goes from `1 failed, 16 passed` to **25 passed**.
+
+**V007 now also runs in the container matrix job**, at every version. It was
+previously exercised only by the `v007` job, which is to say only on the one
+KiCad where it crashed. The route choice is a per-version decision and only a
+four-version matrix can check it.
+
+### The `ubuntu-24.04` pin stays, for a different reason
+
+The old justification is gone: it existed because in-process `pcbnew` needed a
+system Python matching Ohm's 3.12, and nothing is imported in-process now. The
+job installs into a **plain** venv, which is both the honest user environment and
+a tripwire — if it ever needs `--system-site-packages` again, someone has moved
+the import back in-process.
+
+What still pins it is the PPA, which publishes per Ubuntu series: `ubuntu-latest`
+moving to a series KiCad has not built for fails at `apt`. Note also that the PPA
+serves **10.0.6** while the container matrix pins **10.0.5**, and the crash
+reproduced on both.
 
 ---
 
 ## Still not proven
 
-- The workflow YAML has still never run on a GitHub runner. What each job *does*
-  is now measured, including this one; what remains untested is the orchestration
-  — dependencies, artifact hand-off, matrix expansion, triggers.
-- **The `ubuntu-24.04` pin's justification changes** if the gate no longer
-  imports `pcbnew` in-process. The pin existed because a compiled extension had
-  to match Ohm's 3.12; that constraint weakens once the import moves to a child.
-- The PPA now serves **10.0.6** while the container matrix is pinned at
-  **10.0.5** — the two can drift, and the crash reproduced on both.
+- The workflow YAML has still never run on a GitHub runner. Every job's steps
+  have now been executed locally, **including this one**, which was the gap this
+  loop existed to close.
+- `KICAD_COMPATIBILITY.md` still grades V007 `proven` at 10.0.5 on evidence that
+  never existed. Left standing deliberately — that document carries its own
+  banner saying it is the record of what was believed before anyone checked, and
+  editing it would destroy the thing it is for.
+- Whether `kicad-cli pcb drc` and `pcbnew.WriteDRCReport` agree on *every* rule
+  class. They were measured byte-for-byte identical on the boards tested at
+  8.0.9, 9.0.9 and 10.0.5; that is a strong sample, not a proof.

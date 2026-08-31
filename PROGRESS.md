@@ -609,16 +609,16 @@ The brief was to make Ohm current with KiCad 10 and the latest versions of every
 other EDA tool it claims, and to put CI over the result. Docker turned out to be
 available on the development machine, which changed the character of the whole
 exercise: **every claim below was executed rather than reasoned about**, and that
-is where the value came from. Seven defects surfaced that no existing test could
-see, and five of them were in code that had passed every gate for months.
+is where the value came from. Eight defects surfaced that no existing test could
+see, and six of them were in code that had passed every gate for months.
 
 **The matrix, run here, under `OHM_REQUIRE_KICAD=1` so a skip fails the run:**
 
 | KiCad | Passed | Failed | Skipped |
 |---|---|---|---|
 | **7.0.11** | 365 | 0 | 0 |
-| 8.0.9 | 337 | 0 | 0 |
-| 9.0.9 | 337 | 0 | 0 |
+| 8.0.9 | 365 | 0 | 0 |
+| 9.0.9 | 365 | 0 | 0 |
 | 10.0.5 | 365 | 0 | 0 |
 
 **KiCad 7 was containerised all along.** Five documents — `KICAD_CI_PLAN.md`,
@@ -638,26 +638,33 @@ and runs in CI so the mistake cannot be repeated by eye.
    it — exit 139, no verdict at all, not even the pure V001–V006 results already
    computed. It works on 7, 8 and 9. The `v007` CI job is pinned to exactly the
    version where it crashes and had **never been run**; the matrix graded V007
-   `proven at 10.0.5` on the strength of no run. `kicad-cli pcb drc` works on 9
-   and 10 in exactly the report format Ohm already parses.
-2. **A board Ohm could not READ reported that the board was WRONG.** The readers
+   `proven at 10.0.5` on the strength of no run. Fixed by delegating
+   out-of-process — `kicad-cli pcb drc` where it exists, `pcbnew` in a child
+   otherwise — so the gate now runs at all four versions and a crash in KiCad's
+   engine degrades to a warning instead of destroying the verdict.
+2. **The geometry gate could not return `error` anyway.** KiCad 8 dropped the
+   `Severity: ` prefix from its DRC report; `parse_drc_report` matched only the
+   KiCad 7 spelling, so since KiCad 8 every finding fell back to `warning` on
+   every route. A courtyard overlap or a clearance violation could not fail the
+   gate on any modern KiCad, and nothing said so.
+3. **A board Ohm could not READ reported that the board was WRONG.** The readers
    were structural but not defensive; six shapes raised out of the last gate
    before fabrication and four more returned a confident wrong verdict. New V008.
-3. **`ohm signoff` ran with pad translation off**, so a board laid out on KiCad 10
+4. **`ohm signoff` ran with pad translation off**, so a board laid out on KiCad 10
    carrying `SH` pads while the source model said `11` was *silently unverified*
    rather than reported.
-4. **Ohm's own standard library named a footprint KiCad 7 does not have** — added
+5. **Ohm's own standard library named a footprint KiCad 7 does not have** — added
    after 7 — on the DEFAULT target, leaving two connector parts' pins
    unconnected. The rule that a stdlib footprint must exist in every supported
    KiCad now has a gate; this was the third time the family had been fixed one
    part at a time.
-5. **S012 called a never-added footprint "removed"**, sending readers to hunt for
+6. **S012 called a never-added footprint "removed"**, sending readers to hunt for
    a removal that never happened. 728 footprints are added-after-7 and 379 are
    removed-by-10, so neither direction is rare.
-6. **Schematic uuids were derived from the source path as typed**, so two
+7. **Schematic uuids were derived from the source path as typed**, so two
    checkouts at different paths produced different bytes — and KiCad identifies a
    sheet by its uuid, so a rebuild elsewhere reads as a different sheet.
-7. **The "every code has an explanation" gate never covered the V tier.** The
+8. **The "every code has an explanation" gate never covered the V tier.** The
    character class omitted `V`, so the tier that runs last, on a routed board,
    immediately before fabrication, was exempt from the check that every code
    carries a cause and a fix.

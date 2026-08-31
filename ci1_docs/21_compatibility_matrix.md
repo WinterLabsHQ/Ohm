@@ -51,13 +51,21 @@ when the leg was wired: **the read-back gate does run at KiCad 7.**
 | stdlib symbol refs exist in the library | proven | proven | proven | proven |
 | `ohm doctor` finds the installed libraries | proven | proven | proven | proven |
 | Footprint pad table (`fpdata`) covers this major | proven | proven | proven | proven |
-| V007 geometry gate (`pcbnew.WriteDRCReport`) | assumed | assumed | assumed | proven |
+| V007 geometry gate | **proven** | **proven** | **proven** | **proven** |
 
-**V007 is the one remaining gap, and it is not fixable by trying harder.**
-`pcbnew` is a compiled CPython extension built against its distribution's own
-Python, and Ohm requires ≥3.12. Only `ubuntu-24.04` with the KiCad 10 PPA gives a
-system Python (3.12) that matches. The geometry gate therefore runs at exactly
-one version. Recorded, not worked around.
+**V007 was the one remaining gap, and it turned out not to be a gap but a
+crash.** Running it found that `pcbnew.WriteDRCReport` **segfaults on KiCad 10**,
+taking `ohm signoff` with it, and that since KiCad 8 the report parser could not
+read a severity at all — so the gate could never return `error`. Both are fixed:
+the gate now delegates to `kicad-cli pcb drc` where available and to `pcbnew` in
+a child process otherwise, so it runs at **every** supported version and a crash
+degrades to a warning instead of killing the verdict. See
+[`24_v007_headless.md`](24_v007_headless.md).
+
+The residual constraint is narrower than it was. `pcbnew` is still a compiled
+extension built against its distribution's own Python, so the **in-process** route
+was only ever possible where those matched — but nothing imports it in-process
+any more, which is what removed the single-version ceiling.
 
 ### The pad table is byte-reproducible, proven end to end
 

@@ -20,6 +20,8 @@ the whole picture.
 | The `fpdata` rebuild being byte-reproducible | Dumped in three containers and rebuilt: 162 075 bytes, identical to what is committed |
 | That the matrix pins are current | `tools/check_kicad_tags.py`, run against the live registry and gated in CI |
 | DRC/ERC rule-id drift (audit finding **F6**) | `_INFO_RULES` is a version-annotated union; the `.kicad_pro` writes both ERC spellings |
+| **The V007 geometry gate at all** — the one CI job nobody had ever run | Runs at all four versions; the KiCad 10 segfault and the since-KiCad-8 severity blindness both fixed |
+| A board Ohm could not READ reporting the board as WRONG | **V008**, naming the shape it could not find |
 
 ---
 
@@ -35,19 +37,18 @@ download between jobs, matrix expansion, and the `if:` triggers. A wiring error
 surfaces only on the first real run. There is no `gh` here and the repo is
 private.
 
-### The `v007` geometry gate
+### ~~The `v007` geometry gate~~ — closed, and it took two defects with it
 
-Two distinct problems, and the second is new.
+Running it found that `pcbnew.WriteDRCReport` **segfaults on KiCad 10**, taking
+`ohm signoff` with it, and that since KiCad 8 the report parser could not read a
+severity at all — so the gate could never return `error`. The gate now delegates
+out-of-process and runs at **all four** versions. See
+[`24_v007_headless.md`](24_v007_headless.md).
 
-**It runs at one KiCad version and cannot run at more.** `pcbnew` is a compiled
-CPython extension built against its distribution's own Python; Ohm requires
-≥3.12; `ubuntu-24.04` is the only runner whose system Python matches. This is a
-fact about how `pcbnew` is packaged, not something to try harder at.
-
-**And running it found that the job does not pass.** See
-[`24_v007_headless.md`](24_v007_headless.md). This is the one job that had never
-been executed, by anyone, at any point — the earlier "proven at 10.0.5" grading
-did not come from a run of this job.
+What remains here is narrower: whether `kicad-cli pcb drc` and
+`pcbnew.WriteDRCReport` agree on **every** rule class. They were measured
+byte-for-byte identical on the boards tested at 8.0.9, 9.0.9 and 10.0.5 — a
+strong sample, not a proof.
 
 ### No external non-KiCad tool has ever opened Ohm's output
 

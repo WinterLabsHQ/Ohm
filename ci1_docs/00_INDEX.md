@@ -56,12 +56,12 @@ measurement.** The KiCad matrix was executed here, all four versions, with
 
 | KiCad | Passed | Failed | Skipped |
 |---|---|---|---|
-| **7.0.11** | 337 | 0 | 0 |
-| 8.0.9 | 337 | 0 | 0 |
-| 9.0.9 | 337 | 0 | 0 |
-| 10.0.5 | 337 | 0 | 0 |
+| **7.0.11** | 365 | 0 | 0 |
+| 8.0.9 | 365 | 0 | 0 |
+| 9.0.9 | 365 | 0 | 0 |
+| 10.0.5 | 365 | 0 | 0 |
 
-Measuring found seven defects that no existing test could see:
+Measuring found **eight** defects that no existing test could see:
 
 1. **The repo's premise about KiCad 7 was false** — five documents said no
    container image existed below 8.0.4; `kicad/kicad:7.0.11` is real, and a
@@ -76,9 +76,21 @@ Measuring found seven defects that no existing test could see:
 5. **`ohm signoff` ran with pad translation off**, so a mismatch in the last gate
    before fabrication was silently unverified rather than reported.
 6. **`pcbnew.WriteDRCReport` segfaults on KiCad 10**, taking `ohm signoff` with
-   it — and the CI job was pinned to exactly that version, and had never run.
-7. **A Windows-only test failure** in the UTF-8 invariant, which would have
+   it — exit 139, no verdict at all — and the CI job was pinned to exactly that
+   version, and had never run.
+7. **The geometry gate could not return `error` anyway.** KiCad 8 dropped the
+   `Severity: ` prefix from its DRC report, and the parser matched only the
+   KiCad 7 spelling, so since KiCad 8 every finding fell back to `warning`. A
+   clearance violation could not fail the gate on any modern KiCad.
+8. **A Windows-only test failure** in the UTF-8 invariant, which would have
    red-lit the new Windows leg on its first run.
+
+Two of those are second-order and worth more than the rest. The compatibility
+matrix graded V007 `proven at 10.0.5` on the strength of a job that had never
+run — the exact failure `OHM_REQUIRE_KICAD` exists to prevent, one level up. And
+the "every code has an explanation" gate omitted `V` from its character class, so
+the tier that runs last, on a routed board, immediately before fabrication, was
+exempt from the check that every code carries a cause and a fix.
 
 ---|---|---|---|
 | 01 | [Baseline and gate hygiene](01_baseline_and_gates.md) | 1 | done |
