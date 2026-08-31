@@ -9,6 +9,7 @@ than pretending the format was checked.
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from decimal import Decimal
 from pathlib import Path
@@ -21,7 +22,35 @@ from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import PkgError, build
 from ohm.pkggen.step import emit_step_box
 
-GMSH = shutil.which("gmsh")
+def _gmsh_cmd() -> list[str] | None:
+    """The argv prefix that runs gmsh, or None if there is no gmsh to run.
+
+    Two ways gmsh can be present, and the fallback matters more than it looks:
+
+    1. A standalone gmsh on PATH (a system package, or the SDK download). Used
+       as-is.
+    2. `pip install gmsh` into this venv. This drops `Scripts/gmsh` — a plain
+       Python script that calls `gmsh.initialize(argv, run=True)` — plus a
+       `gmsh.bat` that launches it with a bare `python`. On Windows `shutil.which`
+       prefers the `.bat`, and the bare `python` it shells out to is whatever is
+       first on PATH, which is NOT this venv: the shim dies with
+       `ModuleNotFoundError: No module named 'gmsh'`, gmsh prints nothing, and
+       `_mesh` fails on an empty stdout rather than on the geometry. Running the
+       script directly with `sys.executable` bypasses the broken shim entirely.
+
+    Skipping is honest when gmsh is absent; skipping because the launcher was
+    mis-wired is not, and these three tests are the only real STEP reader in the
+    suite — the AP242 bump in ADR-022 rests on them, so they have to run from the
+    plain `./.venv/Scripts/python.exe -m pytest` gate and not only from a shell
+    that happened to activate the venv first.
+    """
+    if (exe := shutil.which("gmsh")) and not exe.lower().endswith((".bat", ".cmd")):
+        return [exe]
+    script = Path(sys.executable).parent / "gmsh"
+    return [sys.executable, str(script)] if script.is_file() else None
+
+
+GMSH = _gmsh_cmd()
 needs_gmsh = pytest.mark.skipif(GMSH is None, reason="gmsh (STEP reader) not installed")
 
 
@@ -36,7 +65,7 @@ def _mesh(step: Path) -> tuple[float, int]:
     """Mesh the solid with gmsh; returns (volume, solid count). Meshing only
     succeeds on a watertight, correctly-oriented shell."""
     out = subprocess.run(
-        [GMSH, str(step), "-3", "-o", str(step.with_suffix(".msh")), "-format", "msh2"],
+        [*GMSH, str(step), "-3", "-o", str(step.with_suffix(".msh")), "-format", "msh2"],
         capture_output=True, text=True, timeout=180)
     assert "Error" not in out.stdout, out.stdout
     vol = re.search(r"volume = ([\d.eE+-]+)", out.stdout)
@@ -65,7 +94,7 @@ def test_body_sits_on_the_board_and_is_centred(tmp_path):
                    'bb() = BoundingBox Volume{1};\n'
                    'Printf("BB %g %g %g %g %g %g", bb(0), bb(1), bb(2),'
                    ' bb(3), bb(4), bb(5));\n')
-    out = subprocess.run([GMSH, str(geo), "-0"], capture_output=True, text=True,
+    out = subprocess.run([*GMSH, str(geo), "-0"], capture_output=True, text=True,
                          timeout=120)
     bb = re.search(r"BB ([-\d.e+ ]+)", out.stdout)
     assert bb, out.stdout + out.stderr
