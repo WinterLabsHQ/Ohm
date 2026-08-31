@@ -600,3 +600,96 @@ together, in either order, and the job is loud if they do not. Wherever the tabl
 has no data for a major, `ohm/fpdata/__init__.py` abstains and S012 reports
 *unchecked* rather than clean; that was never a statement about KiCad 7 in
 particular.
+
+## EDA compatibility round 1 — measured, not wired (2026-08-31, branch `ci1-eda-upgrade`)
+
+Full per-part record in [`ci1_docs/`](ci1_docs/00_INDEX.md); this is the summary.
+
+The brief was to make Ohm current with KiCad 10 and the latest versions of every
+other EDA tool it claims, and to put CI over the result. Docker turned out to be
+available on the development machine, which changed the character of the whole
+exercise: **every claim below was executed rather than reasoned about**, and that
+is where the value came from. Seven defects surfaced that no existing test could
+see, and five of them were in code that had passed every gate for months.
+
+**The matrix, run here, under `OHM_REQUIRE_KICAD=1` so a skip fails the run:**
+
+| KiCad | Passed | Failed | Skipped |
+|---|---|---|---|
+| **7.0.11** | 365 | 0 | 0 |
+| 8.0.9 | 337 | 0 | 0 |
+| 9.0.9 | 337 | 0 | 0 |
+| 10.0.5 | 365 | 0 | 0 |
+
+**KiCad 7 was containerised all along.** Five documents — `KICAD_CI_PLAN.md`,
+`KICAD_CI_IMPLEMENTATION.md`, ADR-021, `README.md` and `tests/kicad_in_docker.sh`
+— asserted that no official image exists below 8.0.4. `kicad/kicad:7.0.11` is
+real, 440 MB, pushed 2024-02-23, built by `Dockerfile.7.0-stable` in the same
+repo as 8/9/10 and cloning the libraries at the matching `7.0` branch. The error
+came from reading page one of a tag listing ordered by `last_updated`; 7.x last
+moved in February 2024. A decision to raise the supported floor to 8 had already
+been taken and implemented on that premise, and was **reverted**. The floor stays
+at 7, and 7 is now a measured leg. `tools/check_kicad_tags.py` paginates properly
+and runs in CI so the mistake cannot be repeated by eye.
+
+**What measuring found, in order of severity:**
+
+1. **`pcbnew.WriteDRCReport` segfaults on KiCad 10**, taking `ohm signoff` with
+   it — exit 139, no verdict at all, not even the pure V001–V006 results already
+   computed. It works on 7, 8 and 9. The `v007` CI job is pinned to exactly the
+   version where it crashes and had **never been run**; the matrix graded V007
+   `proven at 10.0.5` on the strength of no run. `kicad-cli pcb drc` works on 9
+   and 10 in exactly the report format Ohm already parses.
+2. **A board Ohm could not READ reported that the board was WRONG.** The readers
+   were structural but not defensive; six shapes raised out of the last gate
+   before fabrication and four more returned a confident wrong verdict. New V008.
+3. **`ohm signoff` ran with pad translation off**, so a board laid out on KiCad 10
+   carrying `SH` pads while the source model said `11` was *silently unverified*
+   rather than reported.
+4. **Ohm's own standard library named a footprint KiCad 7 does not have** — added
+   after 7 — on the DEFAULT target, leaving two connector parts' pins
+   unconnected. The rule that a stdlib footprint must exist in every supported
+   KiCad now has a gate; this was the third time the family had been fixed one
+   part at a time.
+5. **S012 called a never-added footprint "removed"**, sending readers to hunt for
+   a removal that never happened. 728 footprints are added-after-7 and 379 are
+   removed-by-10, so neither direction is rare.
+6. **Schematic uuids were derived from the source path as typed**, so two
+   checkouts at different paths produced different bytes — and KiCad identifies a
+   sheet by its uuid, so a rebuild elsewhere reads as a different sheet.
+7. **The "every code has an explanation" gate never covered the V tier.** The
+   character class omitted `V`, so the tier that runs last, on a routed board,
+   immediately before fabrication, was exempt from the check that every code
+   carries a cause and a fix.
+
+**Two format bumps, both with a real reader**, per the new ADR-022 rule — *write
+the oldest stamp a current reader accepts; bump only when a reader proves the new
+one is needed*. STEP AP214 → **AP242**, verified by gmsh/OpenCASCADE, an oracle
+that had to be repaired first: it was never installed, `shutil.which` could not
+find it, and Windows preferred a `.BAT` shim launching an interpreter without the
+module. Three tests had been sitting in the skip count, which is how AP214 went
+unexamined. And Zener `.zen` → the **0.4** surface, verified by running `pcbc
+0.4.41` against Ohm's output — closing ADR-002 §5's deferral, and finding that
+the tool disagrees with its own published spec in several places that matter.
+
+The other six formats are recorded as already correct with the reason, in
+`ohm/formats.py` (the registry, where five stamps had been bare inline literals
+with no test) and ADR-022. **IPC-7351B is one of them**: revision C was drafted,
+built into CAD tools and never published, so Ohm was already current.
+
+**Boards are now orderable.** `Edge.Cuts` carried no geometry, so the gerber
+package was producible and not orderable. Building the gate required a
+measurement worth keeping: KiCad plots a 429-byte, perfectly well-formed,
+entirely **empty** profile gerber for an outline-less board, so a test asserting
+only that a profile file arrived could not have failed.
+
+**Cross-platform determinism is measured for the first time** — 175 artifacts
+across all eight emit kinds, byte-identical between Windows and Linux, with a CI
+job on ubuntu/windows/macos that runs on every PR. Page 8 states this as an
+invariant and nothing had ever checked the across-machine half.
+
+**Not proven, and said so** (`ci1_docs/23_not_proven.md`): the workflow YAML has
+still never run on a GitHub runner, though every job's steps have now been
+executed locally; V007 runs at one KiCad and cannot run at more; no Eagle, Altium
+or Allegro exists on any machine here, so those formats are proven internally
+consistent and nothing more; and no Ohm board has come back from a fab and booted.
