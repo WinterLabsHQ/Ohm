@@ -81,8 +81,10 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
     doc = {
         "board": {"3dviewports": [], "design_settings": {}, "layer_presets": []},
         "boards": [],
-        # KiCad 7 has no headless ERC (`kicad-cli sch` only exports), so ERC is
-        # a GUI run — but it is only worth running against the right severities.
+        # KiCad 7 has no headless ERC (`kicad-cli sch` only exports), so on the
+        # oldest supported KiCad an ERC is a GUI run; from KiCad 8 `kicad-cli
+        # sch erc` exists and Ohm does not yet drive it. Either way the run is
+        # only worth doing against the right severities, which is what this sets.
         # The two that matter for a LABEL-connected schematic are raised to
         # error: `similar_labels` catches a typo'd label silently forking a net,
         # and `pin_not_connected` catches a pin nobody accounted for (deliberate

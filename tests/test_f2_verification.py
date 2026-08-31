@@ -13,6 +13,7 @@ it cries wolf on a correct design.
 
 from ohm.driver import compile_source
 
+
 POWER = ("interface Power:\n    v: Signal, role=power_in\n"
          "    gnd: Signal, role=ground\n")
 

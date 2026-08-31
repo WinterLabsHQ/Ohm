@@ -83,7 +83,10 @@ When no library has the part, attest it by hand and say where it came from:
 `mpn=`) carrying four or more pads and no source at all gets **S009**.
 
 To audit a whole design against the installed libraries:
-`ohm verify-pinouts <src.ohm>`.
+`ohm verify-pinouts <src.ohm>` for pin↔pad maps, and
+`ohm verify-footprints <src.ohm>` for the pads themselves — a string
+`package = "Lib:Footprint"` names pads in a library file the compiler never
+opens, and KiCad renames pads between releases.
 
 ## Generated packages
 
@@ -196,7 +199,9 @@ fully-waived board.
 `ohm check` — it shows all diagnostics at once, none hidden; `--json-diagnostics`
 for the machine format. Fix errors until clean, then `ohm build`.
 `ohm verify-pinouts <src.ohm>` audits every pad map against the installed KiCad
-libraries; run it before you commit to a fab. After routing,
+libraries, and `ohm verify-footprints <src.ohm>` checks that every pad a
+component declares exists in the footprint that library really ships; run both
+before you commit to a fab. After routing,
 `ohm signoff <src.ohm> <routed.kicad_pcb>` re-verifies the board.
 
 ## Style rules

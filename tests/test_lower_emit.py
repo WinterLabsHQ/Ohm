@@ -2,7 +2,6 @@
 output without error. Plus the structural invariants: determinism (double-build
 byte-identity) and hermeticity (forbidden-import grep over the build path)."""
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,6 +11,8 @@ from ohm import ir
 from ohm.driver import compile_source
 from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.emit_netlist import emit_netlist
+
+from tests.conftest import KICAD_CLI, requires_kicad_cli
 
 GOLDEN = Path(__file__).parent / "golden"
 DESIGNS = sorted(GOLDEN.glob("*.ohm"))
@@ -37,7 +38,7 @@ def test_at_least_five_golden_designs():
 
 
 # ---------- gate: KiCad imports without error ----------
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad_cli
 @pytest.mark.parametrize("design", DESIGNS, ids=lambda p: p.stem)
 def test_kicad_opens_emitted_files(design, tmp_path):
     result = compile_ok(design)
@@ -46,11 +47,11 @@ def test_kicad_opens_emitted_files(design, tmp_path):
     sch.write_text(emit_kicad_sch(result.low, design.name))
     pcb.write_text(emit_kicad_pcb(result.low, design.name))
     r1 = subprocess.run(
-        ["kicad-cli", "sch", "export", "netlist", "-o", str(tmp_path / "k.net"), str(sch)],
+        [KICAD_CLI, "sch", "export", "netlist", "-o", str(tmp_path / "k.net"), str(sch)],
         capture_output=True, text=True)
     assert r1.returncode == 0, r1.stderr
     r2 = subprocess.run(
-        ["kicad-cli", "pcb", "export", "pos", "-o", str(tmp_path / "k.pos"), str(pcb)],
+        [KICAD_CLI, "pcb", "export", "pos", "-o", str(tmp_path / "k.pos"), str(pcb)],
         capture_output=True, text=True)
     assert r2.returncode == 0, r2.stderr
 

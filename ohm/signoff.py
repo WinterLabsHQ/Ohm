@@ -114,6 +114,10 @@ def read_board(text: str) -> _Board:
     b = _Board()
     root = parse_sexpr(text)
     pcb = next((n for n in root if isinstance(n, list) and n and n[0] == "kicad_pcb"), [])
+    # Resolve every net slot to a NAME here, once, so nothing downstream has to
+    # know which KiCad wrote the file (see _net_slot). Empty on KiCad 10, which
+    # names its nets inline and has no table.
+    ids = _net_ids(text)
     for node in pcb:
         if not isinstance(node, list) or not node:
             continue
@@ -124,11 +128,11 @@ def read_board(text: str) -> _Board:
             layer, net = _kid(node, "layer"), _kid(node, "net")
             if st and en and layer and net:
                 b.segs.append((_q(st[1]), _q(st[2]), _q(en[1]), _q(en[2]),
-                               str(layer[1]), str(net[1])))
+                               str(layer[1]), _net_name(net, ids)))
         elif node[0] == "via":
             at, net = _kid(node, "at"), _kid(node, "net")
             if at and net:
-                b.vias.append((_q(at[1]), _q(at[2]), str(net[1])))
+                b.vias.append((_q(at[1]), _q(at[2]), _net_name(net, ids)))
         elif node[0] == "footprint":
             path_p = next((p for p in _kids(node, "property")
                            if len(p) >= 3 and p[1] == "ohm_path"), None)
@@ -153,13 +157,39 @@ def read_board(text: str) -> _Board:
                     path, str(p[1]), (fx + dx).quantize(_Q), (fy + dy).quantize(_Q),
                     Decimal(size[1]) / 2, Decimal(size[2]) / 2,
                     frozenset(s for s in layers_n[1:] if s.endswith(".Cu") or s == "*.Cu"),
-                    str(pnet[2]) if pnet and len(pnet) > 2 else ""))
+                    _net_name(pnet, ids)))
     return b
 
 
-# ---------- the maps in the segment/via net slot are net NUMBERS; resolve ----------
+# ---------- the net slot: a NUMBER through KiCad 9, a NAME from KiCad 10 ----------
+#
+# KiCad 7-9 wrote a top-level net table and referenced it by index everywhere:
+#
+#     (net 3 "R1_P2")                     <- top-level declaration
+#     (pad "2" smd ... (net 3 "R1_P2"))   <- number AND name
+#     (segment ... (net 3))               <- number only, resolved via the table
+#
+# KiCad 10 (format 20260206) drops the table entirely and references nets by
+# NAME alone:
+#
+#     (pad "2" smd ... (net "R1_P2"))
+#     (segment ... (net "R1_P2"))
+#
+# Reading only the old shape made every pad and every track come back bound to
+# "", so `ohm signoff` reported V001 on EVERY pad of any board KiCad 10 had
+# saved — and V001 says "the board does not match the source", which reads as
+# the user's routing being wrong rather than as Ohm failing to parse. This is
+# the last check before a board is fabricated, so a parse failure that presents
+# as a design failure is the worst possible way for it to break.
+#
+# Both shapes are accepted, and neither is guessed at: a net slot's payload is a
+# number in the old form and a quoted string in the new one.
 def _net_ids(text: str) -> dict[str, str]:
-    """Board net table: id -> name (top-level `(net N \"name\")` entries)."""
+    """Board net table: id -> name (top-level `(net N "name")` entries).
+
+    Empty on KiCad 10, which has no such table. Callers must therefore treat a
+    miss as "this board names its nets inline", not as "unknown net".
+    """
     root = parse_sexpr(text)
     pcb = next((n for n in root if isinstance(n, list) and n and n[0] == "kicad_pcb"), [])
     out = {}
@@ -167,6 +197,28 @@ def _net_ids(text: str) -> dict[str, str]:
         if len(n) >= 3:
             out[str(n[1])] = str(n[2])
     return out
+
+
+def _net_slot(node: Sexpr | None) -> tuple[str, str]:
+    """A `(net ...)` form -> (id_or_empty, name_or_empty).
+
+    `(net 3 "R1_P2")` -> ("3", "R1_P2");  `(net 3)` -> ("3", "");
+    `(net "R1_P2")`   -> ("", "R1_P2").
+    """
+    if not node or len(node) < 2:
+        return "", ""
+    first = str(node[1])
+    if len(node) >= 3:                     # (net N "name") — KiCad 7-9
+        return first, str(node[2])
+    if first.lstrip("-").isdigit():        # (net N) — a number with no name
+        return first, ""
+    return "", first                       # (net "name") — KiCad 10
+
+
+def _net_name(node: Sexpr | None, ids: dict[str, str]) -> str:
+    """The net a pad/segment/via is on, whichever shape the board uses."""
+    nid, name = _net_slot(node)
+    return name or ids.get(nid, "")
 
 
 class _UF:
@@ -195,7 +247,6 @@ def signoff(low: ir.IRLow, board_text: str, board_file: str) -> list[Diagnostic]
         diags.append(Diagnostic(sev, code, msg, _SPAN, board_file, help_))
 
     board = read_board(board_text)
-    ids = _net_ids(board_text)
     renames = diffpair_renames(low)
     # expected board-net name per source net (diffpair _P/_N renames apply)
     exp_net = {n.name: renames.get(n.name, n.name) for n in low.nets}
@@ -226,18 +277,17 @@ def signoff(low: ir.IRLow, board_text: str, board_file: str) -> list[Diagnostic]
     by_xyl: dict[tuple[Decimal, Decimal, str], set[str]] = {}  # segment endpoints
     via_xy: dict[tuple[Decimal, Decimal], set[str]] = {}
     seg_net_name: list[str] = []
-    for x1, y1, x2, y2, layer, nid in board.segs:
-        name = ids.get(nid, "")
+    for x1, y1, x2, y2, layer, name in board.segs:
         seg_net_name.append(name)
         uf.union((x1, y1, layer), (x2, y2, layer))
         for pt in ((x1, y1, layer), (x2, y2, layer)):
             by_xyl.setdefault(pt, set()).add(name)
-    for x, y, nid in board.vias:
+    for x, y, via_net in board.vias:
         anchor = (x, y, "*via*")
         uf.find(anchor)
         for pt in [p for p in by_xyl if p[0] == x and p[1] == y]:
             uf.union(pt, anchor)
-        via_xy.setdefault((x, y), set()).add(ids.get(nid, ""))
+        via_xy.setdefault((x, y), set()).add(via_net)
     for i, pad in enumerate(board.pads):
         uf.find(("pad", i))  # ensure singleton pads exist in the forest
         if not pad.net:

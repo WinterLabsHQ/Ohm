@@ -10,9 +10,44 @@ CANONICAL = str(FIXTURES / "canonical.ohm")
 GENERATED = str(FIXTURES / "agent_mcp9808.ohm")
 
 
-def test_target_kicad_8_errors_cleanly(capsys):
-    assert main(["build", CANONICAL, "--target-kicad", "8"]) == 1
-    assert "only KiCad 7 is supported in v1" in capsys.readouterr().err
+def test_target_kicad_accepts_the_whole_supported_range(tmp_path, capsys):
+    """`--target-kicad 10` used to be refused as "only KiCad 7 is supported",
+    which told a user running the version the README certifies that their KiCad
+    was not supported. The flag names the KiCad being targeted; Ohm emits the
+    KiCad 7 format for all of them because every one reads it forward."""
+    for major in ("8", "9", "10"):
+        out = tmp_path / f"k{major}"
+        assert main(["build", CANONICAL, "-o", str(out), "--target-kicad", major]) == 0
+        err = capsys.readouterr().err
+        assert "KiCad 7 file format" in err, f"target {major} did not say what it emits"
+
+
+def test_target_kicad_changes_nothing_but_a_renamed_pad(tmp_path):
+    """The FORMAT does not vary with the target — only a pad KiCad renamed does.
+
+    Ohm emits the KiCad 7 file format for every target and relies on KiCad
+    reading forward (ADR-021), so a design naming no renamed pad must come out
+    byte-identical: anything else would mean a second, hidden format. `canonical`
+    is such a design. What may legitimately differ, and only there, is a pad id
+    the target's own library calls something else — the same copper under the
+    name that KiCad answers to (see `ohm.lower._pad_translator`, and
+    `tests/test_fpdata.py` for the renaming case).
+    """
+    written = {}
+    for major in ("7", "8", "9", "10"):
+        out = tmp_path / f"k{major}"
+        assert main(["build", CANONICAL, "-o", str(out), "--target-kicad", major]) == 0
+        written[major] = {p.name: p.read_bytes() for p in sorted(out.iterdir())
+                          if p.is_file()}
+    assert written["7"], "build produced no files"
+    for major in ("8", "9", "10"):
+        assert written[major] == written["7"], f"target {major} emitted different bytes"
+
+
+def test_unknown_target_kicad_errors_cleanly(capsys):
+    assert main(["build", CANONICAL, "--target-kicad", "99"]) == 1
+    err = capsys.readouterr().err
+    assert "unknown KiCad target '99'" in err and "7, 8, 9, 10" in err
 
 
 def test_target_kicad_7_and_provider_flags_accepted(tmp_path):

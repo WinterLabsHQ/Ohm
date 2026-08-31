@@ -45,8 +45,50 @@ def first_by_name(items) -> dict:
     return d
 
 
-def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Diagnostic]]:
+def _pad_translator(target_kicad: str | None):
+    """pin pad -> the pad id that KiCad `target_kicad` calls the same physical pad.
+
+    A `package = "Lib:Footprint"` reference emits a pad-LESS stub, so the pad id
+    is the ONLY thing that travels to the layout — and KiCad renames pads between
+    releases. KiCad 10 normalised shield and shell pads to "SH" across 163
+    footprints, which leaves `pad=11` bound to nothing at all on a KiCad 10 board.
+
+    A rename is not a different pad; it is the same copper under a new name. So
+    when the source says which KiCad it is for, the netlist is written in that
+    KiCad's spelling. This is why `--target-kicad` exists: the FORMAT is always
+    KiCad 7 (ohm/emit_kicad.py), and the LIBRARY VOCABULARY follows the target.
+
+    Translation is deterministic and table-driven (`ohm/fpdata`, generated from
+    real libraries by `tools/gen_fpdata.py`), so a build stays reproducible. It
+    only ever renames a pad the target does not have into one it does; a pad the
+    target already has is never touched, and a pad with no known rename is left
+    exactly as declared for S012 to report.
+    """
+    if target_kicad is None:
+        return lambda comp, pad: pad
+    from ohm import fpdata
+
+    if target_kicad not in fpdata.kicad_majors():
+        # No data for this KiCad (7 has no published container to generate from),
+        # so there is nothing to translate against. Leaving the pad as declared is
+        # the only honest option: inventing a rename would be a guess on copper.
+        return lambda comp, pad: pad
+
+    def translate(comp: ir.ComponentDef, pad: str | None) -> str | None:
+        if pad is None or not isinstance(comp.package, str):
+            return pad
+        have = fpdata.pads(comp.package, target_kicad)
+        if have is None or pad in have:
+            return pad
+        return fpdata.renamed_to(comp.package, pad, target_kicad) or pad
+
+    return translate
+
+
+def lower(design: ir.Design, path: str = "<string>",
+          target_kicad: str | None = None) -> tuple[ir.IRLow, list[Diagnostic]]:
     diags: list[Diagnostic] = []
+    pad_for = _pad_translator(target_kicad)
     comps = {c.name: c for c in design.components}
     mods = {m.name: m for m in design.modules}
     ifaces = {i.name: i for i in design.interfaces}
@@ -103,7 +145,7 @@ def lower(design: ir.Design, path: str = "<string>") -> tuple[ir.IRLow, list[Dia
             comp = comps[inst.def_ref]
             pin_name = refparts[1]
             pin = pins_of[comp.name].get(pin_name)
-            pad = pin.pad if pin else None
+            pad = pad_for(comp, pin.pad) if pin else None
             lbl = mk(f"{prefix}{base}.{pin_name}", (_PIN, f"{prefix}{base}", pin_name, pad))
             return [lbl] if lbl is not None else []
         if inst is not None and inst.def_ref in mods:

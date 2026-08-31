@@ -51,11 +51,35 @@ def test_q_checks_deterministic():
     )
     outs = []
     for seed in ("0", "1"):
+        # PYTHONUTF8=1 because this deliberately bypasses ohm.cli.main(), which is
+        # where the UTF-8 stream forcing lives — without it a Windows cp1252 console
+        # dies on Q003's "ΔV=" and the run fails on encoding rather than on the
+        # hash-seed nondeterminism this test exists to catch. That the CLI itself
+        # survives a cp1252 console is a separate claim, proved by
+        # test_cli_survives_a_non_utf8_console below.
         r = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True,
-                           env={**os.environ, "PYTHONHASHSEED": seed})
+                           encoding="utf-8",
+                           env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONUTF8": "1"})
         assert r.returncode == 0, r.stderr
         outs.append(r.stdout)
     assert outs[0] == outs[1]
+
+
+def test_cli_survives_a_non_utf8_console():
+    """The invariant `ohm/cli.py:433-439` claims: Ohm forces its own streams to
+    UTF-8, so a legacy console cannot crash it on a diagnostic carrying a non-ASCII
+    character. Q003's message contains "ΔV=", which is exactly the character
+    that killed it. Run with UTF-8 mode OFF and a legacy encoding asked for, which
+    is what a bare `cmd.exe` or an old Linux locale gives you."""
+    fixture = KNOWN_BAD / "q003_overpower.ohm"
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+    r = subprocess.run([sys.executable, "-m", "ohm", "check", str(fixture)],
+                       capture_output=True, env=env)
+    # exit 1 is the expected verdict (Q003 is an error); a crash is 2 or 3, and the
+    # UnicodeEncodeError traceback is what we are actually guarding against.
+    assert b"UnicodeEncodeError" not in r.stderr, r.stderr.decode("utf-8", "replace")
+    assert r.returncode == 1, r.stderr.decode("utf-8", "replace")
+    assert "ΔV" in r.stderr.decode("utf-8", "replace")
 
 
 def test_q001_message_has_values():

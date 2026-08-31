@@ -134,8 +134,9 @@ docs/STYLE.md   how to write Ohm
 docs/adr/       why things are built the way they are
 docs/blueprint/ the original design docs (read-only)
 examples/       complete boards, kept compiling by CI
-tests/          895 tests: golden netlists, a KiCad round-trip oracle,
-                adversarial suites, byte-for-byte determinism gates
+tests/          golden netlists, a KiCad round-trip oracle, a signoff
+                read-back gate, adversarial suites, determinism gates
+tools/          author-time generators (never on the build path)
 ```
 
 ## Principles
@@ -150,8 +151,16 @@ tests/          895 tests: golden netlists, a KiCad round-trip oracle,
 Pre-release (v0.1.0). Language and compiler are feature-complete through
 signoff — see [`CHANGELOG.md`](CHANGELOG.md).
 
-Ohm writes the KiCad 7 file format, verified to open and extract identically in
-KiCad 7 through 10.0.5.
+Ohm writes the KiCad 7 file format, and KiCad reads it forward. That is
+**measured, not assumed**: CI runs the emit, library, read-back and plot gates
+inside the official KiCad containers at **8.0.9, 9.0.9 and 10.0.5**, with a
+switch that makes a skipped KiCad test fail the run rather than pass it quietly.
+KiCad 7 has no published container image, so it is verified by hand and carries
+no footprint-pad data — unchecked, not checked and clean.
+
+Where KiCad renames a pad between releases — it moved shield and shell pads to
+`SH` across 163 footprints in KiCad 10 — `--target-kicad` writes that version's
+spelling into the netlist, so one source stays correct across the range.
 
 **About validation, plainly**: everything claimed above is backed by the test
 suite — golden netlists, adversarial suites, agreement with KiCad itself — but

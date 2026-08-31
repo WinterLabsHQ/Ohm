@@ -141,18 +141,32 @@ def test_bare_check_outside_project_errors(tmp_path, monkeypatch, capsys):
 
 
 def test_ohm_toml_target_drives_build(tmp_path, monkeypatch, capsys):
-    # ohm.toml's target is authoritative for a bare build: an unsupported target
-    # fails honestly instead of being silently ignored.
+    # ohm.toml's target is authoritative for a bare build: it reaches the build
+    # path rather than being silently ignored. `kicad8` is a supported target
+    # (every target emits the KiCad 7 format), so it builds and says so.
     proj = tmp_path / "board"
     assert main(["init", str(proj)]) == 0
     toml = (proj / "ohm.toml").read_text(encoding="utf-8")
     (proj / "ohm.toml").write_text(toml.replace('target = "kicad7"', 'target = "kicad8"'),
                                    encoding="utf-8")
     monkeypatch.chdir(proj)
-    assert main(["build"]) == 1
-    assert "only KiCad 7" in capsys.readouterr().err
+    assert main(["build"]) == 0
+    assert "KiCad 7 file format" in capsys.readouterr().err
     # an explicit flag still wins over the project's target
     assert main(["build", "--target-kicad", "7", "-o", str(tmp_path / "o")]) == 0
+
+
+def test_ohm_toml_unknown_target_fails_honestly(tmp_path, monkeypatch, capsys):
+    # An unsupported target must still fail rather than be ignored — that was
+    # the property the kicad8 case used to gate, and it needs its own test now.
+    proj = tmp_path / "board"
+    assert main(["init", str(proj)]) == 0
+    toml = (proj / "ohm.toml").read_text(encoding="utf-8")
+    (proj / "ohm.toml").write_text(toml.replace('target = "kicad7"', 'target = "eagle"'),
+                                   encoding="utf-8")
+    monkeypatch.chdir(proj)
+    assert main(["build"]) == 1
+    assert "unknown KiCad target 'eagle'" in capsys.readouterr().err
 
 
 def test_explicit_out_overrides_project(tmp_path, monkeypatch):

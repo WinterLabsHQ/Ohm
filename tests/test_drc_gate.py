@@ -9,14 +9,13 @@ Report parsing is tested against real KiCad 7 report text rather than a live
 run, so the gate is covered on machines without KiCad.
 """
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from ohm.drc import parse_drc_report
+
+from tests.conftest import requires_kicad_cli
 
 REPORT = """** Drc report for out/fmuv2.kicad_pcb **
 ** Created on 2026-07-29 20:53:48 **
@@ -79,7 +78,7 @@ def test_empty_report_is_a_clean_gate():
     assert parse_drc_report("** Found 0 DRC violations **\n", "b.kicad_pcb") == []
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="KiCad not installed")
+@requires_kicad_cli
 def test_signoff_runs_the_gate_end_to_end(tmp_path):
     """The command wires source-fidelity and geometry into ONE verdict."""
     src = Path(__file__).parent.parent / "examples" / "divider_led.ohm"

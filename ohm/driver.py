@@ -42,7 +42,8 @@ class CompileResult:
 
 
 def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
-                   debug_passes: bool = False) -> CompileResult:
+                   debug_passes: bool = False,
+                   target_kicad: str | None = None) -> CompileResult:
     result = CompileResult()
     program, pdiags = load(source, path)  # parse + `use` import closure (ADR-007)
     result.diagnostics += pdiags
@@ -55,12 +56,19 @@ def compile_source(source: str, path: str = "<string>", *, emit: bool = True,
     result.diagnostics += udiags
     result.design = design
     # lower ONCE (pure; safe on poisoned/partial designs) and share the result
-    # with check_intent/check_quant and the emit path.
-    low, ldiags = lower(design, path)
+    # with check_intent/check_quant and the emit path. `target_kicad` reaches it
+    # because a pad id KiCad renamed must be written in the target's spelling —
+    # the same copper, the name that KiCad answers to (see _pad_translator).
+    low, ldiags = lower(design, path, target_kicad)
     snapshot = ir.to_json(design) if debug_passes else None
     for checker in CHECKERS:
-        extra = {"low": low} if checker in (check_intent, check_quant, check_bringup,
-                                            check_mfg, check_placement) else {}
+        # the only two things a checker needs beyond the design: the lowered form,
+        # and (S012) which KiCad the user said they are building for
+        extra: dict[str, object] = {}
+        if checker in (check_intent, check_quant, check_bringup, check_mfg, check_placement):
+            extra = {"low": low}
+        elif checker is check_structural:
+            extra = {"target_kicad": target_kicad}
         result.diagnostics += checker(design, path, **extra)
         if debug_passes and ir.to_json(design) != snapshot:
             raise AssertionError(f"checker '{checker.__name__}' mutated the design")

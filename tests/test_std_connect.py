@@ -9,14 +9,13 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
-from tests.conftest import requires_kicad_fp
+from tests.conftest import KICAD_FOOTPRINTS, requires_kicad_fp
 
 STD = Path(ohm.__file__).parent / "std"
 ELECTROMECH_SRC = (STD / "electromech.ohm").read_text()
 CONNECTIVITY_SRC = (STD / "connectivity.ohm").read_text()
 SENSORS_SRC = (STD / "sensors.ohm").read_text()
 EXAMPLE = Path(__file__).parent / "examples" / "rs485_node.ohm"
-KICAD_FP = Path("/usr/share/kicad/footprints")
 
 ELECTROMECH_BLOCKS = [
     "Header_1x02", "Header_1x03", "Header_1x04", "Header_1x05", "Header_1x06",
@@ -38,7 +37,7 @@ def compile_at(tmp_path, name, source):
 
 def pad_ids(lib, name):
     """All pad ids read from the real .kicad_mod on disk."""
-    mod = (KICAD_FP / f"{lib}.pretty" / f"{name}.kicad_mod").read_text()
+    mod = (KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod").read_text()
     return re.findall(r'\(pad "([^"]*)"', mod)
 
 
@@ -89,30 +88,54 @@ def test_all_string_footprints_exist_on_disk():
     assert len(ids) >= 15  # 13 electromech + 2 connector footprints
     for fid in ids:
         lib, name = fid.split(":")
-        path = KICAD_FP / f"{lib}.pretty" / f"{name}.kicad_mod"
+        path = KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod"
         assert path.is_file(), f"{fid} -> {path} missing"
 
 
 @requires_kicad_fp
-def test_declared_pads_exist_in_footprints():
-    # every pad= declared on a string-footprint component exists in its .kicad_mod
+def test_declared_pads_reach_a_real_pad_in_the_installed_library():
+    """Every declared pad lands on copper in the KiCad that is actually here.
+
+    Not "the declared id is present verbatim": KiCad 10 renamed shield and shell
+    pads to "SH" across 163 footprints, and the std library declares the id KiCad
+    8 and 9 use. `ohm.lower` writes the target's spelling into the netlist
+    (ADR-021), so what must hold is that the declared pad EITHER exists in this
+    library OR is one the table knows was renamed into a pad that does. Asserting
+    the literal id would force the std library to be wrong on some supported
+    KiCad in order to be right on this one.
+    """
+    from ohm import fpdata
+
     for src in (ELECTROMECH_SRC, CONNECTIVITY_SRC):
         for block in re.split(r"\ncomponent ", src)[1:]:
             m = re.search(r'package = "([^"]+)"', block)
             if not m:  # generate(...) blocks are checked by the compiler itself
                 continue
-            lib, name = m.group(1).split(":")
+            fp = m.group(1)
+            lib, name = fp.split(":")
             on_disk = set(pad_ids(lib, name))
-            declared = re.findall(r"pad=(\w+)", block)
-            for pad in declared:
-                assert pad in on_disk, f"{name}: declared pad {pad} not in {sorted(on_disk)}"
+            for pad in re.findall(r"pad=(\w+)", block):
+                if pad in on_disk:
+                    continue
+                renamed = next((fpdata.renamed_to(fp, pad, major)
+                                for major in fpdata.kicad_majors()
+                                if fpdata.renamed_to(fp, pad, major) in on_disk), None)
+                assert renamed is not None, (
+                    f"{name}: declared pad {pad} is not in {sorted(on_disk)}, and no "
+                    f"rename in ohm/fpdata reaches one that is")
 
 
 @requires_kicad_fp
 def test_microb_pad_ids_spot_check():
     pads = pad_ids("Connector_USB", "USB_Micro-B_Amphenol_10118193-0001LF_Horizontal")
-    assert {"1", "2", "3", "4", "5", "6"} <= set(pads)  # signals 1..5 + shield 6
-    assert pads.count("6") > 1  # the shield is multiple physical pads, all id 6
+    assert {"1", "2", "3", "4", "5"} <= set(pads)  # the five signals, always numeric
+    # The shell is several physical pads sharing ONE id — "6" through KiCad 9,
+    # "SH" from KiCad 10. Which spelling is present depends on the library
+    # installed here, so assert the shape (one shared id, repeated) rather than
+    # the name; ohm/fpdata is what maps between them.
+    shell = "SH" if "SH" in pads else "6"
+    assert shell in pads, f"neither shell id present: {sorted(set(pads))}"
+    assert pads.count(shell) > 1
 
 
 @requires_kicad_fp
@@ -126,7 +149,9 @@ def test_usbc_pad_ids_spot_check():
     pads = set(pad_ids("Connector_USB",
                        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal"))
     assert {"A1", "A4", "A5", "A6", "A7", "A8", "A9", "A12",
-            "B1", "B4", "B5", "B6", "B7", "B8", "B9", "B12", "S1"} <= pads
+            "B1", "B4", "B5", "B6", "B7", "B8", "B9", "B12"} <= pads
+    # the shell: "S1" through KiCad 9, "SH" from KiCad 10
+    assert pads & {"S1", "SH"}, f"no shell pad present: {sorted(pads)}"
 
 
 # ---------- example ----------

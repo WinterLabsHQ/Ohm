@@ -13,9 +13,7 @@ schematic can look plausible and be disconnected, which is exactly the failure a
 generated diagram invites.
 """
 
-import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -27,13 +25,9 @@ from ohm.emit_netlist import emit_netlist
 from ohm.pkggen.pindata_iface import DeclaredPinData
 from ohm.pkggen.symbol import symbol_layout
 
+from tests.conftest import KICAD_CLI, requires_kicad_cli
+
 EXAMPLES = Path(__file__).parent.parent / "examples"
-# $OHM_KICAD_CLI overrides the binary this gate runs against, so the SAME gate
-# can certify a different KiCad than the one installed — point it at a wrapper
-# and the whole roundtrip runs inside a container. Compatibility with a KiCad
-# release is then something measured, not assumed from release notes.
-KICAD_CLI = os.environ.get("OHM_KICAD_CLI") or shutil.which("kicad-cli")
-requires_kicad_cli = pytest.mark.skipif(KICAD_CLI is None, reason="kicad-cli not installed")
 
 CASES = ["divider_led", "io_expander_board", "kind_demo_power_amp",
          "blinky_555", "led_bar"]

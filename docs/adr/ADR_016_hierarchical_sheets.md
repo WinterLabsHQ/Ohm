@@ -102,3 +102,11 @@ local nets, and ERC severities. All three shipped:
   and a GUI run is only worth doing against the right severities.
 
 Nothing in this ADR is open.
+
+> **Note, 2026-08-26.** "KiCad 7 has no headless ERC" was true when written and
+> is still true of KiCad 7, but it now reads as a statement about every user's
+> environment. `kicad-cli sch erc` exists from KiCad 8 onward. The decision here
+> — ship the right severities in the `.kicad_pro` — is unaffected and stands;
+> what changed is that a headless ERC gate became *possible* on the newer
+> versions Ohm supports, and Ohm does not yet drive it. Recorded rather than
+> rewritten: an ADR is a record of a decision at a date, not a live document.

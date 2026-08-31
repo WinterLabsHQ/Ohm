@@ -46,6 +46,15 @@ from pathlib import Path
 from ohm import ir, units
 
 _NS = uuid.UUID("00000000-0000-0000-0000-00000000006f")  # fixed Ohm namespace
+# THE VERSION POLICY, in the one place the stamps live. Ohm writes the KiCad 7
+# format for every `--target-kicad` and never bumps these, because KiCad reads
+# FORWARD and that is the direction it guarantees: a newer stamp would buy
+# nothing and cost every older KiCad the ability to open the file. It follows
+# that Ohm's own READERS (signoff, import-symbol, provenance) must be structural
+# rather than layout-anchored — they face the other way, at files the user's
+# KiCad wrote, and a line-anchored parser has already been broken twice by
+# nothing more than a pretty-printer change (KiCad 9 and again KiCad 10).
+# Gated by .github/workflows/ci.yml's `kicad` job at 8.0.9, 9.0.9 and 10.0.5.
 _SCH_VERSION = 20230121  # KiCad 7 schematic format
 _PCB_VERSION = 20221018  # KiCad 7 board format
 

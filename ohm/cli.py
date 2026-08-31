@@ -97,6 +97,15 @@ def _emit_generated_packages(result, outdir: Path, fmt: str = "kicad",
         (outdir / f"{stem}.SchLib").write_bytes(emit_schlib(altium_symbols))
 
 
+# The KiCad versions `--target-kicad` accepts. They all emit the SAME bytes:
+# Ohm writes the KiCad 7 file format and relies on KiCad reading forward, which
+# is the direction KiCad guarantees, so a newer stamp would cost backward
+# compatibility for no gain. The flag names the KiCad you are targeting, not a
+# different serialisation — refusing 10 here told a user on the version the
+# README certifies that their KiCad was unsupported.
+SUPPORTED_KICAD = ("7", "8", "9", "10")
+
+
 def _target_major(target: str) -> str:
     """Normalize an ohm.toml `target` ("kicad7") or a --target-kicad value ("7")
     to the bare KiCad major version string the build path validates ("7")."""
@@ -215,24 +224,64 @@ def _cmd_init(args) -> int:
 
 def _find_kicad() -> str | None:
     """Best-effort locate KiCad's installed footprint libraries (optional — only
-    needed to open an emitted .kicad_pcb, not to compile)."""
-    import os
-    import shutil
+    needed to open an emitted .kicad_pcb, not to compile).
 
-    for var in ("KICAD9_FOOTPRINT_DIR", "KICAD8_FOOTPRINT_DIR",
-                "KICAD7_FOOTPRINT_DIR", "KICAD_FOOTPRINT_DIR"):
-        v = os.environ.get(var)
-        if v and Path(v).is_dir():
-            return v
-    candidates = [Path("/usr/share/kicad/footprints"),
-                  Path("/usr/local/share/kicad/footprints")]
-    candidates += [Path(f"C:/Program Files/KiCad/{maj}.0/share/kicad/footprints")
-                   for maj in ("7", "8", "9")]
-    for p in candidates:
-        if p.is_dir():
-            return str(p)
-    cli = shutil.which("kicad-cli")
-    return cli or None
+    The probe itself lives in `ohm/kicad_env.py`, which the test suite shares, so
+    "where is KiCad" has one definition. This version knew nothing about KiCad 10
+    and reported it as absent on exactly the version the README certifies.
+    """
+    from ohm.kicad_env import kicad_root
+
+    return kicad_root()
+
+
+def _default_symbol_dir() -> str:
+    """`--lib-dir`'s default: this machine's KiCad symbols if they can be found.
+
+    Falls back to the Linux path so `--help` still prints something concrete and
+    the error, when it comes, names a path the user can recognise.
+    """
+    from ohm.kicad_env import symbols_dir
+
+    return symbols_dir() or "/usr/share/kicad/symbols"
+
+
+def _default_footprint_dir() -> str | None:
+    """`verify-footprints --lib-dir`'s default: this machine's KiCad footprints.
+
+    None where KiCad is absent, and NOT a fallback path as `_default_symbol_dir`
+    uses: "no libraries here" is the answer the footprint command has to be able
+    to give, because reporting every footprint in the design as missing from a
+    directory that does not exist would be a page of confident nonsense.
+    """
+    from ohm.kicad_env import footprints_dir
+
+    return footprints_dir()
+
+
+def _print_verify_rows(rows: list[tuple[str, str, str, list[str]]]) -> tuple[int, int]:
+    """Render `verify-pinouts` / `verify-footprints` rows; returns (bad, unverifiable).
+
+    Shared so the two commands cannot drift apart in format: they are one habit
+    with two subjects, and a user who has read one report should not have to
+    re-learn how to read the other.
+    """
+    bad = unver = 0
+    for name, status, detail, mismatches in rows:
+        if status == "ok":
+            print(f"ok           {name}  ({detail})")
+        elif status == "unverifiable":
+            unver += 1
+            print(f"UNVERIFIABLE {name}  — {detail}")
+        else:
+            bad += 1
+            print(f"MISMATCH     {name}  vs {detail}  "
+                  f"({len(mismatches)} finding{'s' if len(mismatches) != 1 else ''})")
+            for line in mismatches[:12]:
+                print(f"                 {line}")
+            if len(mismatches) > 12:
+                print(f"                 … {len(mismatches) - 12} more")
+    return bad, unver
 
 
 def _cmd_doctor(args) -> int:
@@ -438,7 +487,8 @@ def main(argv: list[str] | None = None) -> int:
                          help="verify checkers do not mutate the IR (asserts on violation)")
     p_build.add_argument("--target-kicad", default=None,
                          help="KiCad major version to target (default: ohm.toml 'target', "
-                              "else 7; v1 supports: 7)")
+                              "else 7; accepts 7-10 — all emit the KiCad 7 format, "
+                              "which every one of them reads)")
     # ponytail: single 'declared' provider today; the flag is the provider seam
     p_build.add_argument("--ratings", choices=["declared"], default="declared",
                          help="pin-ratings provider")
@@ -452,6 +502,11 @@ def main(argv: list[str] | None = None) -> int:
                          help="exit 1 on any warning or worse")
     p_check.add_argument("--debug-passes", action="store_true",
                          help="verify checkers do not mutate the IR (asserts on violation)")
+    # S012 reads pad ids against the KiCad the user is actually building for; with
+    # no target it reports across every major the shipped table covers
+    p_check.add_argument("--target-kicad", default=None,
+                         help="KiCad major version to target (default: ohm.toml 'target', "
+                              "else 7), which decides how footprint pad ids are checked")
     p_check.add_argument("--explain", metavar="CODE",
                          help="print the explanation for a diagnostic code and exit")
 
@@ -469,8 +524,18 @@ def main(argv: list[str] | None = None) -> int:
     p_ver = sub.add_parser("verify-pinouts",
                            help="diff every pin↔pad map against real KiCad symbol libraries")
     p_ver.add_argument("file", help="the Ohm source")
-    p_ver.add_argument("--lib-dir", default="/usr/share/kicad/symbols",
+    # resolved rather than hardcoded: the old Linux-only default meant
+    # `verify-pinouts` had no usable default on Windows or macOS at all.
+    p_ver.add_argument("--lib-dir", default=_default_symbol_dir(),
                        help="directory of .kicad_sym libraries (default: %(default)s)")
+
+    p_vfp = sub.add_parser("verify-footprints",
+                           help="diff every declared pad against real KiCad footprint libraries")
+    p_vfp.add_argument("file", help="the Ohm source")
+    fp_default = _default_footprint_dir()
+    p_vfp.add_argument("--lib-dir", default=fp_default,
+                       help="directory of .pretty libraries (default: "
+                            + (fp_default or "this machine's installed KiCad, if any") + ")")
 
     p_sign = sub.add_parser("signoff",
                             help="verify a ROUTED .kicad_pcb against the Ohm source (ADR-011)")
@@ -548,15 +613,24 @@ def main(argv: list[str] | None = None) -> int:
             if need_out:
                 args.out = str(proj.root / proj.out) if proj else "."
             # honor ohm.toml's target only when already relying on the project
-            if args.command == "build" and args.target_kicad is None and proj is not None:
+            if args.target_kicad is None and proj is not None:
                 args.target_kicad = _target_major(proj.target)
 
-    if args.command == "build":
+    if args.command in ("build", "check"):
         if args.target_kicad is None:
             args.target_kicad = "7"
-        if args.target_kicad != "7":
-            print("error: only KiCad 7 is supported in v1", file=sys.stderr)
+        if args.target_kicad not in SUPPORTED_KICAD:
+            print(f"error: unknown KiCad target '{args.target_kicad}' — "
+                  f"supported: {', '.join(SUPPORTED_KICAD)}", file=sys.stderr)
             return 1
+        # Ohm writes ONE format for every target on purpose (see SUPPORTED_KICAD),
+        # so say so rather than letting a user believe `--target-kicad 10` bought
+        # them different bytes. Only worth saying when they asked for a target
+        # that is not the format's own version, and only when bytes are written.
+        if args.command == "build" and args.target_kicad != "7":
+            print(f"note: Ohm writes the KiCad 7 file format; KiCad "
+                  f"{args.target_kicad} reads it forward. Output is identical "
+                  f"for every supported target.", file=sys.stderr)
 
     if args.command == "lsp":
         from ohm.lsp import serve
@@ -664,26 +738,50 @@ def main(argv: list[str] | None = None) -> int:
                     print(d.machine(), file=sys.stderr)
             return 1
         rows = verify_against_libs(design, args.lib_dir)
-        bad = unver = 0
-        for name, status, detail, mismatches in rows:
-            if status == "ok":
-                print(f"ok           {name}  ({detail})")
-            elif status == "unverifiable":
-                unver += 1
-                print(f"UNVERIFIABLE {name}  — {detail}")
-            else:
-                bad += 1
-                print(f"MISMATCH     {name}  vs {detail}  "
-                      f"({len(mismatches)} finding{'s' if len(mismatches) != 1 else ''})")
-                for line in mismatches[:12]:
-                    print(f"                 {line}")
-                if len(mismatches) > 12:
-                    print(f"                 … {len(mismatches) - 12} more")
+        bad, unver = _print_verify_rows(rows)
         print(f"\n{len(rows)} attested components: {len(rows) - bad - unver} verified, "
               f"{bad} MISMATCHED, {unver} unverifiable")
         if unver:
             print("unverifiable is not the same as correct — attest those by hand "
                   'with pinout_source = "datasheet:<ref>"')
+        return 1 if bad else 0
+
+    if args.command == "verify-footprints":
+        from ohm.loader import load
+        from ohm.resolve import resolve
+        from ohm.verify_footprints import generated_packages, verify_against_footprints
+
+        program, load_diags = load(source, args.file)
+        design, res_diags = resolve(program, args.file)
+        if any(d.severity == "error" for d in load_diags + res_diags):
+            for d in load_diags + res_diags:
+                if d.severity == "error":
+                    print(d.machine(), file=sys.stderr)
+            return 1
+        # Abstaining is a 0. This command reads the REAL libraries, so with none
+        # on the machine there is nothing to read — which says nothing whatever
+        # about the design, and must not be reported as if it did. `ohm check`'s
+        # S012 is the half that still answers here, from the shipped table.
+        if args.lib_dir is None or not Path(args.lib_dir).is_dir():
+            where = (f"'{args.lib_dir}' is not a directory" if args.lib_dir else
+                     "no installed KiCad footprint libraries were found on this machine")
+            print(f"cannot check: {where}.\n"
+                  "`ohm verify-footprints` re-reads the footprint libraries KiCad "
+                  "actually has, so\nwith none installed there is nothing to compare "
+                  "against — this is not a finding about\nthe design. Install KiCad, or "
+                  "point --lib-dir (or $KICAD_FOOTPRINT_DIR) at a directory\nof .pretty "
+                  "libraries. `ohm check` still checks pad ids against Ohm's shipped table.")
+            return 0
+        rows = verify_against_footprints(design, args.lib_dir)
+        bad, unver = _print_verify_rows(rows)
+        print(f"\n{len(rows)} library footprints: {len(rows) - bad - unver} verified, "
+              f"{bad} MISMATCHED, {unver} unverifiable")
+        if generated := generated_packages(design):
+            print(f"{generated} generate(...) package{'s' if generated != 1 else ''} "
+                  "not applicable — Ohm emits that geometry itself")
+        if unver:
+            print("unverifiable is not the same as correct — those footprints are not "
+                  f"in {args.lib_dir}, so nothing read them")
         return 1 if bad else 0
 
     # ---- .zen ecosystem paths (ADR-012 X0) ----
@@ -748,7 +846,8 @@ def main(argv: list[str] | None = None) -> int:
 
     emit = args.command == "build"
     result = compile_source(source, args.file, emit=emit,
-                            debug_passes=getattr(args, "debug_passes", False))
+                            debug_passes=getattr(args, "debug_passes", False),
+                            target_kicad=getattr(args, "target_kicad", None))
     _report(result, source, args.json_diagnostics)
     if not result.ok:
         return 1

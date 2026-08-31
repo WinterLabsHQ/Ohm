@@ -9,8 +9,9 @@ import pytest
 
 from ohm.driver import compile_source
 
+from tests.conftest import KICAD_FOOTPRINTS, requires_kicad_fp
+
 STD_DIR = Path(__file__).resolve().parent.parent / "ohm" / "std"
-KICAD_FP = Path("/usr/share/kicad/footprints")
 STD_FILES = ["analog.ohm", "power.ohm", "logic.ohm"]
 
 EXPECTED = {
@@ -56,7 +57,7 @@ def test_every_declared_block_instantiates_clean(fname, tmp_path):
     assert result.diagnostics == [], [d.machine() for d in result.diagnostics]
 
 
-@pytest.mark.skipif(not KICAD_FP.is_dir(), reason="KiCad footprint library not installed")
+@requires_kicad_fp
 def test_string_footprints_exist_on_disk_with_declared_pads():
     checked = 0
     for fname in STD_FILES:
@@ -66,7 +67,7 @@ def test_string_footprints_exist_on_disk_with_declared_pads():
             if m is None:
                 continue  # generate(...) packages are compiler-verified
             lib, name = m.groups()
-            mod = KICAD_FP / f"{lib}.pretty" / f"{name}.kicad_mod"
+            mod = KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod"
             assert mod.is_file(), mod
             disk_pads = set(re.findall(r'\(pad "([^"]+)"', mod.read_text()))
             # only real pin lines — commented TEMPLATE pads don't count

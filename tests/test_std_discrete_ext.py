@@ -11,11 +11,10 @@ import pytest
 from ohm.driver import compile_source
 from ohm.emit_netlist import emit_netlist
 
-from tests.conftest import requires_kicad_fp
+from tests.conftest import KICAD_FOOTPRINTS, requires_kicad_fp
 
 STD = Path(__file__).parent.parent / "ohm" / "std"
 EXAMPLE = Path(__file__).parent / "examples" / "ac_and_ui.ohm"
-KICAD_FP = Path("/usr/share/kicad/footprints")
 
 NEW_BLOCKS = {
     "discrete": ["BridgeRectifier", "DigitalTransistor_NPN",
@@ -36,7 +35,7 @@ NEW_FOOTPRINTS = {
 
 def pad_ids(fid):
     lib, name = fid.split(":")
-    mod = (KICAD_FP / f"{lib}.pretty" / f"{name}.kicad_mod").read_text()
+    mod = (KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod").read_text()
     return set(re.findall(r'\(pad "([^"]*)"', mod))
 
 
@@ -65,7 +64,7 @@ def test_new_block_instantiates_clean(tmp_path, mod, block):
 @pytest.mark.parametrize("fid,declared", NEW_FOOTPRINTS.items())
 def test_new_footprint_and_declared_pads_exist_on_disk(fid, declared):
     lib, name = fid.split(":")
-    assert (KICAD_FP / f"{lib}.pretty" / f"{name}.kicad_mod").is_file(), fid
+    assert (KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod").is_file(), fid
     on_disk = pad_ids(fid)
     missing = declared - on_disk
     assert not missing, f"{fid}: declared pads {missing} not in {sorted(on_disk)}"

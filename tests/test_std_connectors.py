@@ -12,11 +12,10 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
-from tests.conftest import requires_kicad_fp
+from tests.conftest import KICAD_FOOTPRINTS, requires_kicad_fp
 
 STD_SRC = (Path(ohm.__file__).parent / "std" / "connectors.ohm").read_text()
 EXAMPLE = Path(__file__).parent / "examples" / "power_input.ohm"
-FP_ROOT = Path("/usr/share/kicad/footprints")
 
 BLOCKS = [
     "TerminalBlock_2", "TerminalBlock_3", "DCBarrelJack", "JST_XH_2", "JST_XH_3",
@@ -31,7 +30,7 @@ def _design():
 
 def _fp_path(fid):
     lib, name = fid.split(":")
-    return FP_ROOT / f"{lib}.pretty" / f"{name}.kicad_mod"
+    return KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod"
 
 
 def _pads_on_disk(fid):
@@ -70,16 +69,47 @@ def test_all_string_footprints_exist_on_disk():
 
 @requires_kicad_fp
 def test_every_declared_pad_exists_in_its_footprint():
-    """Exhaustive: every pad= on every block is a real pad id in the .kicad_mod."""
+    """Exhaustive: every pad= reaches real copper in the library installed here.
+
+    Via a rename where KiCad has one — the std library declares the id KiCad 8
+    and 9 use, and `ohm.lower` writes KiCad 10's spelling into the netlist
+    (ADR-021). Demanding the literal id would force the std library to be wrong
+    on two supported majors in order to be right on the third.
+    """
+    from ohm import fpdata
+
     comps = {c.name: c for c in _design().design.components}
     for name in BLOCKS:
         c = comps[name]
         disk = _pads_on_disk(c.package)
         for pin in c.pins:
-            assert pin.pad in disk, (
-                f"{name}.{pin.name} maps to pad '{pin.pad}' not present in "
-                f"{c.package} (footprint has {sorted(disk)})"
-            )
+            if pin.pad in disk:
+                continue
+            reached = any(fpdata.renamed_to(c.package, pin.pad, major) in disk
+                          for major in fpdata.kicad_majors())
+            assert reached, (
+                f"{name}.{pin.name} maps to pad '{pin.pad}', which is not in "
+                f"{c.package} (footprint has {sorted(disk)}) and no rename in "
+                f"ohm/fpdata reaches one that is")
+
+
+
+def _assert_pads_reach_copper(name: str, declared: set, package: str) -> None:
+    """Every declared pad exists in the installed library, or was renamed into
+    one that does. The std library declares the id KiCad 8 and 9 use; `ohm.lower`
+    writes the target's spelling into the netlist (ADR-021), so demanding the
+    literal id here would force the std library to be wrong on two supported
+    majors in order to be right on the third."""
+    from ohm import fpdata
+
+    disk = _pads_on_disk(package)
+    for pad in sorted(declared):
+        if pad in disk:
+            continue
+        assert any(fpdata.renamed_to(package, pad, major) in disk
+                   for major in fpdata.kicad_majors()), (
+            f"{name}: pad '{pad}' is not in {package} (has {sorted(disk)}) and no "
+            f"rename in ohm/fpdata reaches one that is")
 
 
 @requires_kicad_fp
@@ -95,12 +125,15 @@ def test_pad_ids_spot_checks():
     # RJ45: signal 1..8 + LEDs 9..12 + repeated shell id "SH"
     rj_pads = {p.pad for p in comps["RJ45"].pins}
     assert "SH" in rj_pads and {"1", "8", "9", "12"} <= rj_pads
-    assert rj_pads <= _pads_on_disk(comps["RJ45"].package)
+    _assert_pads_reach_copper("RJ45", rj_pads, comps["RJ45"].package)
 
-    # MicroSD: SD-mode contacts + card-detect + shell "11"
+    # MicroSD: SD-mode contacts + card-detect + the shell, which the std library
+    # declares as "11" (KiCad 8/9) and KiCad 10 calls "SH". Compared through the
+    # rename table for the same reason as the exhaustive check above — the
+    # declaration must REACH copper here, not match this library's spelling.
     sd_pads = {p.pad for p in comps["MicroSD"].pins}
     assert {"1", "8", "9", "10", "11"} <= sd_pads
-    assert sd_pads <= _pads_on_disk(comps["MicroSD"].package)
+    _assert_pads_reach_copper("MicroSD", sd_pads, comps["MicroSD"].package)
 
     # CoinCellHolder: two-terminal + / -
     cc_pads = {p.pad for p in comps["CoinCellHolder"].pins}

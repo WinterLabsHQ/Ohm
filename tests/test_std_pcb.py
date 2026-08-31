@@ -9,7 +9,7 @@ import ohm
 from ohm.cli import main as cli_main
 from ohm.driver import compile_source
 
-from tests.conftest import requires_kicad_fp
+from tests.conftest import footprint, requires_kicad_fp
 
 STD_DIR = Path(ohm.__file__).parent / "std"
 PCB_SRC = (STD_DIR / "pcb.ohm").read_text()
@@ -86,7 +86,7 @@ def test_all_string_footprints_exist_on_disk():
     assert ids, "expected string footprints in std.pcb / std.clock"
     for fid in ids:
         lib, name = fid.split(":")
-        path = Path(f"/usr/share/kicad/footprints/{lib}.pretty/{name}.kicad_mod")
+        path = footprint(f"{lib}.pretty/{name}.kicad_mod")
         assert path.is_file(), f"{fid} -> {path} missing"
 
 

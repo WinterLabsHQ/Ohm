@@ -6,17 +6,13 @@ wrong pad. Every test that matters here starts from a design the rest of the
 S-tier calls clean.
 """
 
-from pathlib import Path
-
 import pytest
 
 from ohm.driver import compile_source
 from ohm.import_symbol import import_symbol
 from ohm.provenance import _prefix_score, _same_pin, digest_pairs, parse_source
 
-KICAD_SYMBOLS = Path("/usr/share/kicad/symbols")
-requires_kicad_sym = pytest.mark.skipif(
-    not KICAD_SYMBOLS.is_dir(), reason="KiCad symbol libraries not installed")
+from tests.conftest import KICAD_SYMBOLS, requires_kicad_sym
 
 
 def _part(*, pins=8, mpn=True, source=None, digest=None, swap=False):

@@ -1,9 +1,23 @@
 name: ci
 
-on: [push, pull_request]
+# `fast` gates every push and PR. The KiCad jobs pull a ~1.5 GB image and are
+# deliberately kept off that path: compatibility with a program Ohm does not ship
+# changes on KiCad's release cadence, not on Ohm's, so it is checked weekly, on
+# demand, and at every tag — not on every commit.
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"        # Mondays 04:00 UTC
+  workflow_dispatch:
 
 jobs:
-  test:
+  # ------------------------------------------------------------------
+  # The gate that must stay fast. No KiCad, no container pull.
+  # ------------------------------------------------------------------
+  fast:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,3 +28,202 @@ jobs:
       - run: ruff check ohm/ shared/ tests/
       - run: mypy
       - run: pytest -q
+
+  # ------------------------------------------------------------------
+  # Ohm's output, read by real KiCad. Everything inside one image, so the
+  # binary and the symbol/footprint libraries are the same version by
+  # construction — the failure mode where a KiCad 10 binary is checked
+  # against KiCad 8 libraries cannot occur.
+  #
+  # No KiCad 7 leg: the official images begin at 8.0.4 and no 7.x tag has
+  # ever existed. KiCad 7 is certified against a local install or not at all.
+  # ------------------------------------------------------------------
+  kicad:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    container: kicad/kicad:${{ matrix.kicad }}
+    strategy:
+      fail-fast: false          # one version failing must not hide the others
+      matrix:
+        kicad: ["8.0.9", "9.0.9", "10.0.5"]
+    env:
+      # A skipped test is not a passed test. Without this the job is green when
+      # KiCad is missing, which is the exact failure this job exists to prevent:
+      # a certification run that certified nothing. See tests/conftest.py.
+      OHM_REQUIRE_KICAD: "1"
+      HOME: /github/home        # kicad-cli writes its config on first run
+      PYTHONUTF8: "1"
+    steps:
+      - name: Container prerequisites
+        # The image is a kicad-cli runtime, not a build environment: it has
+        # neither git (which actions/checkout prefers) nor curl (which the uv
+        # installer needs).
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12
+        # The image is Debian 12 bookworm -> Python 3.11, and Ohm is
+        # requires-python >= 3.12, so the image interpreter cannot install it.
+        # uv fetches a standalone 3.12 and is already this repo's lock tool.
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Ohm
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+          uv pip install -e ".[dev]"
+
+      - name: Record what is under test
+        # A test report that does not name the KiCad it ran against cannot be
+        # used as evidence afterwards.
+        run: |
+          kicad-cli version
+          ls -d /usr/share/kicad/footprints /usr/share/kicad/symbols
+
+      - name: Emit gates — KiCad reads what Ohm writes
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_schematic_roundtrip.py \
+            tests/test_pkggen.py \
+            tests/test_placement.py \
+            tests/test_lower_emit.py \
+            tests/test_fixes_w3_parser.py
+
+      - name: Library gates — the parts Ohm names still exist
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_import_symbol.py \
+            tests/test_provenance.py \
+            tests/test_std_analog.py \
+            tests/test_std_connect.py \
+            tests/test_std_connectors.py \
+            tests/test_std_discrete.py \
+            tests/test_std_discrete_ext.py \
+            tests/test_std_magnetics.py \
+            tests/test_std_opto_ext.py \
+            tests/test_std_passives.py \
+            tests/test_std_pcb.py
+
+      - name: Read-back and plot gates
+        # Split out so a failure here reads as "KiCad changed what it WRITES",
+        # distinct from the emit gates' "KiCad changed what it READS".
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_signoff_readback.py \
+            tests/test_kicad_plot.py
+
+      - name: Dump this KiCad's footprint pad ids
+        # Feeds the `fpdata` job below. Ohm ships a table of these because a
+        # `package = "Lib:Footprint"` reference emits a pad-LESS stub and only
+        # the pad id travels — so a pad KiCad renamed silently unbinds a pin.
+        run: |
+          python3 tools/gen_fpdata.py dump "${{ matrix.kicad }}" \
+            "pads-$(echo '${{ matrix.kicad }}' | cut -d. -f1).json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fpdump-${{ matrix.kicad }}
+          path: pads-*.json
+
+  # ------------------------------------------------------------------
+  # V007 — the geometry gate, which imports pcbnew IN-PROCESS. Only runs
+  # where the system Python matches Ohm's: ubuntu-24.04 is 3.12 and the
+  # KiCad 10 PPA builds pcbnew against it. `ubuntu-latest` is deliberately
+  # NOT used here — when that label moves to a newer Ubuntu the system
+  # Python moves with it and pcbnew silently stops importing.
+  # ------------------------------------------------------------------
+  v007:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    env:
+      OHM_REQUIRE_KICAD: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: KiCad 10 from the PPA
+        run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
+          sudo apt-get update
+          sudo apt-get install -y --install-recommends kicad
+          kicad-cli version
+          python3 -c "import pcbnew; print('pcbnew', pcbnew.GetBuildVersion())"
+
+      - name: Install Ohm against the system interpreter
+        # --system-site-packages so the venv can see KiCad's pcbnew. ohm/drc.py
+        # also appends /usr/lib/python3/dist-packages itself, but requiring both
+        # means a failure here is a real failure, not a path accident.
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Geometry gate
+        run: |
+          .venv/bin/python -m pytest -q \
+            tests/test_signoff.py \
+            tests/test_drc_gate.py
+
+  # ------------------------------------------------------------------
+  # The shipped pad table must not rot. Rebuild it from the libraries the
+  # matrix just read and fail if it differs from what is committed — the
+  # KiCad 10 shield rename (163 footprints, `11`/`6`/`S1` -> `SH`) reached
+  # users precisely because nothing noticed a library had changed.
+  # ------------------------------------------------------------------
+  fpdata:
+    if: github.event_name != 'pull_request'
+    needs: [kicad]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fpdump-*
+          merge-multiple: true
+          path: dumps
+      - name: Rebuild and compare
+        # The build is byte-reproducible (sorted keys, gzip mtime=0), so any
+        # difference is a real library change, never churn.
+        run: |
+          python tools/gen_fpdata.py build ohm/fpdata/pads.json.gz dumps/pads-*.json
+          if ! git diff --quiet -- ohm/fpdata/pads.json.gz; then
+            echo "::error::ohm/fpdata/pads.json.gz is out of date — a KiCad library changed."
+            echo "Regenerate it and read the diff before committing: a renamed pad silently"
+            echo "unbinds a pin on every board that names the old id."
+            git --no-pager diff --stat -- ohm/fpdata/pads.json.gz
+            exit 1
+          fi
+          echo "pad table matches the installed libraries at every matrix version"
+
+  # ------------------------------------------------------------------
+  # The claim, with provenance. "Verified through 10.0.5" should be a file
+  # a machine wrote, not a sentence someone typed.
+  # ------------------------------------------------------------------
+  certify:
+    if: github.event_name != 'pull_request'
+    needs: [kicad, v007, fpdata]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write the certification record
+        run: |
+          {
+            echo "commit:  ${GITHUB_SHA}"
+            echo "date:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run:     ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "kicad:   8.0.9, 9.0.9, 10.0.5 — emit, libraries, read-back, plot"
+            echo "v007:    10.0.5 — pcbnew in-process (ubuntu-24.04 PPA)"
+            echo "not run: 7.0.x — no official container image exists"
+          } > kicad-certification.txt
+          cat kicad-certification.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kicad-certification
+          path: kicad-certification.txt

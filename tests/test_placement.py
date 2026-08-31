@@ -7,7 +7,6 @@ only; .kicad_pro net classes; kicad-cli parse; byte-identity; near adjacency.
 
 import json
 import re
-import shutil
 import subprocess
 from decimal import Decimal
 
@@ -19,6 +18,8 @@ from ohm.emit_kicad import _CELL_GAP, emit_kicad_pcb, emit_kicad_sch, parse_mm
 from ohm.emit_kicad_pro import emit_kicad_pro
 from ohm.emit_netlist import emit_netlist
 from ohm.pkggen.packages import build
+
+from tests.conftest import KICAD_CLI, requires_kicad_cli
 
 SRC = (
     "interface Power:\n"
@@ -198,12 +199,12 @@ def test_keepout_zone_emitted(pcb):
 
 
 # ---------- kicad-cli parses the board ----------
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad_cli
 def test_kicad_cli_parses_board(pcb, tmp_path):
     board = tmp_path / "board.kicad_pcb"
     board.write_text(pcb)
     r = subprocess.run(
-        ["kicad-cli", "pcb", "export", "pos", "-o", str(tmp_path / "b.pos"), str(board)],
+        [KICAD_CLI, "pcb", "export", "pos", "-o", str(tmp_path / "b.pos"), str(board)],
         capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 

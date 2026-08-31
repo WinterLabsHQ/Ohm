@@ -44,12 +44,19 @@ miss them and Ohm has to invent a substitute, which is what reads as amateur.
 - **`note "..."`** for anything geometry cannot say. `near(...)` constraints
   render themselves onto the sheet as placement notes.
 
-## The two gates, and why there are two
+## The gates, and why there are several
 
 - **Connectivity is proved, exactly.** `tests/test_schematic_roundtrip.py` makes
   KiCad re-read the emitted schematic and compares it to Ohm's own netlist. A
   wire that misses its pin splits a net and the gate fails. Do not weaken this
   to make a change pass — it is what made every layout rewrite safe.
+- **Read-back is proved too.** `tests/test_signoff_readback.py` runs an emitted
+  board through `kicad-cli pcb upgrade` — KiCad rewriting it, as it does the
+  moment anyone opens and saves — and asserts `ohm signoff` reaches the same
+  verdict. Signoff identifies parts by a custom `ohm_path` property, so a KiCad
+  release that moved or dropped it would silently stop identifying parts in the
+  last check before fabrication. Everything else here tests what Ohm *writes*;
+  this is the only gate on what Ohm *reads*.
 - **Legibility is checked, advisory.** `ohm/check_drawing.py` (**D001–D004**)
   reports overlapping text, text over a symbol body, overlapping symbols and
   duplicate uuids on every emitted sheet. It exists because every geometric

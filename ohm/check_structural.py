@@ -3,8 +3,10 @@
 Pure structural comparison of things both present in the program (the
 self-closing loop): pin↔pad maps vs the declared package. For generate(...)
 packages the pad set is fully declared (the built package model), so the loop closes
-completely; for external string footprints only program-internal consistency is
-checkable (no footprint data at build time — hermeticity N1).
+completely; for external string footprints the geometry belongs to the user's
+installed library, so the loop closes only as far as the pad IDS — which is what
+S012 checks, against the table shipped in `ohm.fpdata` rather than against a disk
+Ohm is not allowed to read (hermeticity N1).
 
 Since R9 allows per-instance `package=` overrides (library blocks), the same
 pad-loop check also runs for every instance whose override changes the package.
@@ -18,6 +20,7 @@ from decimal import Decimal
 
 from ohm import ir
 from ohm.diagnostics import Diagnostic, Span
+from ohm.fpdata import kicad_majors, known, majors_lacking, pads, present_in, renamed_to, summarise
 from ohm.provenance import parse_source, pinmap_digest
 
 _NO_SPAN = Span(1, 1, 1, 1)
@@ -103,6 +106,95 @@ def _check_pad_loop(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
         diags.append(_d("error", "S006",
                         f"package of {owner} must be a footprint string or generate(...)",
                         span, path))
+
+
+# S012 closes the half of the loop S004 leaves open. For an external footprint the
+# pad ids are the ONLY thing that travels — Ohm emits a pad-less stub and KiCad
+# supplies the geometry from the library on that machine — so a pad id that library
+# does not carry lands in the netlist and the pin arrives unconnected. KiCad 10
+# renamed shield and shell pads to "SH" across 163 footprints, which is how a
+# `pad=11` that was right for years becomes silently wrong on upgrade.
+
+
+def _fpdata_target(target_kicad: str | None) -> str | None:
+    """The major to check against, or None to check against every known major.
+
+    A target the shipped table has no data for — KiCad 7, which has no official
+    container image to generate a table from — is not clean, it is unknown, and
+    unknown has to fall back to reporting across the majors that ARE covered.
+    """
+    return target_kicad if target_kicad in kicad_majors() else None
+
+
+def _no_target_help(target_kicad: str | None) -> str:
+    """Say why the answer is a list of versions rather than one verdict."""
+    covered = ", ".join(kicad_majors())
+    why = ("no --target-kicad was given" if target_kicad is None
+           else f"the shipped table has no data for KiCad {target_kicad}")
+    return (f"{why}, so the pad is read against every KiCad the table does cover "
+            f"({covered}). Name one of those as --target-kicad to get a single verdict.")
+
+
+def _fate(footprint: str, pad: str, majors: tuple[str, ...]) -> str:
+    """What became of `pad` in each major whose copy of `footprint` lacks it."""
+    return "; ".join(
+        f"KiCad {m} calls it '{new}'" if (new := renamed_to(footprint, pad, m)) is not None
+        else f"KiCad {m} has no such pad" for m in majors)
+
+
+def _check_footprint_pads(comp: ir.ComponentDef, package: ir.Value | None, owner: str,
+                          span: Span | None, path: str, target_kicad: str | None,
+                          diags: list[Diagnostic]) -> None:
+    """S012 — do the pads this component names exist in the footprint it names?
+
+    Silent on anything the shipped table does not cover: a footprint from the
+    user's own or a third party's library is unknown, not wrong.
+    """
+    if not isinstance(package, str) or not known(package):
+        return
+    target = _fpdata_target(target_kicad)
+    mapped = [(pin, pin.pad) for pin in comp.pins if pin.pad is not None]
+    if target is not None:
+        if not present_in(package, target):
+            diags.append(_d("error", "S012",
+                            f"{owner} uses footprint '{package}', which KiCad {target} "
+                            f"no longer ships", span, path,
+                            "KiCad removed this footprint from its own libraries: name the "
+                            "part's current footprint, or keep the old one in a library of "
+                            "your own and reference it from there"))
+            return
+        have = pads(package, target)
+        if have is None:
+            return
+        for pin, pad in mapped:
+            if pad in have:
+                continue
+            if renamed_to(package, pad, target) is not None:
+                # KiCad renamed this pad; the copper is the same and
+                # `ohm.lower._pad_translator` writes the target's spelling into
+                # the netlist. Nothing for the author to fix, so nothing is said.
+                continue
+            else:
+                diags.append(_d("error", "S012",
+                                f"pin '{pin.name}' of {owner} maps to pad '{pad}', which "
+                                f"'{package}' does not have in KiCad {target}",
+                                pin.span or span, path,
+                                f"KiCad {target} gives that footprint: "
+                                f"{summarise(package, target)}"))
+        return
+    for pin, pad in mapped:
+        # A major that merely RENAMED the pad is handled at lowering time, so it
+        # is not a finding here either. Reporting it would put a warning on every
+        # board using a connector whose shield KiCad 10 renamed — 163 footprints
+        # — for something Ohm resolves on its own.
+        lacking = tuple(m for m in majors_lacking(package, pad)
+                        if renamed_to(package, pad, m) is None)
+        if lacking:
+            diags.append(_d("warning", "S012",
+                            f"pin '{pin.name}' of {owner} maps to pad '{pad}' of "
+                            f"'{package}': {_fate(package, pad, lacking)}",
+                            pin.span or span, path,
+                            _no_target_help(target_kicad)))
 
 
 # A pin↔pad map is only worth attesting on a part specific enough to order: a
@@ -203,7 +295,8 @@ def _check_package_family(comp: ir.ComponentDef, path: str,
                     f"generate(QFN, pins={2 * rows + 2 * cols - 4}, pitch=..., body=...)"))
 
 
-def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnostic]:
+def check_structural(design: ir.Design, path: str = "<string>", *,
+                     target_kicad: str | None = None) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     for comp in design.components:
         # S005: a component must declare a package
@@ -222,6 +315,8 @@ def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnost
             else:
                 seen[pin.pad] = pin
         _check_pad_loop(comp, comp.package, f"'{comp.name}'", comp.span, path, diags)
+        _check_footprint_pads(comp, comp.package, f"'{comp.name}'", comp.span, path,
+                              target_kicad, diags)
         _check_provenance(comp, path, diags)
         _check_package_family(comp, path, diags)
 
@@ -230,10 +325,12 @@ def check_structural(design: ir.Design, path: str = "<string>") -> list[Diagnost
     comps = {c.name: c for c in design.components}
     for module in design.modules:
         for inst in module.instances:
-            target = comps.get(inst.def_ref)
+            target_def = comps.get(inst.def_ref)
             override = dict(inst.overrides).get("package")
-            if target is None or override is None:
+            if target_def is None or override is None:
                 continue
-            owner = f"'{module.name}.{inst.name}' ({target.name})"
-            _check_pad_loop(target, override, owner, inst.span, path, diags)
+            owner = f"'{module.name}.{inst.name}' ({target_def.name})"
+            _check_pad_loop(target_def, override, owner, inst.span, path, diags)
+            _check_footprint_pads(target_def, override, owner, inst.span, path,
+                                  target_kicad, diags)
     return diags

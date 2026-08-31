@@ -9,11 +9,10 @@ import pytest
 from ohm.driver import compile_source
 from ohm.emit_netlist import emit_netlist
 
-from tests.conftest import requires_kicad_fp
+from tests.conftest import KICAD_FOOTPRINTS, requires_kicad_fp
 
 STD = Path(__file__).parent.parent / "ohm" / "std"
 EXAMPLE = Path(__file__).parent / "examples" / "mosfet_switch.ohm"
-KICAD_FP = Path("/usr/share/kicad/footprints")
 
 STD_FILES = ["discrete.ohm", "protection.ohm", "opto.ohm"]
 
@@ -47,7 +46,7 @@ def test_all_string_footprints_exist_on_disk():
     checked = 0
     for name in STD_FILES:
         for lib, fp in pat.findall((STD / name).read_text()):
-            mod = KICAD_FP / f"{lib}.pretty" / f"{fp}.kicad_mod"
+            mod = KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{fp}.kicad_mod"
             assert mod.is_file(), f"{name}: missing footprint {mod}"
             # pad ids used in std files are 1 and 2 — both must exist in the mod
             text = mod.read_text()

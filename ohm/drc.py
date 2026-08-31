@@ -4,13 +4,20 @@ ADR-011 makes `ohm signoff` verify a routed board against the SOURCE, and keeps
 `ohm/signoff.py` pure (no I/O, no subprocess, N1). Geometry — clearance, silk
 over pads, courtyard overlap, board outline — is a property of the board alone,
 so signoff delegated it. It delegated it to `kicad-cli pcb drc`, a subcommand
-that **does not exist in KiCad 7**, the version Ohm pins: the advice was
-unrunnable, so in practice nothing checked geometry at all.
+that **does not exist in KiCad 7**, the oldest KiCad Ohm supports: the advice was
+unrunnable there, so in practice nothing checked geometry at all.
 
-KiCad 7 does expose its DRC engine to Python (`pcbnew.WriteDRCReport`). This
-module drives it and folds the result back into Ohm diagnostics, so one command
-gives one verdict. It lives outside signoff.py because it is impure by nature:
-it imports KiCad and writes a temp file. That is the same seam
+Every KiCad from 8 onwards does ship `kicad-cli pcb drc`, but this module stays
+on the Python route deliberately. `pcbnew.WriteDRCReport` has existed since
+KiCad 7, so one code path serves every supported version; it needs no binary on
+`PATH`, which is the common case inside a virtualenv; and it returns the report
+to the caller rather than to a file the caller must then find. A second
+implementation gated on the user's KiCad version would be two things to keep
+correct in exchange for nothing.
+
+This module drives that engine and folds the result back into Ohm diagnostics,
+so one command gives one verdict. It lives outside signoff.py because it is
+impure by nature: it imports KiCad and writes a temp file. That is the same seam
 `ohm verify-pinouts` already uses to read real KiCad symbol libraries.
 
 Unrouted boards are the normal case for Ohm today (there is no router — that is

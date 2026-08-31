@@ -17,7 +17,8 @@ class Project:
     name: str
     entry: str        # entry file, relative to root
     out: str          # output directory, relative to root
-    target: str       # emit target (v1: "kicad7")
+    target: str       # KiCad targeted ("kicad7".."kicad10"; one format, see
+                      # ohm.cli.SUPPORTED_KICAD)
 
 
 def find_root(start: Path | None = None) -> Path | None:

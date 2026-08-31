@@ -2,6 +2,8 @@ include README.md CHANGELOG.md AGENTS.md LICENSE NOTICE pyproject.toml uv.lock
 recursive-include ohm *.lark
 recursive-include ohm/std *.ohm
 recursive-include ohm/templates *
+recursive-include ohm/fpdata *.json.gz
+include tools/gen_fpdata.py
 recursive-include docs *.md
 prune tests
 prune examples

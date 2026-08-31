@@ -4,18 +4,17 @@ footprints carry silkscreen outline + pin-1 marker, `python -m ohm` works,
 version is single-sourced with an uninstalled fallback."""
 
 import re
-import shutil
 import subprocess
 import sys
 from decimal import Decimal
-
-import pytest
 
 from ohm import ir
 from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
 from ohm.parse import parse
 from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import build
+
+from tests.conftest import KICAD_CLI, requires_kicad_cli
 
 
 # ---------- finding 1: UTF-8 BOM ----------
@@ -111,7 +110,7 @@ def test_footprint_has_silk_outline_and_pin1_marker():
     assert emit_footprint(build("SOIC", {"pins": Decimal(8)})) == fp
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad_cli
 def test_footprint_with_silk_parses_in_kicad(tmp_path):
     fp = emit_footprint(SOIC8)
     body = "\n".join("  " + line for line in fp.splitlines())
@@ -120,7 +119,7 @@ def test_footprint_with_silk_parses_in_kicad(tmp_path):
            + body + "\n)")
     board = tmp_path / "t.kicad_pcb"
     board.write_text(pcb)
-    r = subprocess.run(["kicad-cli", "pcb", "export", "pos", "-o", str(tmp_path / "t.pos"),
+    r = subprocess.run([KICAD_CLI, "pcb", "export", "pos", "-o", str(tmp_path / "t.pos"),
                         str(board)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 

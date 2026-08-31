@@ -19,7 +19,22 @@
 # pytest tmp_path.
 set -euo pipefail
 
-IMAGE="kicad/kicad:${OHM_KICAD_VERSION:-10.0.5}"
+VERSION="${OHM_KICAD_VERSION:-10.0.5}"
+
+# The official images start at 8.0.4 — there is no 7.x tag and there never was.
+# Asking for one used to fail as an opaque "manifest unknown" from `docker pull`
+# midway through a test run, which reads as a broken harness rather than as the
+# fact it is. KiCad 7 can only be certified against a local install.
+case "$VERSION" in
+  7|7.*)
+    echo "kicad_in_docker: no official kicad/kicad image exists for KiCad ${VERSION}" >&2
+    echo "  (the published tags begin at 8.0.4). Certify KiCad 7 against a local" >&2
+    echo "  install instead: OHM_KICAD_CLI=/path/to/kicad-cli pytest ..." >&2
+    exit 2
+    ;;
+esac
+
+IMAGE="kicad/kicad:${VERSION}"
 
 # Mount the directories the arguments actually name — not $HOME — so a stray
 # path outside them fails loudly in the container instead of silently resolving

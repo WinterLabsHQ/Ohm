@@ -3,12 +3,12 @@
 An embedded fixture keeps CI self-contained; the system-library tests (skipped
 when KiCad isn't installed) prove the real ecosystem imports."""
 
-from pathlib import Path
-
 import pytest
 
 from ohm.driver import compile_source
 from ohm.import_symbol import SymbolError, import_symbol, list_symbols
+
+from tests.conftest import first_symbol_lib, requires_symbol_lib, symbol_lib
 
 FIXTURE = """(kicad_symbol_lib (version 20220914) (generator test)
   (symbol "OpAmpish" (in_bom yes)
@@ -26,9 +26,30 @@ FIXTURE = """(kicad_symbol_lib (version 20220914) (generator test)
     (property "Reference" "U" (at 0 0 0)))
 )"""
 
-SYSLIB = Path("/usr/share/kicad/symbols/Device.kicad_sym")
-# KiCad 9 moved the discrete FETs out of Device into Transistor_FET.
-FETLIB = Path("/usr/share/kicad/symbols/Transistor_FET.kicad_sym")
+SYSLIB = symbol_lib("Device.kicad_sym")
+# KiCad 9 moved the discrete FETs out of Device into Transistor_FET, so where
+# Q_NMOS_GDS lives depends on the version installed. Ask for the symbol, not for
+# one library's name: pinned to Transistor_FET this failed on KiCad 8, where that
+# library exists but does not contain the part.
+FET_LIBS = ("Transistor_FET.kicad_sym", "Device.kicad_sym")
+
+
+def _lib_holding(symbol: str, *libs: str):
+    """The first installed library that actually CONTAINS `symbol`.
+
+    KiCad moves parts between libraries across releases (the discrete FETs went
+    Device -> Transistor_FET at KiCad 9), so asking for a library name and
+    assuming the part is in it fails on whichever half of the range is wrong.
+    """
+    from ohm.import_symbol import list_symbols
+
+    for name in libs:
+        path = symbol_lib(name)
+        if path is not None and path.exists() and symbol in list_symbols(
+                path.read_text(encoding="utf-8")):
+            return path
+    pytest.skip(f"no installed KiCad library holds {symbol} (looked in {', '.join(libs)})")
+
 
 
 def test_import_generates_compilable_component():
@@ -65,17 +86,20 @@ def test_deterministic():
     assert import_symbol(FIXTURE, "OpAmpish") == import_symbol(FIXTURE, "OpAmpish")
 
 
-@pytest.mark.skipif(not SYSLIB.exists(), reason="system KiCad symbols not installed")
+@requires_symbol_lib("Device.kicad_sym")
 def test_real_device_resistor():
     text = import_symbol(SYSLIB.read_text(), "R", "Device")
     assert "pin P1: role=passive, pad=1" in text and "pin P2: role=passive, pad=2" in text
 
 
-@pytest.mark.skipif(not SYSLIB.exists(), reason="system KiCad symbols not installed")
+# guarded on Transistor_FET, not Device: that is the library this one reads
+@pytest.mark.skipif(first_symbol_lib(*FET_LIBS) is None,
+                    reason="no KiCad symbol library installed for the FETs")
 def test_every_role_emitted_is_valid():
     from ohm.resolve import VALID_ROLES
 
-    text = import_symbol(FETLIB.read_text(), "Q_NMOS_GDS", "Transistor_FET")
+    lib = _lib_holding("Q_NMOS_GDS", *FET_LIBS)
+    text = import_symbol(lib.read_text(encoding="utf-8"), "Q_NMOS_GDS", lib.stem)
     for line in text.splitlines():
         if line.strip().startswith("pin "):
             role = line.split("role=")[1].split(",")[0]

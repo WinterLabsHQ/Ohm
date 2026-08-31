@@ -6,6 +6,7 @@ import pytest
 
 from ohm.driver import compile_source
 
+
 EXAMPLES = sorted((Path(__file__).parent.parent / "examples").glob("*.ohm"))
 
 

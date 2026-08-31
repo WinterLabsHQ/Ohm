@@ -3,7 +3,6 @@ that import into KiCad clean and match a golden reference within tolerance;
 (b) generated pads satisfy the pin<->pad map (Tier-S); (c) byte-identical
 across runs. `ohm gen-package` works standalone. No fetch in the build path."""
 
-import shutil
 import subprocess
 import sys
 from decimal import Decimal
@@ -17,14 +16,18 @@ from ohm.pkggen.footprint import emit_footprint
 from ohm.pkggen.packages import PkgError, build
 from ohm.pkggen.symbol import emit_symbol
 
-KICAD_SOIC8 = Path("/usr/share/kicad/footprints/Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm.kicad_mod")
+from tests.conftest import (KICAD_CLI, KICAD_SYMBOLS, first_footprint, footprint,
+                            requires_footprint, requires_kicad_cli, requires_kicad_sym)
+
+SOIC8_MOD = "Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm.kicad_mod"
+KICAD_SOIC8 = footprint(SOIC8_MOD)
 OHM_BIN = Path(sys.executable).parent / "ohm"
 
 SOIC8 = build("SOIC", {"pins": Decimal(8)})
 
 
 # ---------- gate (a): golden reference within tolerance ----------
-@pytest.mark.skipif(not KICAD_SOIC8.exists(), reason="KiCad library not installed")
+@requires_footprint(SOIC8_MOD)
 def test_soic8_matches_kicad_golden_within_tolerance():
     golden = pads_from_kicad_mod(KICAD_SOIC8)
     assert len(golden) == 8
@@ -36,7 +39,7 @@ def test_soic8_matches_kicad_golden_within_tolerance():
         assert abs(pad.h - gh) <= Decimal("0.10"), f"pad {pad.id} h: {pad.h} vs {gh}"
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad_cli
 def test_generated_footprint_imports_into_kicad(tmp_path):
     # embed the footprint in a board and let real KiCad parse it
     fp = emit_footprint(SOIC8)
@@ -46,7 +49,7 @@ def test_generated_footprint_imports_into_kicad(tmp_path):
            + body + "\n)")
     board = tmp_path / "t.kicad_pcb"
     board.write_text(pcb)
-    r = subprocess.run(["kicad-cli", "pcb", "export", "pos", "-o", str(tmp_path / "t.pos"),
+    r = subprocess.run([KICAD_CLI, "pcb", "export", "pos", "-o", str(tmp_path / "t.pos"),
                         str(board)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
@@ -117,11 +120,12 @@ def _q(x: str, unit: str = "mm"):
     return Quantity(Decimal(x), unit)
 
 
-KICAD_QFN32 = Path("/usr/share/kicad/footprints/Package_DFN_QFN.pretty/"
-                   "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.kicad_mod")
+QFN32_MOD = ("Package_DFN_QFN.pretty/"
+             "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.kicad_mod")
+KICAD_QFN32 = footprint(QFN32_MOD)
 
 
-@pytest.mark.skipif(not KICAD_QFN32.exists(), reason="KiCad library not installed")
+@requires_footprint(QFN32_MOD)
 def test_qfn32_matches_kicad_golden_within_tolerance():
     golden = pads_from_kicad_mod(KICAD_QFN32, as_float=True)
     model = build("QFN", {"pins": Decimal(32), "pitch": _q("0.5"), "body": _q("5")})
@@ -151,10 +155,11 @@ def test_qfn_bad_params_raise():
         build("QFN", {"pins": Decimal(32)})  # missing body
 
 
-KICAD_LQFP48 = Path("/usr/share/kicad/footprints/Package_QFP.pretty/LQFP-48_7x7mm_P0.5mm.kicad_mod")
+LQFP48_MOD = "Package_QFP.pretty/LQFP-48_7x7mm_P0.5mm.kicad_mod"
+KICAD_LQFP48 = footprint(LQFP48_MOD)
 
 
-@pytest.mark.skipif(not KICAD_LQFP48.exists(), reason="KiCad library not installed")
+@requires_footprint(LQFP48_MOD)
 def test_qfp48_matches_kicad_golden_within_tolerance():
     golden = pads_from_kicad_mod(KICAD_LQFP48, as_float=True)
     model = build("QFP", {"pins": Decimal(48), "pitch": _q("0.5"), "span": _q("9")})
@@ -180,10 +185,11 @@ def test_qfp_bad_params_raise():
         build("QFP", {"pins": Decimal(32)})  # missing span
 
 
-KICAD_DFN8 = Path("/usr/share/kicad/footprints/Package_DFN_QFN.pretty/DFN-8_2x2mm_P0.5mm.kicad_mod")
+DFN8_MOD = "Package_DFN_QFN.pretty/DFN-8_2x2mm_P0.5mm.kicad_mod"
+KICAD_DFN8 = footprint(DFN8_MOD)
 
 
-@pytest.mark.skipif(not KICAD_DFN8.exists(), reason="KiCad library not installed")
+@requires_footprint(DFN8_MOD)
 def test_dfn8_matches_kicad_golden_within_tolerance():
     golden = pads_from_kicad_mod(KICAD_DFN8, as_float=True)
     model = build("DFN", {"pins": Decimal(8), "pitch": _q("0.5"), "body": _q("2")})
@@ -203,11 +209,22 @@ def test_dfn_son_two_columns():
         assert {round(float(p.x), 2) for p in m.pads} == {-0.94, 0.94}  # exactly two columns
 
 
-KICAD_BGA49 = Path("/usr/share/kicad/footprints/Package_BGA.pretty/"
-                   "Analog_BGA-49_6.25x6.25mm_Layout7x7_P0.8mm_Ball0.5mm_Pad0.4mm.kicad_mod")
+# The name carried a `_Ball0.5mm_Pad0.4mm` suffix that no KiCad ships — verified
+# absent from 8.0.9, 9.0.9 and 10.0.5 alike — so this comparison had never once
+# run, on any machine, at any version. Found by OHM_REQUIRE_KICAD, which is the
+# whole reason a skipped test is not allowed to pass a certification run.
+# KiCad renamed this reference between 8 and 9: the ball/pad suffix was
+# dropped. Naming both spellings keeps the comparison running across the
+# whole supported range instead of silently skipping on one half of it.
+# (Pinned to the 8 spelling alone, it had never run on 9 or 10; pinned to
+# the 9/10 spelling alone, it stopped running on 8. Both were invisible
+# until OHM_REQUIRE_KICAD made a skipped test fail a certification run.)
+BGA49_MODS = ("Package_BGA.pretty/Analog_BGA-49_6.25x6.25mm_Layout7x7_P0.8mm.kicad_mod",
+              "Package_BGA.pretty/Analog_BGA-49_6.25x6.25mm_Layout7x7_P0.8mm_Ball0.5mm_Pad0.4mm.kicad_mod")
+KICAD_BGA49 = first_footprint(*BGA49_MODS)
 
 
-@pytest.mark.skipif(not KICAD_BGA49.exists(), reason="KiCad library not installed")
+@requires_footprint(*BGA49_MODS)
 def test_bga49_matches_kicad_golden_exactly():
     golden = pads_from_kicad_mod(KICAD_BGA49, as_float=True)
     model = build("BGA", {"rows": Decimal(7), "cols": Decimal(7), "pitch": _q("0.8"), "ball": _q("0.5")})
@@ -231,10 +248,11 @@ def test_bga_needs_ball_or_pad():
         build("BGA", {"rows": Decimal(4), "cols": Decimal(4), "pitch": _q("0.8")})
 
 
-KICAD_PLCC28 = Path("/usr/share/kicad/footprints/Package_LCC.pretty/PLCC-28.kicad_mod")
+PLCC28_MOD = "Package_LCC.pretty/PLCC-28.kicad_mod"
+KICAD_PLCC28 = footprint(PLCC28_MOD)
 
 
-@pytest.mark.skipif(not KICAD_PLCC28.exists(), reason="KiCad library not installed")
+@requires_footprint(PLCC28_MOD)
 def test_plcc28_matches_kicad_golden_within_tolerance():
     golden = pads_from_kicad_mod(KICAD_PLCC28, as_float=True)
     model = build("PLCC", {"pins": Decimal(28)})
@@ -261,11 +279,11 @@ def test_plcc_needs_odd_per_side():
         build("PLCC", {"pins": Decimal(30)})  # not a multiple of 4
 
 
-KICAD_PLCC32 = Path("/usr/share/kicad/footprints/Package_LCC.pretty/"
-                    "PLCC-32_11.4x14.0mm_P1.27mm.kicad_mod")
+PLCC32_MOD = "Package_LCC.pretty/PLCC-32_11.4x14.0mm_P1.27mm.kicad_mod"
+KICAD_PLCC32 = footprint(PLCC32_MOD)
 
 
-@pytest.mark.skipif(not KICAD_PLCC32.exists(), reason="KiCad library not installed")
+@requires_footprint(PLCC32_MOD)
 def test_plcc32_rectangular_matches_kicad_topology():
     """PLCC-32 is the one JEDEC rectangular PLCC: 7 pads top/bottom, 9 left/right.
 
@@ -304,10 +322,11 @@ def test_plcc_square_counts_unchanged_by_rectangular_support():
         assert float(pad1.x) == 0 and float(pad1.y) == y1
 
 
-KICAD_SOT223 = Path("/usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/SOT-223.kicad_mod")
+SOT223_MOD = "Package_TO_SOT_SMD.pretty/SOT-223.kicad_mod"
+KICAD_SOT223 = footprint(SOT223_MOD)
 
 
-@pytest.mark.skipif(not KICAD_SOT223.exists(), reason="KiCad library not installed")
+@requires_footprint(SOT223_MOD)
 def test_sot223_matches_kicad_golden():
     golden = pads_from_kicad_mod(KICAD_SOT223, as_float=True)
     model = build("SOT223", {})
@@ -335,8 +354,8 @@ _FIXED_REFS = {
 @pytest.mark.parametrize("pkg,ref_leads", list(_FIXED_REFS.items()))
 def test_fixed_power_package_signal_leads_match_kicad(pkg, ref_leads):
     ref_name, leads = ref_leads
-    ref_path = Path(f"/usr/share/kicad/footprints/Package_TO_SOT_SMD.pretty/{ref_name}.kicad_mod")
-    if not ref_path.exists():
+    ref_path = footprint(f"Package_TO_SOT_SMD.pretty/{ref_name}.kicad_mod")
+    if ref_path is None or not ref_path.exists():
         pytest.skip("KiCad library not installed")
     golden = pads_from_kicad_mod(ref_path, as_float=True)
     model = build(pkg, {})
@@ -400,12 +419,12 @@ def test_build_emits_generated_packages(tmp_path):
     assert '"OUTA"' in sym and '"VDD"' in sym  # symbol uses the declared pin names
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad_cli
 def test_generated_symbol_parses_in_kicad(tmp_path):
     pins = [(p.id, f"P{p.id}", "passive") for p in SOIC8.pads]
     lib = tmp_path / "ohm_gen.kicad_sym"
     lib.write_text(emit_symbol("SOIC8", pins))
-    r = subprocess.run(["kicad-cli", "sym", "upgrade", str(lib)], capture_output=True, text=True)
+    r = subprocess.run([KICAD_CLI, "sym", "upgrade", str(lib)], capture_output=True, text=True)
     if r.returncode != 0:
         out = r.stderr + r.stdout
         low = out.lower()
@@ -484,13 +503,14 @@ def test_open_drain_pin_emits_open_collector():
     assert "(pin passive line" not in sym
 
 
-@pytest.mark.skipif(not KICAD_SOIC8.exists(), reason="KiCad library not installed")
+# a symbol guard, not a footprint one: this reads the symbol libraries
+@requires_kicad_sym
 def test_emitted_electrical_types_exist_in_kicad():
     """Every type we emit must be one KiCad actually understands."""
     import re as _re
 
     real = set()
-    for lib in Path("/usr/share/kicad/symbols").glob("*.kicad_sym"):
+    for lib in KICAD_SYMBOLS.glob("*.kicad_sym"):
         real |= set(_re.findall(r"\(pin (\w+) (?:line|inverted|clock)", lib.read_text()))
     assert real, "no KiCad symbol libraries parsed"
     from ohm.pkggen.symbol import _ETYPE

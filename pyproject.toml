@@ -41,11 +41,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["ohm", "ohm.pkggen", "shared"]
+packages = ["ohm", "ohm.fpdata", "ohm.pkggen", "shared"]
 license-files = ["LICENSE", "NOTICE"]
 
 [tool.setuptools.package-data]
-ohm = ["*.lark", "std/*.ohm", "templates/*"]
+ohm = ["*.lark", "std/*.ohm", "templates/*", "fpdata/*.json.gz"]
 
 [tool.mypy]
 python_version = "3.12"
