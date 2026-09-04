@@ -1,6 +1,6 @@
 # 21 · The compatibility matrix — measured, 2026-08-31
 
-Grading vocabulary is the audit's own (`KICAD_COMPATIBILITY.md`), so the two are
+Grading vocabulary is the audit's own (`history/01_audit_kicad_7_to_10.md`), so the two are
 comparable:
 
 - **proven** — a harness in this repo produced the result.
@@ -13,15 +13,27 @@ comparable:
 
 Executed on this machine, in the official containers, with
 `OHM_REQUIRE_KICAD=1` so a KiCad-shaped skip **fails** the run instead of
-quietly passing it. Python 3.12.14 installed into each container by `uv`, Ohm
-installed with `pip install -e .`, repo mounted read-only.
+quietly passing it. Python 3.12 installed into each container by `uv`, Ohm
+installed with `uv pip install -e ".[dev]"`, repo mounted at `/work`.
+
+**This table is the single place the pass count lives.** It moves whenever tests
+are added, and it had been copied by hand into six other documents which then
+disagreed with each other — 337, 340, 342 and 365 were all in the repo at once,
+with the headline table citing this file for a number this file did not have.
+Every other document now cites this one instead of carrying its own.
+
+Re-measured **2026-09-02**, running exactly the test list the `kicad` job runs:
 
 | KiCad | Image | KiCad-dependent tests | Failed | **Skipped** |
 |---|---|---|---|---|
-| **7.0.11** | `kicad/kicad:7.0.11` | **337** | 0 | **0** |
-| 8.0.9 | `kicad/kicad:8.0.9` | **337** | 0 | **0** |
-| 9.0.9 | `kicad/kicad:9.0.9` | **337** | 0 | **0** |
-| 10.0.5 | `kicad/kicad:10.0.5` | **337** | 0 | **0** |
+| **7.0.11** | `kicad/kicad:7.0.11` | **421** | 0 | **0** |
+| 8.0.9 | `kicad/kicad:8.0.9` | **421** | 0 | **0** |
+| 9.0.9 | `kicad/kicad:9.0.9` | **421** | 0 | **0** |
+| 10.0.5 | `kicad/kicad:10.0.5` | **421** | 0 | **0** |
+
+<sub>Earlier snapshots of this same table, kept so the numbers scattered through
+this folder can be dated rather than doubted: 337 at loop 20 (2026-08-31), 340
+after `Edge.Cuts`, 365 after the read-back hardening.</sub>
 
 **KiCad 7 had never been measured before this run.** The repo asserted five times
 that it could not be — see [`10_container_tag_currency.md`](10_container_tag_currency.md).

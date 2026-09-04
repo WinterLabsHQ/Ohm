@@ -23,9 +23,13 @@ point-topology connectivity:
 Connectivity model (documented limits): copper items connect where quantized
 coordinates coincide (0.001 mm) — segment endpoints chain, vias join layers at
 a point, a segment endpoint lands on a pad if it falls within the pad's
-axis-aligned half-size + 0.05 mm slop on a shared layer. Zones and arbitrary
-mid-segment T-junctions are not modeled (KiCad DRC covers them); routers that
-emit endpoint-chained tracks (KiCad, freerouting, Meridian) are in-model.
+axis-aligned half-size + 0.05 mm slop on a shared layer. An `arc` is read as its
+CHORD: connectivity here is point-topology, so an arc and a segment with the
+same endpoints are the same object, and where the bulge swings is geometry that
+V007 owns. Zones and arbitrary mid-segment T-junctions are not modeled (KiCad
+DRC covers them); routers that emit endpoint-chained tracks (KiCad, freerouting,
+Meridian) are in-model. Any OTHER top-level form carrying a net is reported as
+V008 rather than silently skipped — that silence is how arcs went unread.
 """
 
 from __future__ import annotations
@@ -158,6 +162,8 @@ class _Board:
     footprints: dict[str, tuple[Decimal, Decimal, Decimal]] = field(default_factory=dict)
     stub_paths: set[str] = field(default_factory=set)  # footprints without pads
     pads: list[_Pad] = field(default_factory=list)
+    # track segments AND arcs; an arc by its chord, because connectivity here is
+    # point-topology and the bulge is geometry (V007 owns that). See `read_board`.
     segs: list[tuple[Decimal, Decimal, Decimal, Decimal, str, str]] = field(default_factory=list)
     vias: list[tuple[Decimal, Decimal, str]] = field(default_factory=list)
     has_zones: bool = False
@@ -212,6 +218,7 @@ def read_board(text: str) -> _Board:
     ids = _net_ids(pcb)
     fp_seen = fp_named = fp_no_at = 0
     pad_seen = pad_bad = pad_cu = copper_bad = 0
+    unmodelled: dict[str, int] = {}
     for node in pcb:
         if not isinstance(node, list) or not node:
             continue
@@ -228,6 +235,35 @@ def read_board(text: str) -> _Board:
             b.segs.append((st[0].quantize(_Q), st[1].quantize(_Q),
                            en[0].quantize(_Q), en[1].quantize(_Q),
                            str(layer[1]), _net_name(net, ids)))
+        elif node[0] == "arc":
+            # A CURVED track. KiCad's own interactive router writes these in arc
+            # mode, and dragging a track rounds its corners into them, so an
+            # ordinarily routed board carries them. This reader dispatched on
+            # `segment`/`via`/`zone`/`footprint` and an arc fell through all four
+            # silently: it landed in nothing, and none of the sanity counters
+            # below saw it either, so V008 did not fire. A board routed entirely
+            # in arcs came back `V002 net is incomplete` — a correct board
+            # reported as WRONG, in the last gate before fabrication.
+            #
+            # Read by its CHORD, and that is exact rather than an approximation.
+            # The connectivity analysis is point-topology: it unions an item's
+            # two ENDPOINTS and never looks at the geometry between them (see
+            # `uf.union` below), so an arc and a segment with the same endpoints
+            # are already the same object to V002, V003 and V004. Registering
+            # `mid` as a third point would give arcs a T-junction rule that
+            # segments do not have — and this reader states, deliberately, that
+            # it does not model mid-segment T-junctions. Where the bulge SWINGS
+            # is geometry, and geometry belongs to V007.
+            st, en = _xy(_kid(node, "start")), _xy(_kid(node, "end"))
+            layer, net = _kid(node, "layer"), _kid(node, "net")
+            if layer is None or len(layer) < 2 or net is None:
+                continue
+            if st is None or en is None:
+                copper_bad += 1
+                continue
+            b.segs.append((st[0].quantize(_Q), st[1].quantize(_Q),
+                           en[0].quantize(_Q), en[1].quantize(_Q),
+                           str(layer[1]), _net_name(net, ids)))
         elif node[0] == "via":
             at, net = _xy(_kid(node, "at")), _kid(node, "net")
             if net is None:
@@ -236,6 +272,16 @@ def read_board(text: str) -> _Board:
                 copper_bad += 1
                 continue
             b.vias.append((at[0].quantize(_Q), at[1].quantize(_Q), _net_name(net, ids)))
+        elif _kid(node, "net") is not None:
+            # A top-level form carrying a `(net …)` that this reader does not
+            # model. Through KiCad 10 the net-bearing forms are exactly `segment`,
+            # `arc`, `via` and `zone`, all handled above — but this dispatch is
+            # an open enumeration with a silent default, and that silence is
+            # precisely why `arc` was missed for as long as it was. So the
+            # default stops being silent: unmodelled copper is reported as a
+            # board this reader cannot READ (V008), never as a board that is
+            # WRONG.
+            unmodelled[str(node[0])] = unmodelled.get(str(node[0]), 0) + 1
         elif node[0] == "footprint":
             fp_seen += 1
             # ADR-021 / AGENTS.md item 5: signoff identifies every part by this
@@ -311,6 +357,12 @@ def read_board(text: str) -> _Board:
             f"{copper_bad} track segment(s)/via(s) whose `(start …)`, `(end …)` or "
             "`(at …)` carries no readable coordinates — that copper is invisible "
             "here, so the nets it routes look incomplete")
+    if unmodelled:
+        what = ", ".join(f"{n} ({unmodelled[n]})" for n in sorted(unmodelled))
+        b.unreadable.append(
+            f"top-level form(s) carrying a `(net …)` that this reader does not "
+            f"model: {what} — copper they route is invisible here, so the nets "
+            "they carry look incomplete")
     if pad_seen and not pad_cu:
         b.unreadable.append(
             f"{pad_seen} pads, none naming a copper layer in `(layers …)` (a `*.Cu` "

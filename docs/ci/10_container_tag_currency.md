@@ -28,9 +28,9 @@ and nothing would have noticed the day the image appeared.
 The repo asserted, in **five** places, that no official KiCad container image
 exists below 8.0.4:
 
-- `KICAD_CI_PLAN.md` — "**KiCad 7 cannot be containerised.** The official
+- `history/02_ci_feasibility_plan.md` — "**KiCad 7 cannot be containerised.** The official
   `kicad/kicad` image starts at 8.0.4. There is no 7.x tag."
-- `KICAD_CI_IMPLEMENTATION.md` — "No official container image exists below
+- `history/03_ci_implementation.md` — "No official container image exists below
   8.0.4, so 7 is certified by hand or not at all."
 - `docs/adr/ADR_021_kicad_version_policy.md` — twice, including the consequence
   "**KiCad 7 is the weak leg** … the honest move is to raise the floor to 8."
@@ -71,7 +71,8 @@ checked. `SUPPORTED_KICAD = ("7", "8", "9", "10")` is unchanged.
 
 What the correction bought, measured the same day:
 
-- **KiCad 7.0.11 certifies clean** — 337 tests, 0 failed, 0 skipped, under
+- **KiCad 7.0.11 certifies clean** — 337 tests at this loop, 0 failed, 0
+  skipped, under
   `OHM_REQUIRE_KICAD=1`, with no step excluded. See
   [`21_compatibility_matrix.md`](21_compatibility_matrix.md).
 - **KiCad 7 pad data now exists**, closing the last case where `fpdata` had to
@@ -110,9 +111,9 @@ is hermetic (N1). Stdlib-only, like `tools/gen_fpdata.py`, so it runs on a
 container interpreter with no venv.
 
 **The five documents** are corrected in the house style already established by
-`KICAD_CI_IMPLEMENTATION.md`'s "Corrections to the plan, forced by measurement"
+`history/03_ci_implementation.md`'s "Corrections to the plan, forced by measurement"
 section: struck through in place and annotated with the evidence and the date,
-never silently rewritten. `KICAD_COMPATIBILITY.md` is deliberately untouched — it
+never silently rewritten. `history/01_audit_kicad_7_to_10.md` is deliberately untouched — it
 carries its own banner saying it is kept unedited as the record of what was
 believed before anyone checked.
 

@@ -62,7 +62,17 @@ jobs:
   kicad:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    container: kicad/kicad:${{ matrix.kicad }}
+    container:
+      image: kicad/kicad:${{ matrix.kicad }}
+      # The kicad/kicad images set a non-root USER, and the first step below runs
+      # `apt-get install`. Every local reproduction of this matrix passes root
+      # explicitly — `docker run --user root` in docs/ci/21_compatibility_matrix.md,
+      # and tests/kicad_in_docker.sh passes --user because it only ever runs
+      # `kicad-cli` and installs nothing — so the one path never exercised here is
+      # the one that assumes root. Do not "tidy" this back to a plain string: a
+      # failure in that first step takes down all four matrix legs, `fpdata` and
+      # `certify` together.
+      options: --user root
     strategy:
       fail-fast: false          # one version failing must not hide the others
       matrix:
@@ -332,10 +342,6 @@ jobs:
         run: python3 tools/check_kicad_tags.py 7.0.11 8.0.9 9.0.9 10.0.5
 
   # ------------------------------------------------------------------
-  # The claim, with provenance. "Verified through 10.0.5" should be a file
-  # a machine wrote, not a sentence someone typed.
-  # ------------------------------------------------------------------
-  # ------------------------------------------------------------------
   # The determinism invariant, measured across platforms for the first time.
   #
   # Page 8 of the architecture document promises that a build is "reproducible
@@ -391,6 +397,14 @@ jobs:
           ls -l manifest-*.txt
           python tools/emit_manifest.py --check manifest-*.txt
 
+  # ------------------------------------------------------------------
+  # The claim, with provenance. "Verified through 10.0.5" should be a file a
+  # machine wrote, not a sentence someone typed — which is only worth anything
+  # if the machine writes what actually ran. This record has been wrong once
+  # already: it said the geometry gate ran in-process at one version, while the
+  # `kicad` job above ran it out of process at all four, 250 lines earlier in
+  # this same file. A certification that overstates is worse than none.
+  # ------------------------------------------------------------------
   certify:
     if: github.event_name != 'pull_request'
     needs: [kicad, v007, fpdata, determinism-compare]
@@ -404,10 +418,12 @@ jobs:
             echo "date:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "run:     ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "kicad:   7.0.11, 8.0.9, 9.0.9, 10.0.5 — emit, libraries, read-back, plot"
-            echo "v007:    10.0.5 — pcbnew in-process (ubuntu-24.04 PPA)"
+            echo "geom:    7.0.11, 8.0.9, 9.0.9, 10.0.5 — V007 in every container"
+            echo "         (kicad-cli pcb drc from 8; a pcbnew child at 7)"
+            echo "v007:    PPA KiCad 10 on ubuntu-24.04 — out of process, plain venv"
             echo "determ:  ubuntu, windows, macos — all eight emit kinds, byte-identical"
-            echo "not run: the geometry gate at 7, 8 and 9 — pcbnew is a compiled"
-            echo "         extension built against each image's own Python, not Ohm's 3.12"
+            echo "not run: whether kicad-cli pcb drc and pcbnew.WriteDRCReport agree"
+            echo "         on every rule class; no Ohm board has come back from a fab"
           } > kicad-certification.txt
           cat kicad-certification.txt
       - uses: actions/upload-artifact@v4

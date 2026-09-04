@@ -14,7 +14,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from ohm import ir
-from ohm.emit_kicad import _uid, diffpair_renames, sheet_groups
+from ohm.emit_common import _source_id
+from ohm.emit_kicad import _uid, diffpair_renames, sheet_plan
+from ohm.formats import (_PRO_ERC_VERSION, _PRO_NET_SETTINGS_VERSION,
+                         _PRO_PROJECT_VERSION)
 from ohm.trace_width import net_currents, trace_width_mm
 
 _DEFAULTS = {
@@ -40,7 +43,15 @@ def _class(name: str, **over) -> dict:
 
 
 def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
-                   design: ir.Design | None = None) -> str:
+                   design: ir.Design | None = None,
+                   groups: list[str] | None = None) -> str:
+    # Normalise BEFORE anything derives from it. Two things here did: every
+    # `_uid(source, ...)` in the `sheets` list below, and `meta.filename`, which
+    # takes `Path(source).stem` — and `Path("D:/repo/x.ohm").stem` on POSIX is
+    # the whole string, so the project's own declared filename was
+    # path-dependent too. `_source_id` is idempotent, so this is safe to apply
+    # here as well as in the emitters that already do it.
+    source = _source_id(source)
     classes: dict[str, dict] = {}
     patterns: list[tuple[str, str]] = []  # (class, net pattern)
     # A class carries the current of the WORST net in it: one rule governs every
@@ -73,10 +84,17 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
 
     # KiCad will not open a hierarchy it cannot find in the project: root first,
     # then one (uuid, name) per module sheet. Empty for a flat single sheet.
-    groups = sheet_groups(low)
+    #
+    # `groups` comes from the caller when the caller knows what it wrote (the
+    # CLI honours --sheets flat/hier/auto), and otherwise from `sheet_plan` —
+    # the SAME predicate `emit_kicad_sheets` writes files from. Deciding it
+    # again here is what listed three sheets for a design that was emitted as
+    # one, naming two .kicad_sch files that do not exist.
+    if groups is None:
+        groups = sheet_plan(low, source, design)
     sheets = ([[_uid(source, "sch"), ""]]
               + [[_uid(source, "sheetsym", g), g] for g in groups]
-              if len(groups) > 1 else [])
+              if groups else [])
 
     doc = {
         "board": {"3dviewports": [], "design_settings": {}, "layer_presets": []},
@@ -91,7 +109,7 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
         # opens carry a no-connect marker from source intent, ADR-015).
         "erc": {
             "erc_exclusions": [],
-            "meta": {"version": 0},
+            "meta": {"version": _PRO_ERC_VERSION},
             "rule_severities": {
                 "endpoint_off_grid": "warning",
                 # One rule, two spellings, both written on purpose: KiCad 10
@@ -129,11 +147,12 @@ def emit_kicad_pro(low: ir.IRLow, source: str = "<string>",
             },
         },
         "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
-        "meta": {"filename": f"{Path(source).stem}.kicad_pro", "version": 1},
+        "meta": {"filename": f"{Path(source).stem}.kicad_pro",
+                 "version": _PRO_PROJECT_VERSION},
         "net_settings": {
             "classes": [_class("Default")]
             + [classes[k] for k in sorted(classes)],
-            "meta": {"version": 3},
+            "meta": {"version": _PRO_NET_SETTINGS_VERSION},
             "net_colors": None,
             "netclass_assignments": None,
             "netclass_patterns": [

@@ -24,7 +24,9 @@ all, by construction. That unevenness is the honest content of this ADR, and
 hiding it behind a uniform table of "reasons" would be the failure mode it exists
 to prevent.
 
-The result: of the fifteen registry entries, **one moved** and **one is new**.
+The result: of the fifteen registry entries this ADR surveyed, **one moved**
+and **one is new**. (The registry has since grown to nineteen — see the
+amendment at the end.)
 Both are the ones with an executable reader. That is not a coincidence, it is the
 policy working.
 
@@ -69,7 +71,8 @@ Two corollaries, both of which decide cases below:
 | `constraints.json` | `"1"` | `shared/constraints_schema.py` | n/a — the open↔proprietary seam | unchanged |
 | Land patterns | IPC-7351**B** | `ohm/pkggen/packages.py` | **yes, indirectly** — KiCad's own library is the comparand | unchanged, and **already current** |
 
-Fourteen rows, fifteen registry entries: `.PcbLib` and `.SchLib` each carry two
+Fourteen rows, fifteen registry entries at the time of this survey: `.PcbLib`
+and `.SchLib` each carry two
 stamps under one owner. The last row is the odd one — IPC-7351B is a *standard Ohm
 computes from*, not a stamp it writes into a file, so it has no `FormatVersion`
 entry and cannot have one (`tests/test_formats.py` requires every registered value
@@ -148,7 +151,7 @@ The lane string goes into the generated file's header comment rather than into a
 manifest, because `emit_zen` produces one `.zen` and no workspace around it: a
 file that outlives this repo should still say which surface it was written
 against. That also makes the entry checkable by `tests/test_formats.py` the same
-way as the other fourteen — the registered value appears in the emitted bytes.
+way as every other entry — the registered value appears in the emitted bytes.
 
 ### 5. The six that did not move, and why each is a different kind of "no"
 
@@ -263,3 +266,42 @@ Two things worth recording alongside it:
 - **A per-format ADR.** Eleven of these stamps share one policy and one survey
   date. Splitting them would hide the only comparison that matters — which stamps
   have an oracle and which do not.
+
+
+---
+
+## Amendment, 2026-09-03 — four entries the survey above did not have
+
+`ohm/formats.py` holds **nineteen** entries, not the fifteen this ADR surveyed.
+Four were added afterwards, and none of them changed a byte Ohm writes — they are
+stamps that were *already being written* as bare literals and had simply never
+reached the registry:
+
+| Entry | Owner | Why it was missing |
+|---|---|---|
+| `_PRO_PROJECT_VERSION` | `ohm/emit_kicad_pro.py` | the `.kicad_pro` document version |
+| `_PRO_ERC_VERSION` | `ohm/emit_kicad_pro.py` | the `erc` section version |
+| `_PRO_NET_SETTINGS_VERSION` | `ohm/emit_kicad_pro.py` | the `net_settings` section version |
+| `_STEP_PROTOCOL` | `ohm/pkggen/step.py` | the DATA section's half of AP242's identity |
+
+The first three are the interesting ones. `emit_kicad_pro` appeared in neither
+the registry nor its owner gate, so a whole emitter — writing three KiCad schema
+versions — was invisible to a round whose stated purpose was to abolish exactly
+that. The gate is now discovery-based (`tests/test_formats.py::_candidate_owners`
+globs `ohm/emit_*.py` and `ohm/pkggen/*.py` rather than comparing against a
+hand-written list), so an unregistered emitter fails the build instead of being
+absent from a table nobody diffs.
+
+The fourth closes a stated-but-unenforced invariant: `ohm/pkggen/step.py` said
+outright that the DATA section's protocol name "has to agree with FILE_SCHEMA
+above or the file claims one protocol in the header and another in the data", and
+nothing checked it. `test_the_step_protocol_agrees_with_the_file_schema` now
+derives one from the other.
+
+**The count is now pinned.** Three documents asserted "fifteen" — this ADR,
+`ohm/formats.py`'s module docstring and `docs/ci/12_multi_eda_version_policy.md` —
+for a whole round after it became nineteen. A number in prose is exactly the kind
+of unnamed literal `ohm/formats.py` exists to abolish, and it had one of its own.
+`tests/test_formats.py::test_the_registry_is_the_size_its_documentation_says`
+fails if the registry changes size, and names these three documents in its
+message.

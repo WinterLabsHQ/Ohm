@@ -57,6 +57,7 @@ from __future__ import annotations
 import re
 
 from ohm import ir
+from ohm.emit_common import _source_id
 from ohm.formats import _ZEN_PCB_VERSION
 
 _IDENT = re.compile(r"[^A-Za-z0-9_]")
@@ -115,6 +116,13 @@ def _sourcing(attrs: dict[str, ir.Value]) -> list[str]:
 
 
 def emit_zen(low: ir.IRLow, source: str = "<string>") -> str:
+    # The file NAME, never the path the caller typed. `_source_id` was written
+    # for the schematic uuids and applied only there, so this artifact still
+    # carried whatever the caller typed — two checkouts at different paths
+    # produced different bytes, breaking the determinism invariant, and an
+    # absolute path (drive letter and user name included) travelled to whoever
+    # the file was handed to.
+    source = _source_id(source)
     # The lane goes in the file, not in a manifest: `emit_zen` produces one `.zen`
     # and no workspace around it, so a reader who finds this file on its own can
     # still tell which `Component()` surface it was written against. `pcb.toml`'s

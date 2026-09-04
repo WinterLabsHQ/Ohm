@@ -116,8 +116,10 @@ confident wrong verdict:
 Plus a **control**: an Ohm-emitted board, routed and unrouted, produces **zero**
 V008.
 
-Certified at `kicad/kicad:7.0.11` and `10.0.5` — **365 passed, 0 failed, 0
-skipped** each.
+Certified at `kicad/kicad:7.0.11` and `10.0.5` — 0 failed, **0 skipped** each.
+(The pass count moves as tests are added;
+[21_compatibility_matrix.md](21_compatibility_matrix.md) carries the current one
+and is the single place to look it up.)
 
 ### A gate that had never looked at this tier
 
@@ -128,6 +130,15 @@ entire tier that runs last, on a routed board, immediately before fabrication.
 `V` and `D` added — **111 codes covered instead of 99** — and the test now also
 asserts it found something, because a regex matching nothing would have passed
 forever. That is precisely how `V` went unnoticed.
+
+**And 111 was one short.** `X000` (`ohm/lsp.py`) was outside the class too, and
+the docstring written here claimed the class was now derived from `EXPLAIN`
+rather than hand-kept — which it was not. Fixing a hand-kept allowlist by hand
+leaves a hand-kept allowlist. The class is now the whole alphabet
+(`[A-Z]\d{3}`, measured: no false positives anywhere in `ohm/`), the check runs
+in **both** directions so an explanation for a deleted code is caught too, and
+the anti-vacuity floor is tied to `len(EXPLAIN)` instead of a literal. See
+[25_second_sweep.md](25_second_sweep.md).
 
 ---
 

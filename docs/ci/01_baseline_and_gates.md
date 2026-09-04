@@ -10,8 +10,8 @@ emits; it changes what the suite is able to notice.
 ## The baseline
 
 44 modified files and 10 new ones were sitting uncommitted in the working tree —
-the whole KiCad 8/9/10 upgrade described in `KICAD_CI_PLAN.md` and
-`KICAD_CI_IMPLEMENTATION.md`: `ohm/kicad_env.py`, `ohm/fpdata/` + S012,
+the whole KiCad 8/9/10 upgrade described in `history/02_ci_feasibility_plan.md` and
+`history/03_ci_implementation.md`: `ohm/kicad_env.py`, `ohm/fpdata/` + S012,
 `ohm verify-footprints`, the signoff read-back and plot gates, and the five-job
 CI matrix. Written, measured and documented, but never committed, so there was no
 floor to diff against.
@@ -19,7 +19,7 @@ floor to diff against.
 Landed unchanged on branch `ci1-eda-upgrade` as `78338e6`, with one fix.
 
 **Measured baseline: 889 passed, 83 skipped, ruff and mypy clean, on Windows /
-CPython 3.12.13.** (`KICAD_CI_IMPLEMENTATION.md` records 888/83 on Linux; the
+CPython 3.12.13.** (`history/03_ci_implementation.md` records 888/83 on Linux; the
 difference is the test added below.)
 
 ---
@@ -97,7 +97,7 @@ that *decides* which KiCad the rest of the suite talks to and which pad ids it
 expects, so a resolver that answers correctly on a bare runner and wrongly in
 front of a real installation should not be able to hide.
 
-This is the same failure mode `KICAD_CI_IMPLEMENTATION.md` records under finding
+This is the same failure mode `history/03_ci_implementation.md` records under finding
 3 — a golden comparison that had never executed on any machine at any version.
 It was not a one-off.
 

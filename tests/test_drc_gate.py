@@ -268,3 +268,78 @@ def test_only_the_cli_reaches_the_geometry_gate():
                 names = [node.module]
             assert not any(n.split(".")[-1] == "drc" for n in names), \
                 f"{py.name} imports ohm.drc, which runs KiCad in a subprocess"
+# ---------- a rule class reports the WORST thing in it ----------
+# `--severity-all` is passed on purpose (ohm/drc.py `_drc_via_kicad_cli`), which
+# is what makes exclusions appear in the report at all — so a rule class really
+# can hold an `error` and an `exclusion` at once. This is that report.
+REPORT_MIXED = """** Drc report for b.kicad_pcb **
+** Report includes: Errors, Warnings, Exclusions **
+
+** Found 3 DRC violations **
+[courtyards_overlap]: Courtyards overlap
+    Rule: board setup constraints courtyard; Severity: error
+    @(4.0000 mm, 8.0000 mm): Footprint J1
+[courtyards_overlap]: Courtyards overlap
+    Rule: board setup constraints courtyard; Severity: error
+    @(3.5000 mm, 46.5000 mm): Footprint H3
+[courtyards_overlap]: Courtyards overlap
+    Local override; Severity: exclusion
+    @(9.0000 mm, 9.0000 mm): Footprint H9
+** End of Report **
+"""
+
+REPORT_MIXED_MODERN = REPORT_MIXED.replace("; Severity: ", "; ")
+
+
+@pytest.mark.parametrize("report", [REPORT_MIXED, REPORT_MIXED_MODERN],
+                         ids=["kicad7", "kicad8+"])
+def test_a_mixed_severity_class_reports_its_worst(report):
+    """Two real courtyard overlaps and one the author excluded.
+
+    Severity used to be stored once per RULE with the last write winning, while
+    KiCad prints one severity line per VIOLATION — so this exact report came back
+    as a single `warning | 3x courtyards_overlap`, and the geometry gate passed a
+    board with two genuine overlaps on it, exit 0. The regex fix that taught this
+    module KiCad 8's spelling did not touch it: the demotion happens in the
+    aggregation, so it survived on every version.
+
+    The count was wrong too. `3x` included the item the author had deliberately
+    excluded, which is the one thing in the class that is NOT a finding.
+    """
+    diags = parse_drc_report(report, "b.kicad_pcb")
+    worst = [d for d in diags if d.severity == "error"]
+    assert worst, [(d.severity, d.message) for d in diags]
+    assert worst[0].message.startswith("2x courtyards_overlap"), worst[0].message
+    # the exclusion is recorded, not counted as a defect and not silently dropped
+    excluded = [d for d in diags if d.severity == "info"]
+    assert excluded and excluded[0].message.startswith("1x courtyards_overlap")
+
+
+@pytest.mark.parametrize("report", [REPORT_MIXED, REPORT_MIXED_MODERN],
+                         ids=["kicad7", "kicad8+"])
+def test_the_reported_location_belongs_to_the_reported_severity(report):
+    """`message` and `where` came from the FIRST violation of a rule while
+    `severity` came from the LAST, so one diagnostic could describe two different
+    items — an error pointing a reviewer at the coordinates of an exclusion."""
+    diags = parse_drc_report(report, "b.kicad_pcb")
+    (err,) = [d for d in diags if d.severity == "error"]
+    (exc,) = [d for d in diags if d.severity == "info"]
+    assert "Footprint J1" in err.message and "Footprint H9" not in err.message
+    assert "Footprint H9" in exc.message
+
+
+def test_kicad_info_is_not_promoted_to_a_warning():
+    """The same defect in the other direction: `_severity` mapped everything
+    that was not exactly "error" to "warning", so KiCad's own `info` came back
+    louder than KiCad wrote it."""
+    report = REPORT_MIXED.replace("Severity: exclusion", "Severity: info")
+    diags = parse_drc_report(report, "b.kicad_pcb")
+    assert [d.severity for d in diags] == ["error", "info"]
+
+
+def test_the_worst_finding_is_reported_first():
+    """A reviewer reads the errors before the notes, and the order is a pure
+    function of the report either way."""
+    diags = parse_drc_report(REPORT, "b.kicad_pcb")
+    rank = {"error": 0, "warning": 1, "info": 2}
+    assert [rank[d.severity] for d in diags] == sorted(rank[d.severity] for d in diags)

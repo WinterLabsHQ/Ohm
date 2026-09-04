@@ -2,6 +2,164 @@
 
 ## Unreleased
 
+- **fix(cli)**: **a diagnostic quoted a file it was not about.** `_report`
+  renders one source text against every diagnostic in the list, which was right
+  while the list held only findings about the `.ohm`. When the D tier joined it —
+  so `--strict` and `--json-diagnostics` could see it — every drawing finding
+  started carrying an excerpt of the `.ohm`'s line 1, with a caret, beneath a
+  location naming the emitted `.kicad_sch`. The excerpt is now printed only for
+  diagnostics about the file whose text was passed; the rest keep their location,
+  message and help line.
+- **fix(check_drawing)**: **the gate could not see a `(justify ...)` on a
+  property.** The trailing group of `_PROP_RE` was `([^)]*)`, which stops at the
+  first `)` and therefore could never contain `(justify left)` — so every
+  property Ohm writes with a justification was measured as centred, 1.5mm from
+  where it is drawn. `hide`, the other thing that group is read for, is a bare
+  word, which is why that half went on working and hid this one. The label
+  branch's justify lookahead was a fixed 120-character window that could reach
+  into the NEXT element; it now stops at this element's own `(uuid`.
+- **fix(check_drawing)**: removed `_symbols()`, fifteen lines called by nothing —
+  and wrong: `_body_half` needs the `lib_symbols` block, which the sheet body
+  that its docstring implies passing has had removed, so every symbol came back
+  on the 7.62mm fallback. `check_drawing()` computes the same boxes inline,
+  correctly, because it also needs each instance's own text.
+- **fix(emit_kicad)**: **four shipped designs failed Ohm's own drawing gate**,
+  all of them text Ohm placed itself in a column something else had claimed.
+  `_rider_offset` reserved a flat 2.54mm for an in-line rider's wire and nothing
+  for the net LABEL that wire carries, so `PWR_GND` — 7.11mm of text — printed
+  across the capacitor 4.32mm along (D002); it now reserves the label's width,
+  read from the same map that decides whether a label is written at all, the way
+  `_chain_span` already did for upright riders. A ladder head's rail name was the
+  only placed text that never reached `taken_text`, so a cluster title was drawn
+  through it (D001). A symbol's reference and value never consulted it either,
+  though they are free text; they now go through `_free_spot` like the frame
+  titles, with their existing position offered first so nothing moves unless it
+  must. `test_every_shipped_design_draws_clean` holds all 29 designs at zero.
+- **fix(emit_kicad)**: `_text_box` measured text with no `(justify ...)` as
+  left-aligned; KiCad draws it centred, and `check_drawing._text_box` measured it
+  that way — so the emitter's own collision avoidance and its own gate disagreed
+  by half a string width. Latent until symbol properties started going through
+  it, which is this release.
+- **fix(check_placement)**: **S013 asserted a cause it had not established.** On
+  a `near` cycle it printed "every side of the target was already taken" — but a
+  cycle has no root, so the part that loses is flowed BEFORE anything is on the
+  board and the target had not been placed at all. The two causes have different
+  fixes, so the message and the help now distinguish congestion from a cycle.
+- **refactor(architecture)**: **three modules pairs were mutually dependent**,
+  each held apart only by an import written inside a function body. `_extent` —
+  pure geometry — lived in `check_placement` and was imported back by the placer,
+  so the emitter had to ask a checker what a rectangle is; it now sits with the
+  rest of the placement geometry. `_source_id`, `_value_text` and `BOM_FIELDS`
+  are now **`ohm/emit_common.py`**, below every emitter and depending on none,
+  which also removes the five `emit_* -> emit_kicad` edges for a helper that was
+  never about KiCad. The third (`import_symbol`/`provenance`) is the shape of
+  that relationship and is declared rather than churned.
+- **test(architecture)**: `tests/test_architecture.py` — no new import cycles in
+  `ohm/`, `driver.CHECKERS` is the list the documents name, `shared/` does not
+  import from `ohm/`, and the non-mutation invariant is RUN over the corpus. Two
+  of the three stated invariants had gates; the shape had none, and prose does
+  not fail.
+- **fix(docs)**: **three documents asserted a registry size the registry had not
+  had for a round.** `ohm/formats.py`, ADR-022 and the multi-EDA policy record
+  all said "fifteen" after `.kicad_pro`'s three section versions and STEP's
+  protocol name made it nineteen. A number in prose is exactly the unnamed
+  literal `ohm/formats.py` exists to abolish. Corrected, ADR-022 gains an
+  amendment rather than being rewritten, and
+  `test_the_registry_is_the_size_its_documentation_says` names all three.
+- **docs**: the CI and compatibility record moved from `ci1_docs/` to
+  **`docs/ci/`**, and the three superseded root documents
+  (`KICAD_COMPATIBILITY.md`, `KICAD_CI_PLAN.md`, `KICAD_CI_IMPLEMENTATION.md`) to
+  `docs/ci/history/`, where a README says what each is and why a document that
+  turned out to be wrong is kept rather than deleted. New `docs/README.md` maps
+  the four kinds of document and what each ages by. The repo root is now the
+  seven files a newcomer should actually read first.
+
+- **fix(signoff)**: **a board routed with ARCS was reported as unrouted.**
+  `read_board` dispatched on `zone`/`segment`/`via`/`footprint`, so KiCad's
+  top-level `(arc ...)` — what its own router writes in arc mode, and what
+  dragging a track produces — fell through silently. It landed in no collection
+  and was counted by none of the structural-sanity counters, so V008 could not
+  fire either. Measured on one board, same net: unrouted -> `V002 incomplete`;
+  routed with a segment -> clean; **routed with an arc -> `V002 incomplete`,
+  exit 1** — a correct board declared wrong in the last gate before fabrication.
+  Symmetrically, an arc shorting two nets or carrying an undeclared net was
+  invisible to V003/V004 and reported clean. An arc is now read as its CHORD,
+  which is exact rather than approximate: the connectivity analysis is
+  point-topology, so an arc and a segment with the same endpoints are already
+  the same object to every V code. Any OTHER top-level form carrying a `(net )`
+  is now reported as **V008** rather than skipped in silence — that silence is
+  how arcs went unread.
+- **fix(provenance)**: **`ohm verify-pinouts` certified real transpositions.**
+  `_same_pin` fell back to any shared underscore token, and KiCad's
+  disambiguating suffix on a duplicated pin is itself such a token — so
+  `VDD_1`/`GND_1`, `VDD_2`/`VSS_2`, `SDA_1`/`SCL_1`, `IN_2`/`OUT_2` and
+  `NC_1`/`VDD_1` all came back as the same pin, the finding was dropped, and the
+  component was reported `ok` by the one tool built to catch a transposition
+  that arrives on copper. Every existing negative pair carries a suffix on at
+  most one side, which is why the branch was never exercised in the failing
+  direction.
+- **fix(drc)**: **the V007 geometry gate demoted whole rule classes.** Severity
+  was kept once per RULE with last-write-wins, while KiCad prints one severity
+  line per VIOLATION and `--severity-all` makes exclusions visible. Two real
+  courtyard overlaps followed by one exclusion reported
+  `warning | 3x courtyards_overlap`, so the gate passed a defective board with
+  exit 0 — on every version and both report spellings, since the demotion is in
+  the aggregation and the earlier regex fix never reached it. The count included
+  the excluded item, and `message`/`where` came from the first violation while
+  `severity` came from the last. Now grouped by `(rule, severity)`, and
+  `_severity` is an explicit map: KiCad's own `info` was being promoted to a
+  warning too.
+- **fix(emit)**: **`ohm build` crashed on a cyclic `near` constraint**, with an
+  unhandled `KeyError` out of `emit_kicad_pcb` AFTER the `.kicad_sch` had been
+  written, leaving a half-populated output directory — while `ohm check`
+  returned 0 and M012 reported "the design places no parts" about a design that
+  declares two. `placement()` is on the ANALYSIS path as well as the emit path,
+  so it must be TOTAL over `low.parts`; it now is, and a cycle breaks exactly
+  one edge instead of dropping every member. New **S013** measures every
+  declared `near` against the placement Ohm actually produced.
+- **fix(determinism)**: **the caller's typed path reached the emitted bytes** of
+  `.net`, `.zen`, converted `.ohm` and `.kicad_pro`. `_source_id` was written
+  for exactly this defect and applied only to the KiCad schematic and board.
+  Two consequences: the determinism invariant was broken for four of the eight
+  emit kinds, and a fab/BOM artifact shipped an absolute path carrying the drive
+  letter and the developer's user name. `tools/emit_manifest.py` could not see
+  it — it passed a repo-relative path *deliberately*, which made the
+  cross-platform gate structurally unable to observe the variable it was
+  describing; it now passes the absolute path on purpose.
+- **fix(emit)**: **`.kicad_pro` listed sheets that were never written.** The
+  hierarchy was decided twice — `emit_kicad_sheets` by FIT, `emit_kicad_pro` by
+  `len(sheet_groups(low)) > 1` — so a multi-module design that fits one page had
+  a project naming two `.kicad_sch` files that do not exist, with none of its
+  three sheet uuids present in the schematic that was emitted. One predicate
+  now: `sheet_plan()`.
+- **fix(cli)**: **D001-D004 escaped `--strict`, `--json-diagnostics` and the
+  exit code.** `ohm build --strict` printed `warning[D001]` and exited 0,
+  against a help text promising "exit 1 (and emit nothing) on any warning or
+  worse". Text artifacts are now rendered into memory, the drawing gate runs
+  over them, and everything is reported and gated once before anything is
+  written — which also means a failure part-way through emitting can no longer
+  leave a partly-written output directory.
+- **fix(formats)**: `.kicad_pro`'s three KiCad schema versions and the STEP DATA
+  section's second AP242 name were still bare literals, unregistered and
+  unmentioned by ADR-022. The owner gate could not have found them: it compared
+  the registry against a hand-written list, and an emitter that never registered
+  appears in neither side. It now discovers candidates and requires each to be
+  registered or exempt with a stated reason. Registry 15 -> 19, and the two
+  AP242 names are tied together by derivation instead of by a second copy.
+- **fix(ci)**: the `kicad` job ran `apt-get` inside a container whose default
+  user is `uid=1000(kicad)` — measured exit 100, and exit 0 with
+  `options: --user root` — which would have taken down all four matrix legs,
+  `fpdata` and `certify` on the workflow's first real run. And the `certify`
+  job's machine-written provenance record claimed an in-process geometry gate at
+  one version, contradicted by `ohm/drc.py` and by a step in the same file that
+  runs it in all four containers. `tests/test_ci_workflow.py` now gates both.
+- **test**: the code-explanation gate still had a hand-kept tier-letter
+  allowlist and still omitted one (`X`), while its docstring claimed the
+  allowlist was gone. It now scans the whole alphabet, checks both directions,
+  and ties its anti-vacuity floor to `len(EXPLAIN)`.
+
+Full record: [`docs/ci/25_second_sweep.md`](docs/ci/25_second_sweep.md).
+
 - **fix(ci)**: **KiCad 7 is in the matrix — the image existed all along.** The
   repo asserted in five places, as fact, that "no official KiCad container image
   exists below 8.0.4", and `tests/kicad_in_docker.sh` turned that into an
@@ -21,7 +179,7 @@
     `pcb export gerbers`, `pcb export drill`, `sym upgrade`) predates KiCad 8.
     `pcb upgrade` is still KiCad 10 only, so the read-back gate re-saves through
     `pcbnew` at 7 as it already does at 8 and 9.
-  - **The supported floor stays at 7.** `KICAD_CI_PLAN.md` and ADR-021 both
+  - **The supported floor stays at 7.** `docs/ci/history/02_ci_feasibility_plan.md` and ADR-021 both
     proposed raising it to 8 *because* nothing could exercise 7; that proposal is
     withdrawn, not implemented.
   - **`tools/check_kicad_tags.py` now runs in CI** against every pinned tag. It
@@ -46,7 +204,7 @@
     certified everything. It aborts before collection when KiCad is absent, and
     converts skips (including `pytest.skip()` inside a test body, which no
     decorator can see) after each test.
-  - Running it found five real defects, listed in `KICAD_CI_IMPLEMENTATION.md`.
+  - Running it found five real defects, listed in `docs/ci/history/03_ci_implementation.md`.
     Two are worth repeating here.
 
 - **fix(signoff)**: **`ohm signoff` could not read a KiCad 10 board at all.**

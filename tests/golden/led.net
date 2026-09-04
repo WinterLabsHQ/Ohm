@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "tests/golden/led.ohm") (tool "ohm 0.1.1"))
+  (design (source "led.ohm") (tool "ohm 0.1.1"))
   (components
     (comp (ref "D1") (value "LED0603") (footprint "LED_0603_1608Metric") (fields (field (name "ohm_ref") "d1")))
     (comp (ref "R1") (value "330ohm") (footprint "R_0402_1005Metric") (fields (field (name "ohm_ref") "r1")))

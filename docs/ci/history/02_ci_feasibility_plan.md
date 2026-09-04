@@ -1,6 +1,6 @@
 # KiCad 10 compatibility in CI — feasibility and the workflow
 
-Written: 2026-08-26 · Sequel to [`KICAD_COMPATIBILITY.md`](KICAD_COMPATIBILITY.md),
+Written: 2026-08-26 · Sequel to [`01_audit_kicad_7_to_10.md`](01_audit_kicad_7_to_10.md),
 whose finding numbers (F1–F8) are referenced throughout.
 
 That audit graded every compatibility claim `proven` / `assumed` / `untested` /
@@ -29,7 +29,7 @@ not the workflow itself.
 > Each affected passage below is corrected **in place and marked**, rather than
 > rewritten to look as though the error was never made — the same treatment the
 > plan's other four wrong predictions got in
-> [`KICAD_CI_IMPLEMENTATION.md`](KICAD_CI_IMPLEMENTATION.md)'s "Corrections to
+> [`03_ci_implementation.md`](03_ci_implementation.md)'s "Corrections to
 > the plan, forced by measurement". The live matrix is
 > **7.0.11, 8.0.9, 9.0.9, 10.0.5**; `.github/workflows/ci.yml` is the authority,
 > not this file.
@@ -258,7 +258,7 @@ with non-empty output is a cheap, real assertion. It proves the files are
 Today "verified through 10.0.5" is prose with no date and no commit. The `certify`
 job should write version, image digest, commit SHA and timestamp as an artifact,
 so the claim has provenance. Until that job exists, keep the same table by hand in
-`KICAD_COMPATIBILITY.md`.
+`01_audit_kicad_7_to_10.md`.
 
 ---
 

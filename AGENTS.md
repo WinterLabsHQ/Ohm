@@ -7,6 +7,8 @@ Ohm is designed to be authored by LLM agents. The contract:
    Do not guess syntax from other HDLs; `.ohm` is not Starlark or Python.
 2. **Iterate on machine diagnostics.** Run `ohm check <file> --json-diagnostics`
    and fix what it reports; every code is explained by `ohm explain <CODE>`.
+   `ohm build --json-diagnostics` carries the same document plus the D-tier
+   drawing findings, which only exist once the sheet has been rendered.
    One diagnostic round typically reaches clean (measured in our live-LLM
    fixtures — see `examples/io_expander_board.ohm`).
 3. **Declare, don't decorate.** Diagnostics scale with declared intent: use
@@ -53,7 +55,9 @@ miss them and Ohm has to invent a substitute, which is what reads as amateur.
 - **Read-back is proved too.** `tests/test_signoff_readback.py` runs an emitted
   board through `kicad-cli pcb upgrade` — KiCad rewriting it, as it does the
   moment anyone opens and saves — and asserts `ohm signoff` reaches the same
-  verdict. Signoff identifies parts by a custom `ohm_path` property, so a KiCad
+  verdict. `pcb upgrade` is KiCad 10 only, so at 7, 8 and 9 the gate re-saves
+  through an out-of-process `pcbnew` instead; both routes are run by the `kicad`
+  matrix. Signoff identifies parts by a custom `ohm_path` property, so a KiCad
   release that moved or dropped it would silently stop identifying parts in the
   last check before fabrication. Everything else here tests what Ohm *writes*;
   this is the only gate on what Ohm *reads*.
@@ -62,7 +66,16 @@ miss them and Ohm has to invent a substitute, which is what reads as amateur.
   duplicate uuids on every emitted sheet. It exists because every geometric
   defect in this emitter's history was found by rendering a PDF and squinting at
   it, while every connectivity defect was found automatically. A class of defect
-  with no gate is a class of defect the next person rediscovers.
+  with no gate is a class of defect the next person rediscovers. Every design
+  this repo ships is at **zero** findings and
+  `test_every_shipped_design_draws_clean` keeps it there, so a D warning on the
+  corpus is a regression you introduced, not the status quo.
+- **The shape of the code is checked too.** `tests/test_architecture.py` forbids
+  new import cycles in `ohm/`, pins `driver.CHECKERS`, and holds `shared/` clear
+  of `ohm/`. If you need something two modules both use, move it DOWN to a module
+  both can depend on — `ohm/emit_common.py` is what that looks like — rather than
+  reaching back up with an import tucked inside a function body. That is how
+  three cycles formed without anyone deciding to create one.
 
 **Measure before you fix a drawing defect.** Print the offending element's
 coordinates and extents against its neighbour's and read the numbers. Several
@@ -71,6 +84,14 @@ of the geometry — the measurement that finally settled one of them took a sing
 command that should have been run first.
 
 Repo hygiene for coding agents: `PROGRESS.md` is the execution log,
-`docs/blueprint/` is read-only canonical, tests gate everything
-(`pytest -q`, `ruff check .`, `mypy ohm`), builds must stay hermetic and
-deterministic (the suite enforces both).
+`docs/` is documentation (start at `docs/README.md`; `docs/blueprint/` is
+read-only canonical and `docs/ci/` is what has actually been measured), builds
+must stay hermetic and deterministic (the suite enforces both). The three gates,
+exactly as CI runs them — `ruff` and `mypy` cover more than `ohm/`, and a
+narrower invocation is a green run that checked less than it looked like:
+
+```sh
+.venv/Scripts/python -m pytest -q
+.venv/Scripts/python -m ruff check ohm/ shared/ tests/ tools/
+.venv/Scripts/python -m mypy          # bare: it reads `files` from pyproject.toml
+```

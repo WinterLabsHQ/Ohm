@@ -339,10 +339,20 @@ def _unavailable(headline: str, reasons: list[str]) -> NoReturn:
     raise DrcUnavailable(f"{headline} — " + "; ".join(reasons))
 
 
+# KiCad's severity words, mapped to Ohm's three. Explicit rather than
+# "error, else warning": that shape silently PROMOTED KiCad's own `info` to a
+# warning, and silently DEMOTED an `exclusion` — a violation the board's author
+# deliberately excluded — into the same bucket as a real finding.
+_SEVERITY_MAP = {"error": "error", "warning": "warning", "info": "info",
+                 "exclusion": "info", "ignore": "info"}
+# Worst-first, so a rule class reports the worst thing in it.
+_SEVERITY_RANK = {"error": 3, "warning": 2, "info": 1}
+
+
 def _severity(rule: str, kicad_severity: str) -> str:
     if rule in _INFO_RULES:
         return "info"
-    return "error" if kicad_severity == "error" else "warning"
+    return _SEVERITY_MAP.get(kicad_severity, "warning")
 
 
 def run_geometry_drc(board_path: str) -> list[Diagnostic]:
@@ -381,30 +391,50 @@ def parse_drc_report(text: str, board_path: str) -> list[Diagnostic]:
     and `pcbnew.WriteDRCReport` write the same text on the same KiCad (measured
     2026-08-31 on 8.0.9, 9.0.9 and 10.0.5).
     """
-    found: dict[str, dict] = {}
-    rule = None
+    # One entry per VIOLATION, grouped afterwards. KiCad prints a severity line
+    # under each violation, and this used to keep one severity per RULE with the
+    # last write winning — so a class holding two real `error` overlaps and one
+    # `exclusion` reported `warning`, and the gate passed a board with genuine
+    # clearance violations on it. `--severity-all` is passed on purpose (it is
+    # what makes exclusions visible at all), which is what put the third line
+    # there. The message and location came from the FIRST violation while the
+    # severity came from the LAST, so one diagnostic could describe two items.
+    #
+    # Grouping by (rule, severity) fixes all three at once: a bucket's count,
+    # message and location now all belong to the same severity.
+    violations: list[dict] = []
     for line in text.splitlines():
         m = _RULE_RE.match(line)
         if m:
-            rule, message = m.group(1), m.group(2)
-            entry = found.setdefault(rule, {"n": 0, "message": message,
-                                            "severity": "warning", "where": None})
-            entry["n"] += 1
+            violations.append({"rule": m.group(1), "message": m.group(2),
+                               "severity": "warning", "where": None})
             continue
-        if rule is None:
+        if not violations:
             continue
         if (m := _SEVERITY_RE.search(line)):
-            found[rule]["severity"] = m.group(1)
-        elif (m := _AT_RE.match(line)) and found[rule]["where"] is None:
-            found[rule]["where"] = f"{m.group(2)} @ ({m.group(1)})"
+            violations[-1]["severity"] = m.group(1)
+        elif (m := _AT_RE.match(line)) and violations[-1]["where"] is None:
+            violations[-1]["where"] = f"{m.group(2)} @ ({m.group(1)})"
+
+    groups: dict[tuple[str, str], dict] = {}
+    for v in violations:
+        key = (v["rule"], _severity(v["rule"], v["severity"]))
+        entry = groups.setdefault(key, {"n": 0, "message": v["message"],
+                                        "where": None})
+        entry["n"] += 1
+        if entry["where"] is None:
+            entry["where"] = v["where"]
 
     span = Span(1, 1, 1, 1)
     out = []
-    for rule in sorted(found):
-        entry = found[rule]
+    # Worst first, then by rule: a reviewer reads the errors before the notes,
+    # and the order is a pure function of the report either way.
+    for (rule, severity) in sorted(
+            groups, key=lambda k: (-_SEVERITY_RANK.get(k[1], 0), k[0])):
+        entry = groups[(rule, severity)]
         where = f" first: {entry['where']}" if entry["where"] else ""
         out.append(Diagnostic(
-            _severity(rule, entry["severity"]), "V007",
+            severity, "V007",
             f"{entry['n']}x {rule}: {entry['message']}{where}",
             span, file=board_path,
             help="KiCad DRC, run by `ohm signoff`; geometry is a property of "

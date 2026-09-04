@@ -8,6 +8,16 @@
 #   OHM_KICAD_CLI=tests/kicad_in_docker.sh \
 #     .venv/bin/python -m pytest tests/test_schematic_roundtrip.py -q
 #
+# POSIX HOSTS ONLY. `kicad_env.kicad_cli()` hands this path straight to
+# `subprocess`, which on Windows calls CreateProcess and cannot execute a `.sh`
+# — the failure is a bare `FileNotFoundError: [WinError 2]` out of subprocess,
+# with nothing in it naming this file. It is also only half the story there: the
+# tests that read KiCad's footprint and symbol LIBRARIES do so in-process, so
+# they need the libraries on the HOST filesystem, which this shim cannot supply.
+# On Windows, run the suite INSIDE the container the way
+# .github/workflows/ci.yml does — docs/ci/21_compatibility_matrix.md has the
+# exact `docker run`.
+#
 # Why this exists: "compatible with KiCad N" is a claim about a program Ohm does
 # not ship and cannot inspect. The only honest way to make it is to run KiCad N
 # over Ohm's output and compare — and doing that by upgrading the developer's

@@ -72,7 +72,7 @@ Two consequences the docs do not currently draw out:
 
 > **Superseded 2026-08-27 — this matrix is now measured.** Every `assumed` cell
 > below was resolved by running the gates in the official KiCad containers; see
-> [`KICAD_CI_IMPLEMENTATION.md`](KICAD_CI_IMPLEMENTATION.md) for the result
+> [`03_ci_implementation.md`](03_ci_implementation.md) for the result
 > (**342 tests, 0 failed, 0 skipped at 8.0.9, 9.0.9 and 10.0.5**) and for the
 > five real defects the measuring found — including `ohm signoff` being unable
 > to read a KiCad 10 board at all, which is the F3 risk below, realised.

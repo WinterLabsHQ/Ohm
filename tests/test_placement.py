@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -323,3 +324,92 @@ def test_near_is_honoured_against_a_FIXED_target():
     cw, ch, _ = _courtyard(pkg["c0"])
     gap = max(abs(cx - ux) - uw / 2 - cw / 2, abs(cy - uy) - uh / 2 - ch / 2)
     assert gap <= _CELL_GAP, f"declared 2mm from a fixed part, placed {gap}mm away"
+
+
+# ---------- placement() is TOTAL over low.parts ----------
+_CYCLE_SRC = (
+    "component R:\n"
+    "    package = generate(CHIP0603)\n"
+    '    designator_prefix = "R"\n'
+    "    pin P1: role=passive, pad=1\n"
+    "    pin P2: role=passive, pad=2\n"
+    "module Board:\n"
+    "    ra = R()\n"
+    "    rb = R()\n"
+    "    ra.P2 ~ rb.P1\n"
+    "    constraint near(ra, rb, 2mm)\n"
+    "    constraint near(rb, ra, 2mm)\n"
+)
+
+
+def _low(src: str):
+    result = compile_source(src, "cycle.ohm")
+    assert result.ok, [d.machine() for d in result.diagnostics]
+    return result
+
+
+@pytest.mark.parametrize("design", sorted(
+    [p for p in (Path(__file__).parent / "golden").glob("*.ohm")]
+    + [p for p in (Path(__file__).parent.parent / "examples").glob("*.ohm")],
+    key=lambda p: p.name), ids=lambda p: p.stem)
+def test_placement_places_every_part(design):
+    """`placement()` must return a pose for EVERY part, on every design.
+
+    This is the invariant, not a courtesy. `placement()` is on the ANALYSIS path
+    as well as the emit path: `emit_kicad_pcb` indexes it directly, M012 derives
+    the board outline from it, and S011 checks overlaps in it. A partial map
+    therefore does not merely crash the emitter — it makes two checkers report
+    confidently about parts they never saw. Pinning totality here is what makes
+    the `KeyError` structurally impossible, instead of hiding it behind a
+    `.get()` that would emit a board with a part silently missing and let
+    `ohm signoff` report V001 about it — a design verdict for a compiler bug.
+    """
+    from ohm.emit_kicad import placement
+
+    result = compile_source(design.read_text(encoding="utf-8"), design.name)
+    assert result.low is not None, [d.machine() for d in result.diagnostics]
+    poses = placement(result.low)
+    missing = {p.ref for p in result.low.parts} - set(poses)
+    assert not missing, f"placement() returned no pose for {sorted(missing)}"
+
+
+def test_a_near_cycle_still_places_both_parts():
+    """`near(a, b)` plus `near(b, a)` used to place NEITHER part.
+
+    Each was the other's follower, so neither was in the flow, and the recovery
+    loop skipped both because neither target was down yet. `placement()` returned
+    `{}`; `ohm build` died with `KeyError: 'ra'` out of `emit_kicad_pcb` AFTER the
+    .kicad_sch had been written, leaving a half-populated output directory; and
+    M012 reported "the design places no parts" about a design that declares two.
+    """
+    from ohm.emit_kicad import placement
+
+    low = _low(_CYCLE_SRC).low
+    poses = placement(low)
+    assert set(poses) == {p.ref for p in low.parts} == {"ra", "rb"}
+
+
+def test_a_near_cycle_is_actually_honoured():
+    """...and it is not merely placed, it is placed where the source asked.
+
+    A 2-cycle reads as unsatisfiable and is not: two parts CAN each sit beside
+    the other. One member gives up its adjacency preference and flows, the other
+    seats beside it, and the resulting separation satisfies BOTH declarations —
+    which is why S013 is a measurement rather than a check on the shape of the
+    constraint graph.
+    """
+    from ohm.emit_kicad import _courtyard, placement
+
+    low = _low(_CYCLE_SRC).low
+    poses = placement(low)
+    (ax, ay, *_), (bx, by, *_) = poses["ra"], poses["rb"]
+    w, h, _model = _courtyard(low.parts[0].package)
+    gap = max(abs(ax - bx) - w, abs(ay - by) - h)
+    assert gap <= Decimal("2"), f"declared 2mm, placed {gap}mm apart"
+
+
+def test_a_near_cycle_emits_a_board_with_both_footprints():
+    """The end-to-end shape of the crash: `emit_kicad_pcb` raised `KeyError`."""
+    low = _low(_CYCLE_SRC).low
+    pcb = emit_kicad_pcb(low, "cycle.ohm")
+    assert pcb.count('(property "ohm_path"') == 2

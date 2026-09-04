@@ -38,7 +38,8 @@ false. `kicad/kicad:7.0.11` exists. See
 [`10_container_tag_currency.md`](10_container_tag_currency.md).
 
 What replaced it is better than either position: KiCad 7 is neither dropped nor
-unchecked. It is a measured matrix leg — 337 tests, 0 failed, 0 skipped — with
+unchecked. It is a measured matrix leg — 337 tests at this loop, 0 failed, 0
+skipped — with
 its own pad data in the shipped table.
 
 The reversal is recorded rather than tidied away, in ADR-021's own

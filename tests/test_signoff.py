@@ -8,6 +8,7 @@ geometry against KiCad's own connectivity engine."""
 import re
 import shutil
 import subprocess
+from decimal import Decimal
 
 import pytest
 
@@ -203,3 +204,84 @@ def test_pcbnew_agrees_with_signoff(tmp_path):
          str(tmp_path / "ro.kicad_pcb")], capture_output=True, text=True, check=True)
     unrouted_gaps, routed_gaps = (int(x) for x in r.stdout.split())
     assert unrouted_gaps == 1 and routed_gaps == 0  # matches V002-then-clean above
+# ---------- arcs: a CURVED track is still a track ----------
+def route_arc(pcb: str, net_name: str, pads: list[tuple[str, str]]) -> str:
+    """Append one F.Cu ARC joining two pads, bulging 0.5mm off the chord.
+
+    KiCad's own interactive router writes these in arc mode, and dragging a
+    track rounds its corners into them, so this is an ordinarily routed board
+    rather than an exotic one.
+    """
+    board = read_board(pcb)
+    pos = {(p.fp_path, p.pad_id): (p.x, p.y) for p in board.pads}
+    (ax, ay), (bx, by) = (pos[k] for k in pads)
+    nid = net_id(pcb, net_name)
+    arc = (f'  (arc (start {ax} {ay})'
+           f' (mid {(ax + bx) / 2} {(ay + by) / 2 - Decimal("0.5")})'
+           f' (end {bx} {by}) (width 0.25) (layer "F.Cu") (net {nid}))\n')
+    return pcb.rstrip()[:-1] + arc + ")\n"
+
+
+def test_an_arc_routed_net_is_complete():
+    """A board routed with an arc used to come back `V002: net is incomplete`.
+
+    `read_board` dispatched on segment/via/zone/footprint, so a top-level `arc`
+    fell through all four silently — it landed in no collection, and none of the
+    structural-sanity counters saw it either, so V008 could not fire. The result
+    was a CORRECT board reported as WRONG in the last gate before fabrication,
+    which this module's own comments call the worst possible way for it to break.
+    Measured before the fix: unrouted -> V002; segment -> clean; arc -> V002.
+    """
+    low, pcb = build()
+    arced = route_arc(pcb, "R1_P2", [("r1", "2"), ("r2", "1")])
+    diags = signoff(low, arced, "d.kicad_pcb")
+    assert not [d for d in diags if d.severity in ("error", "warning")], \
+        [d.machine() for d in diags]
+
+
+def test_an_arc_reads_the_same_as_the_segment_with_its_endpoints():
+    """The chord is exact, not an approximation.
+
+    Connectivity here is point-topology — endpoints are unioned and the geometry
+    between them is never consulted — so an arc and a segment sharing endpoints
+    must produce the same verdict, item for item.
+    """
+    low, pcb = build()
+    seg = signoff(low, route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")]), "d.kicad_pcb")
+    arc = signoff(low, route_arc(pcb, "R1_P2", [("r1", "2"), ("r2", "1")]), "d.kicad_pcb")
+    assert [(d.code, d.severity) for d in seg] == [(d.code, d.severity) for d in arc]
+
+
+def test_an_arc_on_a_foreign_net_is_seen():
+    """The other direction: arcs must be visible to the checks that FIND copper,
+    not only to the one that counts it. An arc carrying a net the source never
+    declared was invisible to V003 and reported clean."""
+    low, pcb = build()
+    board = read_board(pcb)
+    pos = {(p.fp_path, p.pad_id): (p.x, p.y) for p in board.pads}
+    (ax, ay) = pos[("r1", "2")]
+    stray = (f'  (arc (start {ax + 5} {ay + 5}) (mid {ax + 6} {ay + 6})'
+             f' (end {ax + 7} {ay + 7}) (width 0.25) (layer "F.Cu") (net 99))\n')
+    arced = route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")]).rstrip()[:-1] + stray + ")\n"
+    codes = by_code(signoff(low, arced, "d.kicad_pcb"))
+    assert "V003" in codes, sorted(codes)
+
+
+def test_unmodelled_net_bearing_copper_is_v008_not_a_verdict():
+    """A top-level form this reader does not model must read as "cannot READ",
+    never as "the board is WRONG".
+
+    The dispatch is an open enumeration, and its silent default is exactly why
+    `arc` went unread for as long as it did. The default now reports itself, so
+    the release that introduces the next net-bearing form says so instead of
+    quietly shrinking the copper this reader can see.
+    """
+    low, pcb = build()
+    routed = route(pcb, "R1_P2", [("r1", "2"), ("r2", "1")])
+    nid = net_id(pcb, "R1_P2")
+    exotic = (f'  (chamfered_track (start 1 1) (end 2 2) (width 0.25)'
+              f' (layer "F.Cu") (net {nid}))\n')
+    spliced = routed.rstrip()[:-1] + exotic + ")\n"
+    codes = by_code(signoff(low, spliced, "d.kicad_pcb"))
+    assert "V008" in codes, sorted(codes)
+    assert "chamfered_track" in codes["V008"][0].message

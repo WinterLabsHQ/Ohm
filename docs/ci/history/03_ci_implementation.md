@@ -1,7 +1,7 @@
 # KiCad CI — what was built, and what it proved
 
-Completed: 2026-08-27 · Implements [`KICAD_CI_PLAN.md`](KICAD_CI_PLAN.md),
-closes findings F1–F8 of [`KICAD_COMPATIBILITY.md`](KICAD_COMPATIBILITY.md).
+Completed: 2026-08-27 · Implements [`02_ci_feasibility_plan.md`](02_ci_feasibility_plan.md),
+closes findings F1–F8 of [`01_audit_kicad_7_to_10.md`](01_audit_kicad_7_to_10.md).
 
 The audit graded every KiCad claim `proven` / `assumed` / `untested` / `broken`.
 This is the record of converting those grades into measurements, and of what the
@@ -102,7 +102,7 @@ library Ohm did not ship, did not read, and could not check. There was **no
 diagnostic in the product** for the entire class.
 
 This completes the pattern ADR-014 already established for symbols, one layer
-down — recorded in [`docs/adr/ADR_021_kicad_version_policy.md`](docs/adr/ADR_021_kicad_version_policy.md).
+down — recorded in [`docs/adr/ADR_021_kicad_version_policy.md`](../../adr/ADR_021_kicad_version_policy.md).
 
 | Piece | What it does |
 |---|---|
@@ -153,22 +153,26 @@ certification and noticing one test still skipped.
 
 ## The workflow
 
-`.github/workflows/ci.yml`, five jobs.
+`.github/workflows/ci.yml`, **eight** jobs. (This said five, over a table of six, while the YAML had eight: `determinism` and `determinism-compare` were added later and never reached this table.)
 
 | Job | Runs on | What it proves |
 |---|---|---|
 | `fast` | every push + PR | ruff, mypy, full suite. No KiCad, no image pull. Unchanged. |
 | `kicad` ×4 | schedule / tag / dispatch | `container: kicad/kicad:{7.0.11,8.0.9,9.0.9,10.0.5}`, `fail-fast: false`, `OHM_REQUIRE_KICAD=1`. Emit, library, read-back and plot gates. The 7 leg was added 2026-08-31; it runs every step the others do, with nothing excluded and nothing made conditional, because every `kicad-cli` subcommand these gates use — `sch export netlist`, `sch export pdf`, `pcb export pos`, `pcb export gerbers`, `pcb export drill`, `sym upgrade` — predates KiCad 8. |
-| `v007` | `ubuntu-24.04` | The geometry gate, which imports `pcbnew` in-process. |
+| `v007` | `ubuntu-24.04` | The geometry gate against a PACKAGED KiCad (PPA), out of process, in a deliberately plain venv. |
+| `determinism` ×3 | every push + PR, on ubuntu/windows/macos | Hashes every artifact of every emit kind. |
+| `determinism-compare` | after `determinism` | The three platforms agree byte for byte. |
 | `fpdata` | after `kicad` | Rebuilds the pad table from the matrix dumps; fails on any diff. |
 | `tags` | schedule / tag / dispatch | `tools/check_kicad_tags.py` against every pinned image. Deliberately **not** in the `certify` chain: a KiCad release must not invalidate the certification of what actually ran. |
 | `certify` | after all | Writes version + commit + date as an artifact. |
 
 Two runner details that are load-bearing:
 
-- **`ubuntu-24.04` is pinned on `v007`**, not `ubuntu-latest`: `pcbnew` is a
-  compiled extension built against the distro's Python, and 24.04 is the release
-  whose system Python is 3.12. When that label moves, `pcbnew` stops importing.
+- **`ubuntu-24.04` is pinned on `v007`**, not `ubuntu-latest` — but no longer
+  for the reason first written here. That reason was the in-process `pcbnew`
+  import needing a system Python matching Ohm's 3.12; the import moved out of
+  process in loop 24. What remains is that the KiCad 10 PPA publishes per Ubuntu
+  series, so `ubuntu-latest` moving to an unbuilt series would fail at apt.
 - **Python 3.12 comes from `uv` inside the container.** KiCad 7, 8 and 9 images
   are Debian 12 (Python 3.11); KiCad 10 is Debian 13 (3.13). Ohm requires ≥3.12,
   so none of the image interpreters will do.
@@ -208,16 +212,19 @@ worse than no matrix.
   not. Wherever the table has no data for a major, `ohm/fpdata/__init__.py`
   abstains and S012 reports *unchecked* rather than clean; that rule never
   depended on which majors happened to be in it.
-- **V007 at 8 and 9.** `pcbnew` is importable only where the system Python
-  matches Ohm's, so the geometry gate runs at one version.
+- ~~**V007 at 8 and 9.** `pcbnew` is importable only where the system Python
+  matches Ohm's, so the geometry gate runs at one version.~~ **Closed:** the
+  constraint was the in-process import, not the ABI. The gate runs out of process
+  at all four versions. What is still assumed is that its two routes —
+  `kicad-cli pcb drc` and a `pcbnew` child — agree on every rule class.
 - **That a gerber is manufacturable.** The plot gate proves the files are
-  *producible*. Separately: **Ohm's boards carry no `Edge.Cuts` geometry** — the
+  *producible*. ~~Separately: **Ohm's boards carry no `Edge.Cuts` geometry** — the
   layer is declared, no outline is drawn — so the gerber package is not orderable
-  as-is. Found while proving the plot claim; out of scope here, worth its own
-  issue.
+  as-is.~~ **Closed:** the outline is drawn from the placed courtyards, and M012
+  reports a design Ohm cannot derive one from.
 - **The workflow YAML running on GitHub.** Every job's *steps* were executed
   locally in the same containers, and the `fpdata` job was proven end-to-end
-  (dumping in all three containers rebuilds the committed table byte-for-byte).
+  (dumping in all four containers rebuilds the committed table byte-for-byte).
   The YAML itself has not run on a GitHub runner — there is no `gh` here.
 - **That any of this survives a fabricated board.** Unchanged, and `README.md`
   says so.

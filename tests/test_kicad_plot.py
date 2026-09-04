@@ -1,7 +1,7 @@
 """The emitted files PLOT — gerbers, drill and a schematic PDF, by KiCad itself.
 
 `CHANGELOG.md` claims KiCad 10.0.5 "plots its gerbers and schematic PDF" for an
-Ohm-emitted design, and `KICAD_COMPATIBILITY.md` grades that claim honestly: it
+Ohm-emitted design, and `docs/ci/history/01_audit_kicad_7_to_10.md` grades that claim honestly: it
 was done once, by hand, on one developer's machine, and no test made it. This
 file makes it.
 

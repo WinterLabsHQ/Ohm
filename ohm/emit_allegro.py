@@ -23,6 +23,7 @@ already name-sorted by P-LOWER.
 from __future__ import annotations
 
 from ohm import __version__, ir
+from ohm.emit_common import _source_id
 from ohm.formats import _PST_VERSION
 
 # Ohm role -> Allegro PINUSE. Allegro's closed set is
@@ -190,7 +191,12 @@ def emit_pstxnet(low: ir.IRLow, root: str, stamp: str) -> str:
 
 def emit_allegro(design: ir.Design, low: ir.IRLow, source: str = "design") -> dict[str, str]:
     """The three files Allegro's third-party logic import reads, keyed by filename."""
-    root = _ident(design.board.name if design.board is not None else source)
+    # `source` here is a fallback board NAME (the CLI passes the file stem), not
+    # a path — but the parameter is spelled like every other emitter's path, so
+    # normalise it anyway. Costs nothing on a stem, and stops a caller who hands
+    # it `args.file` from writing a drive letter into an Allegro identifier.
+    root = _ident(design.board.name if design.board is not None
+                  else _source_id(source))
     stamp = f"{{ Using ohm {__version__} }}"
     return {
         "pstchip.dat": emit_pstchip(design, low, stamp),

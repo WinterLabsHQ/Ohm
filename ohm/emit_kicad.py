@@ -45,6 +45,7 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
 from ohm import ir, units
+from ohm.emit_common import BOM_FIELDS, _source_id, _value_text
 from ohm.formats import _PCB_VERSION, _SCH_VERSION
 
 _NS = uuid.UUID("00000000-0000-0000-0000-00000000006f")  # fixed Ohm namespace
@@ -56,7 +57,8 @@ _NS = uuid.UUID("00000000-0000-0000-0000-00000000006f")  # fixed Ohm namespace
 # rather than layout-anchored — they face the other way, at files the user's
 # KiCad wrote, and a line-anchored parser has already been broken twice by
 # nothing more than a pretty-printer change (KiCad 9 and again KiCad 10).
-# Gated by .github/workflows/ci.yml's `kicad` job at 8.0.9, 9.0.9 and 10.0.5.
+# Gated by .github/workflows/ci.yml's `kicad` job at 7.0.11, 8.0.9, 9.0.9 and
+# 10.0.5 — all four, and 7.0.11 above all, since this is the KiCad 7 format.
 # The two constants themselves live in `ohm/formats.py` now, alongside every
 # other external-format stamp Ohm writes; imported here under their original
 # names so this file's diff — and every f-string below — stays unchanged.
@@ -78,35 +80,6 @@ _PWR_REF_RE = re.compile(r'\(property "Reference" "(#PWR\d+)"')
 def _pwr_ref(seq: int) -> str:
     """KiCad's own spelling for the nth power symbol: #PWR01, #PWR02, ..."""
     return f"#PWR{seq:02d}"
-
-
-def _source_id(source: str) -> str:
-    """The stable identity of a source file, for uuid derivation.
-
-    Every uuid and tstamp in the emitted schematic and board is
-    `uuid5(_NS, source + role + ...)`, and `source` used to be the path string
-    the CALLER typed. So the same design emitted different bytes depending on
-    how it was named:
-
-        ohm build tests/golden/divider.ohm       -> uuid 5d81bef0-7da1-57ac-...
-        ohm build D:/repo/tests/golden/divider.ohm -> uuid 7998f527-d7fb-5a58-...
-
-    Two consequences, and the second is the serious one. It broke the promise
-    that "the same source is the same bytes on any machine, any day" — two
-    developers whose checkouts sit at different paths got different files. And
-    KiCad identifies a sheet BY its uuid, so rebuilding from another directory
-    reads to KiCad as a different sheet, which is how per-sheet state gets
-    silently orphaned. Found by the cross-platform determinism gate
-    (`tools/emit_manifest.py`), which is what that gate is for.
-
-    The file name alone is the stable part: it survives a move, a checkout at
-    another path, and a Windows caller typing backslashes. Two designs sharing
-    a basename cannot collide, because a uuid only has to be unique WITHIN the
-    file it appears in and each build writes its own.
-    """
-    # Accept either separator: a Windows caller types backslashes and a POSIX
-    # one forward slashes, and the same file must hash the same either way.
-    return source.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 def _uid(*parts: str) -> str:
@@ -171,6 +144,30 @@ def diffpair_renames(low: ir.IRLow) -> dict[str, str]:
 
 
 # ---------- placement ----------
+def _extent(w: Decimal, h: Decimal, rot: Decimal) -> tuple[Decimal, Decimal]:
+    """Axis-aligned half-extent of a w x h courtyard turned by `rot` degrees.
+
+    Pure geometry, and it is here rather than in `check_placement` because BOTH
+    the placer and the S011/S013 check need it — and while it lived in the
+    checker, this module imported it back out of one, which made the two a
+    mutual dependency broken only by an import sitting inside a function. The
+    checker asks the emitter what the placement is; the emitter must not have to
+    ask the checker what a rectangle is.
+
+    A part rotated by 90/270 has its courtyard transposed; any other angle is
+    bounded by the diagonal of the rotated rectangle, which is conservative — it
+    can only over-report an overlap, never miss a real one.
+    """
+    angle = rot % 360
+    if angle in (_D(90), _D(270)):
+        return h / 2, w / 2
+    if angle in (_D(0), _D(180)):
+        return w / 2, h / 2
+    # off-axis: bound it by the diagonal — over-reports, never misses
+    diag = (w * w + h * h).sqrt() / 2
+    return diag, diag
+
+
 def _courtyard(pkg: ir.Value | None):
     """(cell basis w, h, PackageModel|None) — Decimal mm."""
     if isinstance(pkg, ir.GenerateSpec):
@@ -204,6 +201,41 @@ def _ceil_grid(d: Decimal) -> Decimal:
 
 def _group_of(ref: str) -> str:
     return ref.split(".", 1)[0] if "." in ref else "root"
+
+
+def near_follows(low: ir.IRLow) -> tuple[dict[str, str], dict[str, Decimal],
+                                        tuple[ir.ConstraintLow, ...]]:
+    """Every `near` the placer will ACT on: follower -> target, follower -> gap.
+
+    Lifted out of `placement()` so `check_placement` reads the same declarations
+    the placer read, rather than a second opinion about them — the S011 rule
+    ("a board Ohm emits and the verdict Ohm gives cannot disagree"), applied to
+    `near` as well.
+
+    The third element is the `near` constraints the placer will NOT act on: a
+    second `near` naming a follower that already has one (first declaration
+    wins), a `near` whose follower is pinned by `fixed` and therefore cannot be
+    moved, and one naming a part that is not on this board. `placement()`
+    ignores them exactly as it always did; they are returned so S013 can report
+    declared intent that never reached the placer at all.
+    """
+    fixed = fixed_poses(low)
+    auto_refs = {p.ref for p in low.parts if p.ref not in fixed}
+    follows: dict[str, str] = {}
+    want_of: dict[str, Decimal] = {}
+    dropped: list[ir.ConstraintLow] = []
+    for c in low.constraints:
+        if c.kind != "near" or len(c.nets) < 2:
+            continue
+        if (c.nets[0] in auto_refs and c.nets[0] != c.nets[1]
+                and (c.nets[1] in auto_refs or c.nets[1] in fixed)
+                and c.nets[0] not in follows):
+            follows[c.nets[0]] = c.nets[1]
+            want_of[c.nets[0]] = next(
+                (d for p in c.params if (d := parse_mm(p)) is not None), _CELL_GAP)
+        else:
+            dropped.append(c)
+    return follows, want_of, tuple(dropped)
 
 
 def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, bool]]:
@@ -247,20 +279,11 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
         return _ceil_grid(w + _CELL_GAP), _ceil_grid(h + _CELL_GAP)
 
     # near(follower, target, distance): first declaration wins
-    follows: dict[str, str] = {}
-    want_of: dict[str, Decimal] = {}
-    for c in low.constraints:
-        if (c.kind == "near" and len(c.nets) >= 2 and c.nets[0] in auto_refs
-                and c.nets[0] != c.nets[1]
-                and (c.nets[1] in auto_refs or c.nets[1] in fixed)
-                and c.nets[0] not in follows):
-            follows[c.nets[0]] = c.nets[1]
-            want_of[c.nets[0]] = next(
-                (d for p in c.params if (d := parse_mm(p)) is not None), _CELL_GAP)
+    follows, want_of, _dropped = near_follows(low)
 
     # depth from a non-follower root, so a target is always placed before the
-    # part that has to sit beside it. A cycle keeps its first-seen depth and is
-    # placed in the flow like anything else.
+    # part that has to sit beside it. A cycle has no root, so every member shares
+    # the same depth and the loop below breaks exactly one of its edges.
     depth_of: dict[str, int] = {}
     for follower in sorted(follows):
         seen, cur, hops = {follower}, follows[follower], 1
@@ -378,12 +401,23 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
     # Only parts still unplaced. An earlier draft re-ran this over EVERY
     # follower and overwrote the positions seat() had already found, which is
     # how a bypass cap ended up 134mm from a pin it was sitting 2mm from.
-    for ref in sorted(follows, key=lambda r: (depth_of[r], r)):
-        if ref in out:
-            continue
+    def flow(ref: str) -> None:
+        """Last resort: put `ref` down on the row cursor, never on a neighbour."""
+        nonlocal cursor_x, cursor_y
+        cw, ch = cell_of(ref)
+        x, y = _mm(cursor_x + cw / 2), _mm(cursor_y + ch / 2)
+        while not free(rect(ref, x, y)):
+            x = _mm(x + cw)
+            if x > _ORIGIN_X + target_w:
+                x, cursor_y = _mm(_ORIGIN_X + cw / 2), _mm(cursor_y + ch)
+                y = _mm(cursor_y + ch / 2)
+        out[ref] = (x, y, _D(0), "top", False)
+        taken.append(rect(ref, x, y))
+        cursor_x = _mm(x + cw / 2)
+
+    def beside(ref: str) -> None:
+        """Seat `ref` at its declared gap from its target, on the first free side."""
         target = follows[ref]
-        if target not in out:  # a cycle: nothing to sit beside
-            continue
         tx, ty, _tr, _ts, _tl = out[target]
         thw, thh = half(target)
         rhw, rhh = half(ref)
@@ -393,18 +427,37 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
             if free(rect(ref, _mm(x), _mm(y))):
                 out[ref] = (_mm(x), _mm(y), _D(0), "top", False)
                 taken.append(rect(ref, _mm(x), _mm(y)))
-                break
-        else:  # every side taken — flow it rather than stack it on a neighbour
-            cw, ch = cell_of(ref)
-            x, y = _mm(cursor_x + cw / 2), _mm(cursor_y + ch / 2)
-            while not free(rect(ref, x, y)):
-                x = _mm(x + cw)
-                if x > _ORIGIN_X + target_w:
-                    x, cursor_y = _mm(_ORIGIN_X + cw / 2), _mm(cursor_y + ch)
-                    y = _mm(cursor_y + ch / 2)
-            out[ref] = (x, y, _D(0), "top", False)
-            taken.append(rect(ref, x, y))
-            cursor_x = _mm(x + cw / 2)
+                return
+        flow(ref)  # every side taken — flow it rather than stack it on a neighbour
+
+    # Depth order alone was enough while every chain had a root: a target is
+    # always placed before the part that has to sit beside it. A CYCLE has no
+    # root, and the loop used to `continue` past one — which left the part out of
+    # the returned map entirely. That was not a cosmetic gap: `placement()` is on
+    # the ANALYSIS path as well as the emit path, so a partial map made
+    # `emit_kicad_pcb` raise `KeyError` on the missing ref, made M012 report "the
+    # design places no parts" about a design that declares two, and made S011
+    # check an empty placement and find nothing. `placement()` must be TOTAL over
+    # `low.parts`; `test_placement_places_every_part` is the gate.
+    #
+    # So: seat everything whose target is already down, repeatedly. When a pass
+    # seats nothing and parts remain, the remainder is a cycle — exactly one
+    # member gives up its adjacency preference and flows, and the rest of the
+    # cycle then seats normally on the next pass. One edge broken, not all of
+    # them. Whether a declared `near` survived is MEASURED by S013 afterwards,
+    # never assumed here.
+    queue = sorted(follows, key=lambda r: (depth_of[r], r))
+    while True:
+        seated = False
+        for ref in queue:
+            if ref not in out and follows[ref] in out:
+                beside(ref)
+                seated = True
+        remaining = [r for r in queue if r not in out]
+        if not remaining:
+            break
+        if not seated:
+            flow(remaining[0])
     return out
 
 
@@ -414,7 +467,7 @@ def placement(low: ir.IRLow) -> dict[str, tuple[Decimal, Decimal, Decimal, str, 
 # the layer table. KiCad plots such a board perfectly happily — the gerbers come
 # out well-formed, which is what `tests/test_kicad_plot.py` proved — but every
 # fab reads the profile layer to know what to CUT, so a package without one is
-# producible and not orderable. That gap is what KICAD_CI_IMPLEMENTATION.md
+# producible and not orderable. That gap is what docs/ci/history/03_ci_implementation.md
 # recorded under "what is still not proven".
 #
 # The outline is DERIVED, because the language cannot state one. A `board` block
@@ -449,7 +502,6 @@ def board_extents(low: ir.IRLow, poses: dict[str, _Pose] | None = None
     """
     if not low.parts:
         return None
-    from ohm.check_placement import _extent  # rotated axis-aligned half-extent
 
     if poses is None:
         poses = placement(low)
@@ -521,7 +573,6 @@ def schematic_value(part: ir.PartLow) -> str:
     Falls back to the component name when no `value` is declared, which is what
     a part named for its value (`C100n`) wants anyway.
     """
-    from ohm.emit_netlist import _value_text
 
     attrs = dict(part.attrs)
     value = attrs.get("value")
@@ -612,6 +663,11 @@ def title_block(design: ir.Design | None, source: str, page: int = 1,
     computed from what is actually emitted rather than declared — the only
     honest source for it.
     """
+    # Normalised here too, not only by the caller. `Path("D:\repo\x.ohm").stem`
+    # on POSIX is the whole string, so an un-normalised Windows path would put a
+    # drive letter in the drawing's title. Idempotent; every current caller has
+    # already done it.
+    source = _source_id(source)
     board = design.board if design is not None else None
     title = board.get("title") if board else ""
     out = ["  (title_block",
@@ -742,7 +798,6 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     # before anything derives one: the caller's path must not decide the bytes.
     # See _source_id. Idempotent, so the recursive sheet calls stay correct.
     source = _source_id(source)
-    from ohm.emit_netlist import BOM_FIELDS, _value_text
     from ohm.pkggen.pindata_iface import DeclaredPinData
     from ohm.pkggen.symbol import emit_symbol, glyph_for, symbol_layout
 
@@ -1138,16 +1193,42 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
                 return _SCH_STUB + _D(len(net)) * _SCH_CHAR_W + _PWR_SYM_W
         return _D(0)
 
-    def _rider_offset(host: str, hside: str, upright: bool) -> Decimal:
+    def _wire_label(rider: str) -> str:
+        """The net name that will be PRINTED on this rider's connecting wire.
+
+        Empty when the net is fully drawn by that one wire: both its endpoints
+        are then joined by copper and no label is emitted (see the `drawable`
+        test at the wire-drawing loop below). Read from the same `drawable` map
+        that decides it there, so the space reserved here and the text written
+        there cannot disagree.
+        """
+        nname = riders[rider][0]
+        return "" if len(drawable.get(nname, ())) == 2 else nname
+
+    def _rider_offset(host: str, hside: str, upright: bool,
+                      label: str = "") -> Decimal:
         """How far outboard of the host pin the rider's near pin sits.
 
         An upright rider's BODY is vertical, so it would cross the wire stubs of
         the host's other pins if it stood in the label column — a wire endpoint
         touching another wire is a junction in KiCad, i.e. a short. It stands
         clear of that column instead.
+
+        `label` is the net name that will ride this wire, and it is reserved for
+        the same reason the upright branch of `_chain_span` already reserves
+        `_rail_name_width`: the name is drawn HORIZONTALLY and is as wide as any
+        label, so a wire shorter than its own name puts that name through
+        whatever stands next to it. An IN-LINE rider was the case that reserved
+        nothing — `examples/divider_led.ohm` put `PWR_GND`, 7 characters, on a
+        2.54mm stub and printed it across the capacitor 4.3mm along (D002).
+        `_chain_span` reserves the block width through this same function, so
+        the room asked for here is the room the cell actually gets.
         """
         if not upright:
-            return _RIDER_GAP
+            if not label:
+                return _RIDER_GAP
+            return max(_RIDER_GAP,
+                       _snap(_SCH_STUB + _D(len(label)) * _SCH_CHAR_W))
         return _snap(_SCH_STUB + _pin_space(host, hside) + _SCH_STUB)
 
     def _chain_span(host: str, rider: str, hside: str) -> Decimal:
@@ -1161,7 +1242,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         mypin = riders[rider][3]
         rside = _pin_geom(rider)[mypin][2]
         up = _upright(rider, mypin)
-        offset = _rider_offset(host, hside, up)
+        offset = _rider_offset(host, hside, up, _wire_label(rider))
         if up:
             # It stands vertical, so its BODY claims no outward width — but the
             # rail it terminates on still prints its name HORIZONTALLY, and that
@@ -1328,7 +1409,7 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             sdx, _sdy = _stub_dir(hside, host_rot)
             hside = "right" if sdx > 0 else "left"
             far = _rider_far_rail(ref, mypin)
-            off = _rider_offset(host, hside, far is not None)
+            off = _rider_offset(host, hside, far is not None, _wire_label(ref))
             bx = _snap(ax + off if hside == "right" else ax - off)
             if far == "ground":
                 # near pin up, body hanging down to the ground symbol
@@ -1466,8 +1547,12 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
     # port, and on a crowded pin that ran straight through the neighbouring
     # IC's own pin names. Seeded first so the very first name already avoids
     # them.
+    def _own_half(part: ir.PartLow) -> Decimal:
+        """The half-extent this part was seeded into `taken_text` with."""
+        return max(_stand_off(part.ref), layouts[part.component][0])
+
     for part, px, py, rot in placed:
-        half = max(_stand_off(part.ref), layouts[part.component][0])
+        half = _own_half(part)
         taken_text.append((px - half, py - half, px + half, py + half))
     for jx, jy in sorted(set(junctions)):
         out.append(f'  (junction (at {jx} {jy}) (diameter 0.9144) (color 0 0 0 0)'
@@ -1488,6 +1573,14 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
             ty = ey if rail_net in ground_nets else _snap(ey - _D("2.54"))
             out.append(f'    (property "Value" "{_q(rail_net)}" (at {ex} {ty} 0)'
                        f" (effects (font (size 1.27 1.27)){hide}))")
+            # A ladder head prints its rail name like every other power port,
+            # and this one was the only placed text on the sheet that never
+            # reached `taken_text` — so a cluster title, which IS free to move
+            # and does consult that list, was placed straight through it.
+            # `tests/examples/led_panel.ohm` put "Decoupling" across `PWR_V`
+            # (D001). Hidden ground names are not drawn, so they claim nothing.
+            if not hide:
+                taken_text.append(_text_box(ex, ty, rail_net, _D("1.27"), ""))
             out.append('    (pin "1" (uuid "'
                        f'{_uid(source, "ldpin", rail_net, str(ex), str(ey))}"))')
             out.append(f'    (instances (project "ohm" (path "{inst_path}"'
@@ -1542,22 +1635,54 @@ def emit_kicad_sch(low: ir.IRLow, source: str = "<string>",
         # 90-degree part's text at 270, reading top-to-bottom. Both are the same
         # text either way, so the half-turn is free to drop.
         tang = (360 - rot) % 180
+        # A reference and a value are FREE text — Ohm chooses where they go —
+        # and they were the one free text on the sheet that never asked whether
+        # the spot was taken, nor told anything else that it now was. A turned
+        # rider's value is written outboard of its body, which is the same
+        # column the neighbouring part's pin label runs back along: on
+        # `examples/io_expander_board.ohm` a `1uF` and a `VIN_V` landed on the
+        # same 3mm of paper (D001), and on `tests/examples/sensor_node_bme280.ohm`
+        # the same pair did.
+        #
+        # So they go through `_free_spot` like the frame titles do, with the
+        # position they have always had FIRST — nothing moves unless it must —
+        # and the alternatives stepping outward, never inward. The part's own
+        # body is excluded from the obstacles: it is seeded into `taken_text`
+        # above, and a part's reference sitting against its own body is the
+        # drawing being right, which is why D002 excludes it too.
+        own_box = (px - _own_half(part), py - _own_half(part),
+                   px + _own_half(part), py + _own_half(part))
+        others = [t for t in taken_text if t != own_box]
+
+        def _prop(cands, text: str) -> tuple[str, str]:
+            """(the `x y angle` for an `(at ...)`, the justify suffix)."""
+            tx, ty, tj = _free_spot(cands, text, _D("1.27"), others)
+            taken_text.append(_text_box(tx, ty, text, _D("1.27"), tj))
+            return f"{tx} {ty} {tang}", "" if tj == "center" else f" (justify {tj})"
+
         if rot in (90, 270):
-            tx = _snap(px + box_h + _SCH_GRID)
-            ref_pos = f"{tx} {_snap(py - _SCH_GRID)} {tang}"
-            val_pos = f"{tx} {_snap(py + _SCH_GRID)} {tang}"
-            just = " (justify left)"
+            # outboard of the body, then inboard on the other side
+            out_x = _snap(px + box_h + _SCH_GRID)
+            back_x = _snap(px - box_h - _SCH_GRID)
+            ry, vy = _snap(py - _SCH_GRID), _snap(py + _SCH_GRID)
+            ref_cands = [(out_x, ry, "left"), (back_x, ry, "right")]
+            val_cands = [(out_x, vy, "left"), (back_x, vy, "right")]
         else:
-            ref_pos = f"{px} {_snap(py - box_h - _SCH_GRID * 2)} {tang}"
-            val_pos = f"{px} {_snap(py + box_h + _SCH_GRID * 2)} {tang}"
-            just = ""
+            # above and below, then further above and below
+            step = box_h + _SCH_GRID * 2
+            ref_cands = [(px, _snap(py - step - _SCH_GRID * n), "center")
+                         for n in (0, 2, 4)]
+            val_cands = [(px, _snap(py + step + _SCH_GRID * n), "center")
+                         for n in (0, 2, 4)]
+        ref_pos, ref_just = _prop(ref_cands, part.designator)
+        val_pos, val_just = _prop(val_cands, schematic_value(part))
         out.append(f'  (symbol (lib_id "ohm:{_q(part.component)}") (at {px} {py} {rot})'
                    " (unit 1) (in_bom yes) (on_board yes) (dnp no)")
         out.append(f'    (uuid "{_uid(source, "sym", part.ref)}")')
         out.append(f'    (property "Reference" "{_q(part.designator)}" (at {ref_pos})'
-                   f" (effects (font (size 1.27 1.27)){just}))")
+                   f" (effects (font (size 1.27 1.27)){ref_just}))")
         out.append(f'    (property "Value" "{_q(schematic_value(part))}" (at {val_pos})'
-                   f" (effects (font (size 1.27 1.27)){just}))")
+                   f" (effects (font (size 1.27 1.27)){val_just}))")
         out.append(f'    (property "Footprint" "{_q(_footprint_id(part.package))}"'
                    " (at 0 0 0) (effects (font (size 1.27 1.27)) hide))")
         out.append(f'    (property "Ohm" "{_q(part.ref)}" (at 0 0 0)'
@@ -1828,14 +1953,23 @@ def zone_of(group: str, low: ir.IRLow, comps: dict) -> int:
 
 def _text_box(x: Decimal, y: Decimal, text: str, size: Decimal,
               justify: str) -> tuple[Decimal, Decimal, Decimal, Decimal]:
-    """Axis-aligned extent of a piece of sheet text, for collision testing."""
+    """Axis-aligned extent of a piece of sheet text, for collision testing.
+
+    A piece of text with NO `(justify ...)` is drawn CENTRED on its anchor —
+    that is what KiCad does and what `check_drawing._text_box` measures. This
+    function used to fall through to left-aligned for the empty case, so the
+    emitter's own avoidance and its own gate disagreed by half a string width on
+    exactly the text Ohm writes without a justify: every symbol's reference and
+    value. Nothing passed "" while only labels and titles came through here, so
+    it sat as a trap rather than a defect; the symbol properties below now do.
+    """
     width = _D(len(text)) * size * _D("0.8")
     if justify == "right":
         x1 = x - width
-    elif justify == "center":
-        x1 = x - width / 2
-    else:
+    elif justify == "left":
         x1 = x
+    else:  # centred: no `(justify ...)` at all, or an explicit "center"
+        x1 = x - width / 2
     return (x1, y - size, x1 + width, y + size / 2)
 
 
@@ -2079,6 +2213,31 @@ def _emit_root_sheet(low: ir.IRLow, source: str, stem: str,
     ]) + "\n"
 
 
+def sheet_plan(low: ir.IRLow, source: str = "<string>",
+               design: ir.Design | None = None, *,
+               force: bool = False) -> list[str]:
+    """The top-level module groups that each get their own sheet. [] means flat.
+
+    THE sheet decision, in one place. `emit_kicad_sheets` writes the files from
+    it and `emit_kicad_pro` lists them from it, so a project file cannot name a
+    sheet nobody wrote.
+
+    It used to be decided twice, by two different predicates. This one is by
+    FIT — a drawing that fits one reviewable page stays on one page. The
+    `.kicad_pro` asked a cheaper question, `len(sheet_groups(low)) > 1`, and on
+    any multi-module design that happened to fit, the project listed child
+    sheets whose files were never emitted and whose uuids appear in no
+    schematic. `tests/golden/i2c_bus.ohm` is exactly that design.
+    """
+    source = _source_id(source)
+    groups = sheet_groups(low)
+    if len(groups) < 2:
+        return []
+    if not force and _REVIEWABLE_RE.search(emit_kicad_sch(low, source, design)):
+        return []
+    return list(groups)
+
+
 def emit_kicad_sheets(low: ir.IRLow, source: str = "<string>",
                       design: ir.Design | None = None, *,
                       force: bool = False) -> dict[str, str]:
@@ -2096,12 +2255,9 @@ def emit_kicad_sheets(low: ir.IRLow, source: str = "<string>",
     # See _source_id. Idempotent, so the recursive sheet calls stay correct.
     source = _source_id(source)
     stem = Path(source).stem
-    groups = sheet_groups(low)
-    if len(groups) < 2:
+    groups = sheet_plan(low, source, design, force=force)
+    if not groups:
         return {f"{stem}.kicad_sch": emit_kicad_sch(low, source, design)}
-    flat = emit_kicad_sch(low, source, design)
-    if not force and _REVIEWABLE_RE.search(flat):
-        return {f"{stem}.kicad_sch": flat}
     flat = emit_kicad_sch(low, source, design,
                           sheet_note="OVERVIEW — every block on one sheet, "
                                      "not part of the hierarchy")

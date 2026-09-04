@@ -4,12 +4,11 @@ Ohm emits eight external file formats on the build path, plus `.zen` on the
 interop path, and every one of them carries a version stamp of some kind — a
 numbered file-format revision, a schema string, a header line an authoring tool
 itself writes. Before this module those stamps were bare literals scattered across
-nine emitter files (ten, now that `.zen` has a version to record at all): some
-named locally, most not, none of them explaining *why that value* to a reader who
-did not also read the format's spec. A literal nobody named is a literal anybody
-can change in one place with nothing noticing.
+the emitter files: some named locally, most not, none of them explaining *why that
+value* to a reader who did not also read the format's spec. A literal nobody named
+is a literal anybody can change in one place with nothing noticing.
 
-THE POLICY, stated once instead of nine times: write the oldest stamp a current
+THE POLICY, stated once instead of once per emitter: write the oldest stamp a current
 reader accepts; bump only when a reader proves the new one is needed. A newer
 stamp never buys correctness — every reader in this table reads forward — and it
 always costs something: an older installation's ability to open the file, or (for
@@ -18,11 +17,19 @@ which is the only ground truth a reverse-engineered binary format has. ADR-021
 states this for the four KiCad constants specifically, with the KiCad-9/KiCad-10
 breakage history that motivated it; ADR-022 generalises the policy to every format
 in this table and tabulates, stamp by stamp, which ones a real reader has actually
-been run against. Of the fifteen entries below, ADR-022 moved exactly one — STEP,
-from AP214 to AP242 — and added one that had never had a version to record, `.zen`.
-Both are the entries whose readers can be executed here: gmsh/OpenCASCADE meshes
-the STEP, and `pcbc` 0.4.41 builds the `.zen`. The other thirteen are unchanged,
-and the reasons say why rather than leaving that to a reader's charity.
+been run against. Of the entries below, exactly one ever changed the bytes Ohm
+writes — STEP, from AP214 to AP242 — and one is a stamp that had no version to
+record before (`.zen`). Both are the entries whose readers can be executed here:
+gmsh/OpenCASCADE meshes the STEP, and `pcbc` 0.4.41 builds the `.zen`. Every other
+entry is the value Ohm was already writing, and the reasons say why rather than
+leaving that to a reader's charity.
+
+The count is deliberately not written out in prose here. It was — "fifteen" — and
+it went stale the moment `.kicad_pro`'s three section versions and STEP's
+DATA-section protocol name were registered, leaving this module, ADR-022 and
+`docs/ci/12` each asserting a number none of them still had. `len(REGISTRY)` is
+the number, `tests/test_formats.py` pins it, and the pin's failure message names
+the documents to update with it.
 
 Hermetic (N1): stdlib only, plus `shared` for the one stamp that belongs to the
 open/proprietary seam rather than to Ohm. No subprocess, no network, no clock,
@@ -51,13 +58,30 @@ class FormatVersion:
 # ---------------------------------------------------------------- KiCad (ADR-021 sec 1)
 # KiCad reads FORWARD, and that is the direction it guarantees: a newer stamp would
 # buy nothing and cost every older KiCad the ability to open the file. See the policy
-# comment at ohm/emit_kicad.py:49-57 and ADR-021 section 1, which names these four
+# comment above `_SCH_VERSION`'s import in ohm/emit_kicad.py, and ADR-021 section 1,
+# which names these four
 # constants explicitly and records the KiCad-9/KiCad-10 breakage that made "structural,
 # not layout-anchored readers" the corollary this module doesn't need to restate.
 _SCH_VERSION = 20230121  # KiCad 7 schematic format
 _PCB_VERSION = 20221018  # KiCad 7 board format
 _FP_VERSION = 20221018  # KiCad 7 board/footprint format (same format as .kicad_pcb)
 _SYM_VERSION = 20220914  # KiCad 7 symbol format
+
+# ---------------------------------------------------------------- KiCad .kicad_pro
+# The project file is JSON, and each of its sections carries its OWN schema
+# version rather than the file carrying one. These are KiCad 7's, chosen for the
+# same forward-compatibility reason as the four format stamps above: bump one and
+# an older KiCad stops opening the project.
+#
+# They sat as bare literals in `ohm/emit_kicad_pro.py` and the module appeared in
+# neither this registry nor its owner gate, so ADR-022's fourteen-row table never
+# mentioned `.kicad_pro` at all — that ADR's amendment section now records it.
+# The objection that these are "KiCad's numbers, not Ohm's choice" applies
+# equally to _SCH_VERSION: what Ohm chooses is which revision to CLAIM, which is
+# exactly what the policy at the top of this file governs.
+_PRO_PROJECT_VERSION = 1  # the project document itself
+_PRO_ERC_VERSION = 0  # the `erc` section
+_PRO_NET_SETTINGS_VERSION = 3  # the `net_settings` section
 
 # ---------------------------------------------------------------- Eagle
 # The schema revision that introduced XML libraries — the oldest Eagle a `.lbr`
@@ -120,6 +144,16 @@ _PST_VERSION = "PST_HDL_CENTRIC_VERSION_0"
 # the brace) — a typo in schemaAP242DIS, not a distinct identifier; readers match
 # the leading name token, and gmsh reads both.
 _HEADER_SCHEMA = "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }"
+# The same protocol named a second time, in the DATA section's
+# APPLICATION_PROTOCOL_DEFINITION. `ohm/pkggen/step.py` says outright that this
+# "has to agree with FILE_SCHEMA above or the file claims one protocol in the
+# header and another in the data" — and nothing enforced it, because the triple
+# was three bare literals. Note the deliberate absence of the `_mim_lf` suffix:
+# OpenCASCADE's `IsAP242()` lower-cases this field and compares it against
+# exactly this spelling, so it is not a typo for the header name.
+_STEP_PROTOCOL = "ap242_managed_model_based_3d_engineering"
+_STEP_PROTOCOL_YEAR = 2013  # the AP242 DIS year OCC stamps; descriptive only
+_STEP_APP_CONTEXT = "Managed model based 3d engineering"
 
 # ---------------------------------------------------------------- Zener (.zen)
 # The diodeinc/pcb toolchain lane the export targets. `pcb.toml` names one of
@@ -227,6 +261,27 @@ REGISTRY: tuple[FormatVersion, ...] = (
         reason="the diodeinc/pcb toolchain lane the export targets and the "
                "oldest one it has been built against — 0.4.41, the first pcb "
                "binary this project has had (ADR-002 sec 5, ADR-022)."),
+    FormatVersion(
+        artifact=".kicad_pro", constant="_PRO_PROJECT_VERSION",
+        value=_PRO_PROJECT_VERSION, owner="ohm.emit_kicad_pro",
+        reason="KiCad 7's project document version; KiCad reads forward, so the "
+               "oldest spelling every supported KiCad opens is the one to write."),
+    FormatVersion(
+        artifact=".kicad_pro erc", constant="_PRO_ERC_VERSION",
+        value=_PRO_ERC_VERSION, owner="ohm.emit_kicad_pro",
+        reason="KiCad 7's `erc` section version; bumping it would cost older "
+               "KiCads the ERC severities Ohm sets and buy nothing."),
+    FormatVersion(
+        artifact=".kicad_pro net_settings", constant="_PRO_NET_SETTINGS_VERSION",
+        value=_PRO_NET_SETTINGS_VERSION, owner="ohm.emit_kicad_pro",
+        reason="KiCad 7's `net_settings` section version; the net classes Ohm "
+               "writes are readable by every supported KiCad at this revision."),
+    FormatVersion(
+        artifact=".step protocol", constant="_STEP_PROTOCOL",
+        value=_STEP_PROTOCOL, owner="ohm.pkggen.step",
+        reason="the DATA section's half of AP242's identity, which must agree "
+               "with _HEADER_SCHEMA; registered so a change to one cannot "
+               "silently leave the other claiming a different protocol."),
     FormatVersion(
         artifact="Ohm netlist", constant="_NETLIST_VERSION",
         value=_NETLIST_VERSION, owner="ohm.emit_netlist",

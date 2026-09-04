@@ -17,7 +17,8 @@ it. New advisory **M012** when there are no extents to derive from.
 
 ## KiCad 7 is supported *and* measured, for the first time
 
-`kicad/kicad:7.0.11` certifies clean — 337 tests, 0 failed, **0 skipped** — on
+`kicad/kicad:7.0.11` certifies clean — 337 tests at this loop, 0 failed,
+**0 skipped** — on
 the same terms as 8, 9 and 10, with no gate excluded. Previously KiCad 7 was
 claimed and checked by nothing, on the strength of a false premise. It also now
 has footprint pad data, so `--target-kicad 7` translates pad ids like every other

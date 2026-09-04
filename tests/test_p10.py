@@ -140,27 +140,51 @@ def test_fmt_leaves_broken_source_untouched():
 
 # ---------- explain ----------
 def test_every_emitted_code_has_an_explanation():
-    """Every diagnostic code Ohm can emit must be answerable by `ohm explain`.
+    """Every diagnostic code Ohm can emit must be answerable by `ohm explain`,
+    and every explanation must belong to a code that exists.
 
-    The tier letters, and one that was missing for a long time. `V` — signoff —
-    was NOT in this character class, so V001 through V007 were never covered by
-    this gate at all: the check that every code carries a cause and a fix skipped
+    This gate has now been wrong twice in the same way, so it is worth writing
+    down what the shape of the mistake is. It used to scan for a hand-kept class
+    of tier letters. `V` — signoff — was missing, so V001 through V007 were never
+    covered at all: the check that every code carries a cause and a fix skipped
     the entire tier that runs last, on a routed board, immediately before
-    fabrication. Adding V here is the whole reason this docstring exists; the
-    class is now the tier letters from `ohm/diagnostics.py`'s own EXPLAIN table
-    rather than a hand-kept subset of them.
+    fabrication. `V` was added, and this docstring was rewritten to claim the
+    class was "now the tier letters from EXPLAIN rather than a hand-kept subset
+    of them" — which was not true. It was still a literal, and it was still short
+    by one: `X`, the LSP tier (`ohm/lsp.py`), sat outside it.
+
+    A class listing the letters EXPLAIN happens to use cannot see a code in a
+    letter EXPLAIN does not have, which is exactly the failure both times. So the
+    class is the whole alphabet. Measured: `[A-Z]NNN` over `ohm/` yields exactly
+    the diagnostic codes and no false positives — Ohm has no other quoted literal
+    of that shape.
+
+    `ohm/diagnostics.py` is excluded from the scan so the EXPLAIN table cannot
+    vouch for itself; without that, the reverse direction below is vacuous.
     """
     import re
 
     ohm_pkg = Path(__file__).parent.parent / "ohm"
     emitted = set()
     for py in ohm_pkg.rglob("*.py"):
-        emitted |= set(re.findall(r'"([PRUSICQZKBMVD]\d{3})"', py.read_text(encoding="utf-8")))
+        if py.name == "diagnostics.py":
+            continue  # the table may not be its own witness
+        emitted |= set(re.findall(r'"([A-Z]\d{3})"', py.read_text(encoding="utf-8")))
+
     missing = emitted - set(EXPLAIN)
     assert not missing, f"codes without explain entries: {sorted(missing)}"
+    # The reverse direction, which nothing checked: an explanation left behind by
+    # a deleted code is a promise `ohm explain` keeps about a diagnostic that can
+    # never arrive.
+    orphaned = set(EXPLAIN) - emitted
+    assert not orphaned, f"explain entries for codes nothing emits: {sorted(orphaned)}"
     # ...and the gate must actually be looking at something. A regex that matched
-    # nothing would pass this test forever, which is how V went unnoticed.
-    assert len(emitted) > 50, f"only {len(emitted)} codes found — is the pattern right?"
+    # nothing would pass this test forever, which is how V went unnoticed. Tied to
+    # the table rather than to a literal floor, so it cannot rot back into
+    # vacuity the way `> 50` had against a real 112.
+    assert len(emitted) == len(EXPLAIN) >= 100, (
+        f"{len(emitted)} codes found against {len(EXPLAIN)} explanations "
+        f"— is the pattern right?")
 
 
 def test_explain_cli():

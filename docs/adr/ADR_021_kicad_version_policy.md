@@ -96,9 +96,11 @@ library out of band. The footprint side now works the same way.
   becomes a diagnostic, for user designs and not merely for the three standard
   parts that happened to have tests.
 - The supported KiCad range is now **measured**: `.github/workflows/ci.yml` runs
-  the emit, library, read-back and plot gates against 8.0.9, 9.0.9 and 10.0.5 in
-  the official containers, with `OHM_REQUIRE_KICAD=1` so a skipped KiCad test
-  fails the run instead of quietly passing it.
+  the emit, library, read-back, plot and geometry gates against **7.0.11, 8.0.9,
+  9.0.9 and 10.0.5** in the official containers, with `OHM_REQUIRE_KICAD=1` so a
+  skipped KiCad test fails the run instead of quietly passing it. (This bullet
+  named only 8, 9 and 10 while the next one added 7 separately, which read as if
+  7 were a bolt-on rather than a leg like the others.)
 - **KiCad 7 is a measured leg like the others.** `.github/workflows/ci.yml`
   runs the same gates in `kicad/kicad:7.0.11`. The supported floor stays at 7:
   raising it to 8 was proposed here on the strength of a claim that turned out
@@ -137,8 +139,13 @@ What follows, and what does not:
   the committed table and the matrix name the same majors — so the two move
   together. Where the table has no data, it still abstains, and that is the rule
   behaving correctly rather than a gap.
-- **The V007 geometry gate still runs at one version.** That constraint is the
-  `pcbnew` Python ABI, was measured, and has nothing to do with image tags.
+- ~~**The V007 geometry gate still runs at one version.** That constraint is the
+  `pcbnew` Python ABI, was measured, and has nothing to do with image tags.~~
+  **Superseded, 2026-08-31.** The constraint was the in-process import, not the
+  ABI. `ohm/drc.py` runs the engine out of process — `kicad-cli pcb drc` where it
+  exists, a `pcbnew` child otherwise — so the gate runs at all four supported
+  versions. What is still assumed is that the two routes agree on every rule
+  class.
 
 Kept as a dated section rather than folded into the text above, because a
 version policy that quietly rewrites what it once asserted about the outside

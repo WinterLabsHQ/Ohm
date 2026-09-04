@@ -414,7 +414,25 @@ def _cmd_refactor(args) -> int:
     return 0
 
 
-def _report(result, source: str, as_json: bool) -> None:
+def _report(diags, source: str, as_json: bool, path: str | None = None) -> None:
+    """Print every diagnostic, ONCE.
+
+    Takes a list rather than a CompileResult because the build path has one more
+    source of diagnostics than the checkers: `check_drawing` reads the emitted
+    schematic, so its D001-D004 only exist after the sheets have been rendered.
+    Those used to be printed straight to stderr further down, after this had
+    already run — so they were absent from `--json-diagnostics` (which
+    `AGENTS.md` tells agents to iterate on) and invisible to `--strict`, whose
+    own help text promises "exit 1 (and emit nothing) on any warning or worse".
+
+    `source` is the text of ONE file — the `.ohm` being compiled — so the excerpt
+    is only printed for diagnostics that are about THAT file. D001-D004 are about
+    the emitted `.kicad_sch`, and quoting `led.ohm` line 1 under a finding whose
+    location reads `out/led.kicad_sch:1:1` points the reader at the wrong file
+    entirely. `path` names the file `source` holds; without it nothing is quoted,
+    which is the safe direction — `human(None)` still prints the location, the
+    message and the help line.
+    """
     if as_json:
         print(json.dumps([{
             "severity": d.severity, "code": d.code, "message": d.message,
@@ -423,10 +441,11 @@ def _report(result, source: str, as_json: bool) -> None:
             "endpoints": list(d.endpoints),
             "related": [{"line": r.line, "col": r.col} for r in d.related],
             "help": d.help,
-        } for d in result.diagnostics]))
+        } for d in diags]))
     else:
-        for d in result.diagnostics:
-            print(d.human(source), file=sys.stderr)
+        for d in diags:
+            about_source = path is not None and d.file in (None, path)
+            print(d.human(source if about_source else None), file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -839,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
         # KiCad 7 pad names and quietly skipped every pad that had been renamed
         result = compile_source(source, args.file, emit=True,
                                 target_kicad=args.target_kicad)
-        _report(result, source, args.json_diagnostics)
+        _report(result.diagnostics, source, args.json_diagnostics, args.file)
         if not result.ok:
             return 1
         assert result.low is not None
@@ -872,12 +891,32 @@ def main(argv: list[str] | None = None) -> int:
     result = compile_source(source, args.file, emit=emit,
                             debug_passes=getattr(args, "debug_passes", False),
                             target_kicad=getattr(args, "target_kicad", None))
-    _report(result, source, args.json_diagnostics)
+    diags = list(result.diagnostics)
+
+    if args.command == "build" and result.ok and not args.dump_ir:
+        # RENDER first, into memory. The emitters are pure `(IR, source) -> str`,
+        # so "no output from an errored design" is a statement about FILES, and
+        # rendering before reporting costs nothing.
+        #
+        # Two things fall out. `check_drawing` needs the emitted schematic text,
+        # so D001-D004 can now join the same diagnostic list as every other tier
+        # instead of being printed past `_report` and past `--strict` — which is
+        # why `ohm build --strict` used to print `warning[D001]` and exit 0,
+        # against a help text promising "exit 1 (and emit nothing) on any warning
+        # or worse", and why `--json-diagnostics` never carried a D code although
+        # AGENTS.md tells agents to iterate on it. And nothing reaches the disk
+        # until every artifact has rendered, so a failure part-way through can no
+        # longer leave a half-written output directory.
+        pending, ddiags = _render(result, args)
+        diags += ddiags
+
+    _report(diags, source, args.json_diagnostics, args.file)
     if not result.ok:
         return 1
-    # --strict: fail (before any emit) on warnings too
+    # --strict: fail on warnings too, and still before anything is WRITTEN —
+    # `pending` is simply discarded on the way out.
     if getattr(args, "strict", False) and any(
-            d.severity in ("error", "warning") for d in result.diagnostics):
+            d.severity in ("error", "warning") for d in diags):
         return 1
 
     if args.command == "build":
@@ -887,67 +926,85 @@ def main(argv: list[str] | None = None) -> int:
             assert node is not None  # result.ok gated above; all stages populated
             print(ir.to_json(node))
             return 0
-        low = result.low
-        assert low is not None  # result.ok gated above; build path always lowers
-        stem = Path(args.file).stem
         outdir = Path(args.out)
         try:
             outdir.mkdir(parents=True, exist_ok=True)
-            if args.emit in ("netlist", "all"):
-                (outdir / f"{stem}.net").write_text(
-                    emit_netlist(low, args.file), encoding="utf-8", newline="\n")
-            if args.emit in ("kicad", "all"):
-                from ohm.emit_kicad_pro import emit_kicad_pro
-
-                mode = getattr(args, "sheets", "auto")
-                sheets = ({f"{stem}.kicad_sch":
-                           emit_kicad_sch(low, args.file, result.design)}
-                          if mode == "flat"
-                          else emit_kicad_sheets(low, args.file, result.design,
-                                                 force=mode == "hier"))
-                for fname, text in sheets.items():
-                    (outdir / fname).write_text(text, encoding="utf-8", newline="\n")
-                # The drawing gate. Connectivity is proved by the netlist; this
-                # is the other half — that the sheet can be READ. Advisory, and
-                # reported at emit time because that is when the geometry exists.
-                from ohm.check_drawing import check_drawing
-
-                for fname, text in sorted(sheets.items()):
-                    for d in check_drawing(text, str(outdir / fname)):
-                        print(d.machine(), file=sys.stderr)
-                (outdir / f"{stem}.kicad_pcb").write_text(
-                    emit_kicad_pcb(low, args.file), encoding="utf-8", newline="\n")
-                (outdir / f"{stem}.kicad_pro").write_text(
-                    emit_kicad_pro(low, args.file, result.design),
-                    encoding="utf-8", newline="\n")
-                _emit_generated_packages(result, outdir)
-            if args.emit in ("package",):  # only the generated .kicad_mod/.kicad_sym
-                _emit_generated_packages(result, outdir)
-            if args.emit in ("eagle",):  # the same part as an Eagle .lbr library
-                _emit_generated_packages(result, outdir, fmt="eagle")
-            if args.emit in ("altium",):  # native .PcbLib + .SchLib (ADR-020)
-                _emit_generated_packages(result, outdir, fmt="altium", stem=stem)
-            if args.emit in ("allegro",):  # Allegro third-party logic import
-                from ohm.emit_allegro import emit_allegro
-
-                assert result.design is not None  # result.ok gated above
-                for fname, text in emit_allegro(result.design, low, stem).items():
-                    (outdir / fname).write_text(text, encoding="utf-8", newline="\n")
-            if args.emit in ("zen", "all"):
-                from ohm.emit_zen import emit_zen  # interop path only (ADR-002)
-
-                (outdir / f"{stem}.zen").write_text(
-                    emit_zen(low, args.file), encoding="utf-8", newline="\n")
-            if args.emit in ("constraints", "all"):
-                from ohm.emit_constraints import emit_constraints
-
-                (outdir / f"{stem}.constraints.json").write_text(
-                    emit_constraints(low, args.file), encoding="utf-8", newline="\n")
+            for fname, text in sorted(pending.items()):
+                (outdir / fname).write_text(text, encoding="utf-8", newline="\n")
+            # The generated packages write themselves (binary formats among
+            # them), so they stay a write-as-you-go step, and they run last.
+            _emit_packages(result, args, outdir)
         except OSError as exc:
             print(f"error: cannot write outputs to '{outdir}': {exc.strerror or exc}",
                   file=sys.stderr)
             return 1
     return 0
+
+
+def _render(result, args) -> tuple[dict[str, str], list]:
+    """Every TEXT artifact this `--emit` produces, plus the drawing diagnostics.
+
+    {filename: content}; nothing touches the disk here.
+    """
+    from ohm.check_drawing import check_drawing
+    from ohm.emit_constraints import emit_constraints
+    from ohm.emit_kicad import sheet_plan
+    from ohm.emit_kicad_pro import emit_kicad_pro
+    from ohm.emit_zen import emit_zen
+
+    low = result.low
+    assert low is not None  # result.ok is checked by the caller; build lowers
+    stem = Path(args.file).stem
+    outdir = Path(args.out)
+    out: dict[str, str] = {}
+    ddiags: list = []
+
+    if args.emit in ("netlist", "all"):
+        out[f"{stem}.net"] = emit_netlist(low, args.file)
+    if args.emit in ("kicad", "all"):
+        mode = getattr(args, "sheets", "auto")
+        # --sheets decides the hierarchy, so the project file is told what was
+        # actually written rather than deciding it a second time. `flat` forces
+        # one sheet, so the project lists none.
+        groups = ([] if mode == "flat"
+                  else sheet_plan(low, args.file, result.design,
+                                  force=mode == "hier"))
+        sheets = ({f"{stem}.kicad_sch":
+                   emit_kicad_sch(low, args.file, result.design)}
+                  if mode == "flat"
+                  else emit_kicad_sheets(low, args.file, result.design,
+                                         force=mode == "hier"))
+        out.update(sheets)
+        # The drawing gate. Connectivity is proved by the netlist; this is the
+        # other half — that the sheet can be READ. Advisory, and computed here
+        # because this is where the geometry exists. `outdir` is named only so
+        # the diagnostic points at the file the user will open.
+        for fname, text in sorted(sheets.items()):
+            ddiags += check_drawing(text, str(outdir / fname))
+        out[f"{stem}.kicad_pcb"] = emit_kicad_pcb(low, args.file)
+        out[f"{stem}.kicad_pro"] = emit_kicad_pro(low, args.file, result.design,
+                                                  groups)
+    if args.emit in ("allegro",):  # Allegro third-party logic import
+        from ohm.emit_allegro import emit_allegro
+
+        assert result.design is not None  # result.ok gated by the caller
+        out.update(emit_allegro(result.design, low, stem))
+    if args.emit in ("zen", "all"):
+        out[f"{stem}.zen"] = emit_zen(low, args.file)  # interop only (ADR-002)
+    if args.emit in ("constraints", "all"):
+        out[f"{stem}.constraints.json"] = emit_constraints(low, args.file)
+    return out, ddiags
+
+
+def _emit_packages(result, args, outdir: Path) -> None:
+    """The generated .kicad_mod/.kicad_sym/.lbr/.PcbLib/.SchLib/.step families."""
+    stem = Path(args.file).stem
+    if args.emit in ("kicad", "all", "package"):
+        _emit_generated_packages(result, outdir)
+    if args.emit in ("eagle",):  # the same part as an Eagle .lbr library
+        _emit_generated_packages(result, outdir, fmt="eagle")
+    if args.emit in ("altium",):  # native .PcbLib + .SchLib (ADR-020)
+        _emit_generated_packages(result, outdir, fmt="altium", stem=stem)
 
 
 if __name__ == "__main__":

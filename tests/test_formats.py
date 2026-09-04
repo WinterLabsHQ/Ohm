@@ -23,6 +23,7 @@ from ohm.driver import compile_source
 from ohm.emit_allegro import emit_allegro
 from ohm.emit_constraints import emit_constraints
 from ohm.emit_kicad import emit_kicad_pcb, emit_kicad_sch
+from ohm.emit_kicad_pro import emit_kicad_pro
 from ohm.emit_netlist import emit_netlist
 from ohm.emit_zen import emit_zen
 from ohm.formats import FormatVersion
@@ -128,6 +129,47 @@ def test_constraints_json_carries_its_stamp(built):
     assert json.loads(text)["version"] == formats._SCHEMA_VERSION
 
 
+def test_kicad_pro_carries_its_stamps(built):
+    """The project file's three section versions.
+
+    They were bare literals in `ohm/emit_kicad_pro.py`, and the module was in
+    neither this registry nor its owner gate — so ADR-022's table never mentioned
+    `.kicad_pro` at all, and any of the three could have been changed with
+    nothing noticing.
+    """
+    import json
+
+    doc = json.loads(emit_kicad_pro(built.low, "led.ohm", built.design))
+    assert doc["meta"]["version"] == formats._PRO_PROJECT_VERSION
+    assert doc["erc"]["meta"]["version"] == formats._PRO_ERC_VERSION
+    assert doc["net_settings"]["meta"]["version"] == formats._PRO_NET_SETTINGS_VERSION
+
+
+def test_step_carries_its_protocol_name():
+    text = emit_step_box("SOIC-8", Decimal("4.9"), Decimal("3.9"),
+                         Decimal("1.75"))
+    assert f"'{formats._STEP_PROTOCOL}'" in text
+    assert str(formats._STEP_PROTOCOL_YEAR) in text
+    assert f"APPLICATION_CONTEXT('{formats._STEP_APP_CONTEXT}')" in text
+
+
+def test_the_step_protocol_agrees_with_the_file_schema():
+    """`ohm/pkggen/step.py` states that the DATA section's protocol name "has to
+    agree with FILE_SCHEMA above or the file claims one protocol in the header
+    and another in the data" — and nothing enforced it.
+
+    Derived rather than a second copy, so the two cannot be half-updated:
+    OpenCASCADE's `IsAP242()` lower-cases the APD name and compares it, and the
+    header name is that same string plus the `_mim_lf` suffix and the object
+    identifier. Changing `_HEADER_SCHEMA` back to AP214 would leave the DATA
+    section still claiming AP242, and this is what says so.
+    """
+    head = formats._HEADER_SCHEMA.split(" ", 1)[0].lower()
+    assert head == formats._STEP_PROTOCOL + "_mim_lf", (
+        f"FILE_SCHEMA says {head!r}, APPLICATION_PROTOCOL_DEFINITION says "
+        f"{formats._STEP_PROTOCOL!r}")
+
+
 # ---------- (b) every entry is real ----------
 def test_every_entry_has_a_real_reason_and_a_real_owner():
     for entry in formats.REGISTRY:
@@ -147,34 +189,72 @@ def test_every_entry_has_a_nonempty_artifact_and_constant_name():
 
 
 # ---------- (c) the registry is exhaustive ----------
-EXPECTED_OWNERS = {
-    "ohm.emit_kicad",
-    "ohm.pkggen.footprint",
-    "ohm.pkggen.symbol",
-    "ohm.pkggen.eagle",
-    "ohm.pkggen.altium",
-    "ohm.pkggen.cfb",
-    "ohm.emit_allegro",
-    "ohm.pkggen.step",
-    "ohm.emit_netlist",
-    "ohm.emit_zen",
-    "shared.constraints_schema",
+# Modules that COULD carry a stamp and deliberately do not. Each states why, so
+# "absent from the registry" is a recorded decision rather than an oversight.
+NO_STAMP = {
+    "ohm.emit_common": "not an emitter — the source identity, value text and BOM "
+                       "field names every emitter shares, and no file of its own",
+    "ohm.emit_constraints": "the stamp belongs to shared.constraints_schema, "
+                            "which owns the seam's schema and is registered there",
+    "ohm.emit_ohm": "emits Ohm's own source language, which carries no version",
+    "ohm.pkggen.packages": "computes land patterns and writes no file; IPC-7351B "
+                           "is the current published revision (ADR-022 sec 6)",
+    "ohm.pkggen.pindata_iface": "a provider interface, not an emitter",
 }
 
 
-def test_registry_owners_match_the_known_emitter_set():
-    """A new external format means a new owner shows up here, unregistered —
-    this must fail until someone adds its FormatVersion entry, not pass quietly
-    the way a bare literal buried in the new emitter would."""
-    assert {entry.owner for entry in formats.REGISTRY} == EXPECTED_OWNERS
+def _candidate_owners():
+    """Every module that writes an external format, discovered rather than listed.
+
+    The gate this replaces compared the registry's owners against a hand-written
+    set, so it could only catch a REGISTERED entry with an unknown owner — never
+    an emitter that never registered at all. That is not a hypothetical: it is
+    how `ohm/emit_kicad_pro.py` wrote three KiCad schema versions as bare
+    literals, unmentioned by the registry and by ADR-022's table, through a whole
+    round whose stated purpose was to abolish exactly that.
+    """
+    root = Path(formats.__file__).parent
+    mods = {f"ohm.{p.stem}" for p in root.glob("emit_*.py")}
+    mods |= {f"ohm.pkggen.{p.stem}" for p in (root / "pkggen").glob("*.py")
+             if not p.stem.startswith("__")}
+    mods |= {"shared.constraints_schema"}
+    return mods
+
+
+def test_every_emitter_is_either_registered_or_exempt_with_a_reason():
+    """An emitter is registered, or it is exempt and says why. No third state."""
+    registered = {entry.owner for entry in formats.REGISTRY}
+    candidates = _candidate_owners()
+
+    unregistered = candidates - registered - set(NO_STAMP)
+    assert not unregistered, (
+        f"emitter(s) with no FormatVersion entry and no stated reason: "
+        f"{sorted(unregistered)} — register the stamp in ohm/formats.py, or add "
+        f"the module to NO_STAMP with the reason it carries none")
+
+    # ...and the exemption list may not rot either: a module that no longer
+    # exists, or one that has since been registered, must not sit here excusing
+    # something.
+    stale = set(NO_STAMP) - candidates
+    assert not stale, f"NO_STAMP names modules that do not exist: {sorted(stale)}"
+    both = set(NO_STAMP) & registered
+    assert not both, f"NO_STAMP excuses modules that ARE registered: {sorted(both)}"
+    assert all(reason.strip() for reason in NO_STAMP.values())
+
+
+def test_registry_owners_are_all_real_modules():
+    """No entry may name an owner that does not exist."""
+    assert {entry.owner for entry in formats.REGISTRY} <= _candidate_owners()
 
 
 def test_registry_has_exactly_the_documented_stamps():
     """Pinned count, not just a pinned owner set — .PcbLib and .SchLib each
     carry two stamps (header + version) under the same owner, so the owner
     check alone would not catch one of those four going missing. 14 -> 15 when
-    `.zen` gained a version to record (ADR-002 sec 5 closed, ADR-022)."""
-    assert len(formats.REGISTRY) == 15
+    `.zen` gained a version to record (ADR-002 sec 5 closed, ADR-022); 15 -> 19
+    when `.kicad_pro`'s three section versions and the STEP DATA-section
+    protocol name stopped being bare literals."""
+    assert len(formats.REGISTRY) == 19
 
 
 # ---------- hermeticity (N1): stdlib + shared only, nothing else, no I/O ----------
@@ -213,3 +293,23 @@ def test_formats_module_does_no_io_or_impure_calls():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id not in forbidden_calls, (
                 f"ohm/formats.py calls '{node.func.id}' — not hermetic (N1)")
+
+
+# ---------- (d) the count in the prose is the count in the code ----------
+# Every document that describes this registry states how big it is, and three of
+# them said "fifteen" for a whole round after it became nineteen: `ohm/formats.py`'s
+# own docstring, ADR-022 ("of the fifteen registry entries") and
+# `docs/ci/12_multi_eda_version_policy.md`. Nothing noticed, because a number in
+# prose is exactly the kind of literal this module exists to abolish — and the
+# module had one of its own. Pinning it here is the smallest thing that makes
+# "the docs disagree with the code" a build failure rather than a reading.
+REGISTRY_SIZE = 19
+
+
+def test_the_registry_is_the_size_its_documentation_says():
+    assert len(formats.REGISTRY) == REGISTRY_SIZE, (
+        f"the registry now holds {len(formats.REGISTRY)} entries, not "
+        f"{REGISTRY_SIZE}. That number is quoted in prose in three places — "
+        f"ohm/formats.py's module docstring, docs/adr/ADR_022_emitted_format_"
+        f"versions.md and docs/ci/12_multi_eda_version_policy.md. Update them "
+        f"with this constant, or the next reader gets a count that was true once")

@@ -8,30 +8,24 @@ from __future__ import annotations
 
 from ohm import ir
 from ohm import __version__
+from ohm.emit_common import BOM_FIELDS, _source_id, _value_text
 from ohm.formats import _NETLIST_VERSION
 
-
-# Ohm attr -> the field name a BOM tool expects to find it under. Ordered, so
-# the emitted fields are deterministic.
-BOM_FIELDS = {"mpn": "MPN", "manufacturer": "Manufacturer", "datasheet": "Datasheet"}
+__all__ = ["BOM_FIELDS", "emit_netlist"]
 
 
 def _q(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _value_text(v: ir.Value) -> str:
-    """Canonical text for an attr value; Quantities render as authored (10kohm +/- 1%)."""
-    if isinstance(v, ir.Quantity):
-        s = f"{v.value}{v.unit}"
-        if v.tol_raw is not None:
-            tval, tunit = v.tol_raw
-            s += f" +/- {tval}{tunit or '%'}"
-        return s
-    return str(v)
-
-
 def emit_netlist(low: ir.IRLow, source: str = "<string>") -> str:
+    # The file NAME, never the path the caller typed. `_source_id` was written
+    # for the schematic uuids and applied only there, so this artifact still
+    # carried whatever the caller typed — two checkouts at different paths
+    # produced different bytes, breaking the determinism invariant, and an
+    # absolute path (drive letter and user name included) travelled to whoever
+    # the file was handed to.
+    source = _source_id(source)
     out = [f'(export (version "{_NETLIST_VERSION}")']
     out.append(f"  (design (source {_q(source)}) (tool {_q('ohm ' + __version__)}))")
     out.append("  (components")

@@ -18,7 +18,7 @@ Loops 12-13 · 2026-08-31 · commit `3fd9b86`
 gerbers` and `pcb export drill` succeed and produce well-formed files. But **a
 gerber package with no board outline is not orderable**: every fabricator needs a
 profile layer to know what to cut. The plot gate proved *producible*, and
-`KICAD_CI_IMPLEMENTATION.md` recorded the gap honestly rather than letting it pass
+`history/03_ci_implementation.md` recorded the gap honestly rather than letting it pass
 as more than it was.
 
 ---
@@ -129,7 +129,8 @@ A test asserting only that a profile *file* arrived **could not have failed**. S
   `test_the_plotted_profile_is_the_outline_ohm_wrote`.
 
 **Verified in containers:** 68 passed at 10.0.5 and at 9.0.9 for the two outline
-files; and the full gate set at **7.0.11 and 10.0.5, 340 passed each** — the
+files; and the full gate set at **7.0.11 and 10.0.5, 340 passed each at this
+loop** — the
 oldest supported KiCad reads and plots the new geometry with no format change.
 At 10.0.5 the profile gerber's real content was confirmed:
 `%TA.AperFunction,Profile*%`, `%ADD10C,0.100000*%`, and four `D01*` draws at

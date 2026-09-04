@@ -48,9 +48,16 @@ _TEXT_RE = re.compile(
     r'(?:\s*\(shape[^)]*\))?'
     r'\s*(?:\(fields_autoplaced\)\s*)?'
     r'\(effects\s*\(font\s*\(size\s+([\d.]+)', re.S)
+# The trailing group is the REST of the `(effects ...)` form -- `hide`, and any
+# `(justify ...)`. It was `([^)]*)`, which stops at the first `)` and so could
+# never contain a parenthesised `(justify left)` at all: every property with a
+# justify was boxed as if centred, putting D001/D002's measurement 1.5mm from
+# where the text is drawn. `hide` is a bare word, which is why that half went
+# on working and hid the other half.
 _PROP_RE = re.compile(
     r'\(property\s+"[^"]*"\s+"((?:[^"\\]|\\.)*)"\s*\(at\s+(-?[\d.]+)\s+(-?[\d.]+)'
-    r'[^)]*\)\s*\(effects\s*\(font\s*\(size\s+([\d.]+)[^)]*\)\)([^)]*)\)', re.S)
+    r'[^)]*\)\s*\(effects\s*\(font\s*\(size\s+([\d.]+)[^)]*\)\)'
+    r'((?:[^()]|\([^()]*\))*)\)', re.S)
 _SYM_RE = re.compile(
     r'\n  \(symbol \(lib_id "([^"]+)"\) \(at (-?[\d.]+) (-?[\d.]+) (\d+)\)')
 _UUID_RE = re.compile(r'\(uuid "([0-9a-f-]{36})"\)')
@@ -115,7 +122,12 @@ def _texts(sch: str) -> list[tuple[str, Box]]:
     out = []
     for m in _TEXT_RE.finditer(sch):
         text, x, y, size = m.group(1), _D(m.group(2)), _D(m.group(3)), _D(m.group(4))
-        tail = sch[m.end():m.end() + 120]
+        # This element's own tail, never the next one's. A fixed 120-character
+        # window reached past the closing paren on a short label and read the
+        # NEXT label's `(justify ...)`, mirroring one text about another. Every
+        # sheet element ends with its `(uuid "...")`, so that is the boundary.
+        tail = sch[m.end():m.end() + 200]
+        tail = tail[:cut] if (cut := tail.find("(uuid")) >= 0 else tail
         just = jm.group(1) if (jm := _JUST_RE.search(tail)) else ""
         out.append((text, _text_box(text, x, y, size, just)))
     for m in _PROP_RE.finditer(sch):
@@ -124,20 +136,6 @@ def _texts(sch: str) -> list[tuple[str, Box]]:
         text, x, y, size = m.group(1), _D(m.group(2)), _D(m.group(3)), _D(m.group(4))
         just = jm.group(1) if (jm := _JUST_RE.search(m.group(5))) else ""
         out.append((text, _text_box(text, x, y, size, just)))
-    return out
-
-
-def _symbols(sch: str) -> list[tuple[str, Box]]:
-    """Symbol envelopes. Power ports are excluded: they are 2mm graphics that
-    sit deliberately AT a pin, and counting them would make every rail a
-    collision."""
-    out = []
-    for m in _SYM_RE.finditer(sch):
-        lib, x, y = m.group(1), _D(m.group(2)), _D(m.group(3))
-        if lib.startswith("ohm:PWR_"):
-            continue
-        hw, hh = _body_half(sch, lib, int(m.group(4)))
-        out.append((lib, (x - hw, y - hh, x + hw, y + hh)))
     return out
 
 

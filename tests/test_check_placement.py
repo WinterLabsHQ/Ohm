@@ -117,3 +117,105 @@ def test_a_string_footprint_overlap_is_a_warning_not_a_claim():
     assert all(d.severity == "warning" for d in hits)
     assert "placeholder" in hits[0].message
     assert result.ok  # a guess must not block the build
+
+
+# ---------- S013: the `near` that did not arrive ----------
+_NEAR_SRC = """component R:
+    package = generate(CHIP0603)
+    designator_prefix = "R"
+    pin P1: role=passive, pad=1
+    pin P2: role=passive, pad=2
+
+module Board:
+    ra = R()
+    rb = R()
+    rc = R()
+    ra.P2 ~ rb.P1
+    rb.P2 ~ rc.P1
+"""
+
+
+def _near_diags(src, code="S013"):
+    # NOT named `_codes`: this module already has one with a different
+    # signature (two `fixed` positions, for S011). Shadowing it made the S011
+    # error test pass a `near` source and find no overlap.
+    result = compile_source(src, "near.ohm")
+    return [d for d in result.diagnostics if d.code == code]
+
+
+def test_s013_is_silent_when_the_near_is_honoured():
+    """The common case, and the one that must never become noise."""
+    assert not _near_diags(_NEAR_SRC + "    constraint near(ra, rb, 2mm)\n")
+
+
+def test_s013_is_silent_on_a_two_cycle():
+    """`near(a, b)` plus `near(b, a)` reads as unsatisfiable and is not.
+
+    Two parts CAN each sit beside the other. Ohm places them at the declared
+    distance and there is nothing to report — which is the whole reason S013
+    measures the placement instead of pattern-matching the constraint graph. A
+    cycle check would have rejected a design that is perfectly satisfiable.
+    """
+    assert not _near_diags(_NEAR_SRC
+                      + "    constraint near(ra, rb, 2mm)\n"
+                      + "    constraint near(rb, ra, 2mm)\n")
+
+
+def test_s013_errors_on_a_second_near_for_one_part():
+    """A part can be declared near ONE other part; the first declaration wins.
+
+    The second was silently discarded — declared intent that never reached the
+    placer, with nothing anywhere saying so.
+    """
+    (d,) = _near_diags(_NEAR_SRC
+                  + "    constraint near(ra, rb, 2mm)\n"
+                  + "    constraint near(ra, rc, 2mm)\n")
+    assert d.severity == "error"
+    assert "near(ra, rc)" in d.message and "never received" in d.message
+
+
+def test_s013_errors_on_a_near_for_a_part_pinned_by_fixed():
+    """`fixed` pins the part and `near` asks Ohm to move it: contradictory."""
+    (d,) = _near_diags(_NEAR_SRC
+                  + "    constraint fixed(ra, 10mm, 10mm)\n"
+                  + "    constraint near(ra, rb, 2mm)\n")
+    assert d.severity == "error" and "near(ra, rb)" in d.message
+
+
+def test_an_s013_error_stops_the_build_before_anything_is_written(tmp_path):
+    """The reason S013's first branch is an ERROR rather than a warning.
+
+    `driver.compile_source` only builds the emit-side IR when the design has no
+    errors, so an error here means `ohm build` writes nothing at all — which is
+    what stopped the cyclic-`near` crash from leaving a half-populated output
+    directory containing a .kicad_sch and no board.
+    """
+    from ohm.cli import main
+
+    src = tmp_path / "near.ohm"
+    src.write_text(_NEAR_SRC
+                   + "    constraint near(ra, rb, 2mm)\n"
+                   + "    constraint near(ra, rc, 2mm)\n", encoding="utf-8")
+    out = tmp_path / "out"
+    assert main(["build", str(src), "--emit", "kicad", "-o", str(out)]) == 1
+    assert not out.exists() or not list(out.iterdir())
+
+
+def test_s013_names_the_cycle_rather_than_blaming_congestion():
+    """A warning may not assert a cause the check has not established.
+
+    On `near(ra, rb) near(rb, rc) near(rc, ra)` the placer breaks one edge: the
+    part that loses is flowed FIRST, before anything else is on the board, so
+    "every side of 'rb' was already taken" — the text this used to print — is
+    not merely vague, it is false. `rb` had not been placed yet. The two causes
+    also have different fixes, which is the practical half: more room does
+    nothing for a cycle.
+    """
+    (d,) = _near_diags(_NEAR_SRC
+                       + "    constraint near(ra, rb, 2mm)\n"
+                       + "    constraint near(rb, rc, 2mm)\n"
+                       + "    constraint near(rc, ra, 2mm)\n")
+    assert d.severity == "warning"
+    assert "CYCLE" in d.message
+    assert "already taken" not in d.message
+    assert "break the cycle" in (d.help or "")

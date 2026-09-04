@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 
 from ohm import ir
+from ohm.emit_common import _source_id
 
 _PIN_NUM = re.compile(r"^(?:P|PAD)?(\d+)$", re.IGNORECASE)
 _NAME_OK = re.compile(r"^[A-Za-z_]\w*$")
@@ -82,6 +83,13 @@ def emit_ohm(low: ir.IRLow, source: str = "<string>") -> str:
         if len(set(by_pin.values())) != len(by_pin):
             del stated[decl]
 
+    # The file NAME, never the path the caller typed. `_source_id` was written
+    # for the schematic uuids and applied only there, so this artifact still
+    # carried whatever the caller typed — two checkouts at different paths
+    # produced different bytes, breaking the determinism invariant, and an
+    # absolute path (drive letter and user name included) travelled to whoever
+    # the file was handed to.
+    source = _source_id(source)
     out = ["# converted from " + source + " by `ohm convert` — a skeleton, not a sign-off:",
            "# every TODO below is intent the .zen source could not express.", ""]
     for (comp, pin_sig), name in sorted(sigs.items(), key=lambda kv: kv[1]):

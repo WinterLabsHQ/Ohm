@@ -21,10 +21,17 @@ library, exactly as `ohm verify-pinouts` does for symbols.
 
 **Honest limits.**
 
-- The table covers the KiCad majors it was generated against (`KICAD_MAJORS`).
-  KiCad 7 is not among them — no official container image exists for it — so a
-  KiCad 7 target is *unchecked*, not *checked and clean*. Callers must treat an
-  unknown major as "abstain", never as "fine".
+- The table covers the KiCad majors it was generated against — 7, 8, 9 and 10,
+  the same set as `ohm.cli.SUPPORTED_KICAD`, which `tests/test_fpdata.py`
+  asserts. Ask `kicad_majors()`; there is no `KICAD_MAJORS` constant. A major
+  with no dump (KiCad 11, when it ships) is *unchecked*, not *checked and
+  clean*, and callers must treat an unknown major as "abstain", never as "fine".
+
+  This bullet used to say KiCad 7 was not among them because "no official
+  container image exists for it". That was false — `kicad/kicad:7.0.11` has
+  existed since February 2024 — and it is corrected here rather than quietly
+  deleted because the same claim reached five other documents and a support-floor
+  decision before anyone checked it. See `docs/ci/10_container_tag_currency.md`.
 - A footprint that is not in the table is unknown, not absent. Users reference
   their own and third-party libraries, and guessing about those is how a checker
   earns the right to be ignored. `pads()` returns None and the caller abstains.

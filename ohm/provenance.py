@@ -259,11 +259,33 @@ def _canon(name: str) -> str:
     return _ALIAS.get(n, n)
 
 
+def _tokens(name: str) -> set[str]:
+    """The underscore-separated parts of a pin name that can carry MEANING.
+
+    Never the trailing disambiguator (`_1`, `_A`) and never a single character.
+    KiCad appends that suffix to every duplicated pin in a symbol, so it is a
+    token two completely different pins routinely share — which is how `VDD_1`
+    and `GND_1` "shared the 1" and a supply/ground transposition was reported
+    verified. Measured before the fix: VDD_1/GND_1, VDD_2/VSS_2, SDA_1/SCL_1,
+    IN_2/OUT_2 and NC_1/VDD_1 all came back as the same pin.
+    """
+    parts = name.split("_")
+    if len(parts) > 1 and len(parts[-1]) == 1:
+        parts = parts[:-1]
+    return {p for p in parts if len(p) > 1}
+
+
 def _same_pin(a: str, b: str) -> bool:
     """Tolerate naming style, never position.
 
-    `VDD_2`/`VDD`, `PB3_SWO`/`PB3`, `SCL_SPC`/`SPC`, `V_I`/`IN` and `I_O1`/`IO1_A`
-    are the same pin. `PD6`/`VSS` and `CS`/`AUX_CL` are not.
+    `VDD_2`/`VDD`, `PB3_SWO`/`PB3`, `SCL_SPC`/`SPC` and `I_O1`/`IO1_A` are the
+    same pin. `PD6`/`VSS`, `CS`/`AUX_CL` and `VDD_1`/`GND_1` are not.
+
+    Known limit, stated rather than hidden: two different pins that share an
+    alternate-function token still match — `PA0_SPI1_SCK` and `PB5_SPI1_MOSI`
+    both carry `SPI1`. Requiring the shared token to be terminal in one of the
+    names would catch that and would still accept `SCL_SPC`/`SPC`, but it is a
+    wider behavioural change against real libraries than this defect asks for.
     """
     na, nb = a.upper().strip("_"), b.upper().strip("_")
     if na == nb or "(ABSENT)" in (na, nb) and na == nb:
@@ -271,7 +293,9 @@ def _same_pin(a: str, b: str) -> bool:
     ca, cb = _canon(a), _canon(b)
     if ca == cb or ca.startswith(cb) or cb.startswith(ca):
         return True
-    pa, pb = set(na.split("_")), set(nb.split("_"))
+    # Tokens of the CANONICAL names: the suffix is what `_canon` strips, and it
+    # is exactly the token two unrelated pins are most likely to have in common.
+    pa, pb = _tokens(na), _tokens(nb)
     return bool(pa & pb) and not (na[:1].isdigit() or nb[:1].isdigit())
 
 

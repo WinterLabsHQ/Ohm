@@ -3,7 +3,7 @@
 Loop 24 · 2026-08-31
 
 The plan for this round included "run the workflow", on the grounds that
-`KICAD_CI_IMPLEMENTATION.md` says plainly the YAML had never executed on a
+`history/03_ci_implementation.md` says plainly the YAML had never executed on a
 GitHub runner. Every other job's steps had at least been executed locally in the
 matching container. **The `v007` job had not** — it is the one job that runs on a
 plain `ubuntu-24.04` runner rather than in a KiCad image, so the container
@@ -174,7 +174,7 @@ reproduced on both.
 - The workflow YAML has still never run on a GitHub runner. Every job's steps
   have now been executed locally, **including this one**, which was the gap this
   loop existed to close.
-- `KICAD_COMPATIBILITY.md` still grades V007 `proven` at 10.0.5 on evidence that
+- `history/01_audit_kicad_7_to_10.md` still grades V007 `proven` at 10.0.5 on evidence that
   never existed. Left standing deliberately — that document carries its own
   banner saying it is the record of what was believed before anyone checked, and
   editing it would destroy the thing it is for.

@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from ohm.formats import _HEADER_SCHEMA
+from ohm.formats import (_HEADER_SCHEMA, _STEP_APP_CONTEXT, _STEP_PROTOCOL,
+                         _STEP_PROTOCOL_YEAR)
 
 
 def _num(value: Decimal) -> str:
@@ -157,10 +158,9 @@ def emit_step_box(name: str, x: Decimal, y: Decimal, z: Decimal,
     #     year — it is descriptive — so it is left agreeing with the one AP242
     #     writer Ohm's output can actually be diffed against rather than silently
     #     diverging from it.
-    app_context = d.add("APPLICATION_CONTEXT("
-                        "'Managed model based 3d engineering')")
+    app_context = d.add(f"APPLICATION_CONTEXT('{_STEP_APP_CONTEXT}')")
     d.add(f"APPLICATION_PROTOCOL_DEFINITION('international standard',"
-          f"'ap242_managed_model_based_3d_engineering',2013,{app_context})")
+          f"'{_STEP_PROTOCOL}',{_STEP_PROTOCOL_YEAR},{app_context})")
     product_context = d.add(f"PRODUCT_CONTEXT('',{app_context},'mechanical')")
     product = d.add(f"PRODUCT('{name}','{name}','',({product_context}))")
     formation = d.add(f"PRODUCT_DEFINITION_FORMATION('','',{product})")

@@ -130,14 +130,22 @@ ohm/            the compiler: parse -> resolve -> check -> lower -> emit
 ohm/std/        standard library (~106 blocks across 17 domains)
 ohm/pkggen/     footprint and symbol generation (IPC-7351)
 shared/         the constraints format the routing/solver products read
-docs/STYLE.md   how to write Ohm
-docs/adr/       why things are built the way they are
-docs/blueprint/ the original design docs (read-only)
+docs/           documentation — start at docs/README.md
+  STYLE.md        how to write Ohm
+  adr/            why things are built the way they are
+  blueprint/      the original design docs (read-only)
+  ci/             what has actually been measured, and what has not
 examples/       complete boards, kept compiling by CI
 tests/          golden netlists, a KiCad round-trip oracle, a signoff
                 read-back gate, adversarial suites, determinism gates
 tools/          author-time generators (never on the build path)
 ```
+
+Two of those are worth naming. [`docs/ci/`](docs/ci/) is the compatibility
+record: which KiCad versions, which other EDA formats, and — in its own file —
+[what is still **not** proven](docs/ci/23_not_proven.md). [`docs/adr/`](docs/adr/)
+is why, not what; where an ADR and the blueprint disagree, the ADR is the later
+decision and wins.
 
 ## Principles
 

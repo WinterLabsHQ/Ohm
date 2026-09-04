@@ -2,7 +2,7 @@
 
 Loop 8 · 2026-08-31 · commit `5cd9415`
 
-`KICAD_COMPATIBILITY.md` graded every KiCad-version claim in the repo and raised
+`history/01_audit_kicad_7_to_10.md` graded every KiCad-version claim in the repo and raised
 eight findings. F1-F5, F7 and F8 were closed by code. **F6 was the one still
 open**, recorded only in prose. It is closed here.
 
@@ -113,10 +113,17 @@ rather than against a snapshot.
 
 ## Still not proven
 
-- **V007 runs at one version.** `pcbnew` is a compiled extension built against
+- ~~**V007 runs at one version.** `pcbnew` is a compiled extension built against
   its distribution's Python, and only `ubuntu-24.04` with the KiCad 10 PPA gives
   a system Python (3.12) that matches Ohm's. The geometry gate is proven at
-  10.0.5 and assumed at 7, 8 and 9.
+  10.0.5 and assumed at 7, 8 and 9.~~ **CLOSED, loop 24.** The constraint was the
+  in-process import, not the ABI: `ohm/drc.py` now runs the engine out of process
+  (`kicad-cli pcb drc` from 8, a `pcbnew` child at 7), so the gate runs at all
+  four and is `proven` at all four
+  ([24_v007_headless.md](24_v007_headless.md), [21](21_compatibility_matrix.md)).
+- **A route difference is not measured.** `kicad-cli pcb drc` and
+  `pcbnew.WriteDRCReport` are assumed to agree on every rule class; they were
+  compared on the classes these boards produce, not on all of them.
 - **No ERC is ever run.** `kicad-cli sch erc` exists from KiCad 8 and Ohm does
   not drive it — recorded at `ohm/emit_kicad_pro.py:84-91` as an open item, and
   deliberately out of scope this round.

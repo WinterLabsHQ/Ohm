@@ -72,28 +72,37 @@ def build_one(python: str, root: Path, design: Path, kind: str,
               outdir: Path) -> list[str]:
     """Emit `design` under `kind` and return one manifest line per artifact.
 
-    The design is named by a path RELATIVE to the repo root, with `cwd=root`, and
-    that is load-bearing rather than tidiness. `ohm/emit_kicad.py:81` derives every
-    schematic and board uuid as `uuid5(namespace, source_path + role)`, where
-    `source_path` is the string the caller passed — so naming the same file as
-    `tests/golden/divider.ohm` and as `D:/.../tests/golden/divider.ohm` produces
-    different uuids and therefore different bytes. Passing absolute paths here
-    would make every artifact differ between a Windows checkout and a Linux one,
-    and the manifest would report a platform difference that is really a harness
-    difference, drowning any real finding.
+    The design is named by an ABSOLUTE path, and that is load-bearing rather
+    than tidiness. Nothing Ohm emits may depend on how the design was NAMED —
+    every emitter normalises `source` to the file name (`ohm.emit_kicad`'s
+    `_source_id`) before deriving a uuid, a title block or a provenance line
+    from it.
 
-    That the uuid depends on the typed path at all is its own defect against the
-    determinism invariant, and it has its own test — see
-    `test_kicad_uuids_do_not_depend_on_the_typed_path`.
+    This used to pass a repo-relative path, with a docstring explaining that an
+    absolute one would make every artifact differ between a Windows checkout and
+    a Linux one. That was true at the time, and it made this gate structurally
+    unable to observe the defect it was describing. It hid the rest of it, too:
+    the KiCad uuids were fixed and `.kicad_pro`, `.net` and `.zen` went on
+    embedding the caller's path for another round, because the one gate that
+    compares bytes across machines was normalising the variable away.
+
+    So the harness now passes the absolute path deliberately. If a path ever
+    reaches the bytes again, ubuntu/windows/macos disagree and `check()` names
+    the artifact. `cwd=root` stays: the corpus still resolves `use` relative to
+    the repo.
+
+    The within-emitter half has its own tests — see `tests/test_determinism.py`,
+    which runs every emitter that takes a `source` over five spellings of one
+    path.
     """
-    rel = design.relative_to(root).as_posix()
-    cmd = [python, "-m", "ohm", "build", rel, "-o", str(outdir), "--emit", kind]
+    cmd = [python, "-m", "ohm", "build", str(design), "-o", str(outdir),
+           "--emit", kind]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                        errors="replace", cwd=root)
     if r.returncode != 0:
         # A design that does not compile is a real failure of this gate: the
         # manifest would silently shrink and the comparison would still pass.
-        raise SystemExit(f"error: `ohm build --emit {kind} {rel}` exited "
+        raise SystemExit(f"error: `ohm build --emit {kind} {design}` exited "
                          f"{r.returncode}\n{r.stdout}\n{r.stderr}")
     lines = []
     for artifact in sorted(p for p in outdir.rglob("*") if p.is_file()):

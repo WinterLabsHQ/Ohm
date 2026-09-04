@@ -76,8 +76,9 @@ the tests for their row. The registry-level guarantee is `tests/test_formats.py`
 owner emits, every entry has a non-empty `reason`, and the set of owner modules is
 closed — a ninth format cannot be added without a decision.
 
-Of fifteen registry entries (`.PcbLib`/`.SchLib` carry two stamps each under one
-owner), exactly one moved (STEP) and one is new (`.zen`). That is not a
+Of the fifteen registry entries as they stood for this loop (`.PcbLib`/`.SchLib`
+carry two stamps each under one owner; the registry has since grown to nineteen —
+see ADR-022's amendment), exactly one moved (STEP) and one is new (`.zen`). That is not a
 coincidence — it is the policy working: the only two stamps re-examined *and found
 needing a bump* were the only two with an oracle able to say so.
 

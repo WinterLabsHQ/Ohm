@@ -1,27 +1,31 @@
 # 23 · What is still not proven
 
 A green matrix that implies more than it checked is worse than no matrix. This is
-the standing list, inherited from `KICAD_CI_IMPLEMENTATION.md` and updated by
+the standing list, inherited from `history/03_ci_implementation.md` and updated by
 this round. Entries are removed only when something measures them.
 
 ---
 
-## Closed by this round
+## Closed since the audit
 
 Recorded first, so the list below is understood as what *remains* rather than as
-the whole picture.
+the whole picture. Each row names the record that closed it where that is not
+the round this file was written in.
 
 | Was not proven | Now |
 |---|---|
-| **KiCad 7 at all** — "certified by hand or not at all" | A measured matrix leg: `kicad/kicad:7.0.11`, 337 tests, 0 failed, **0 skipped** |
+| **KiCad 7 at all** — "certified by hand or not at all" | A measured matrix leg: `kicad/kicad:7.0.11`, 0 failed, **0 skipped** (see [21](21_compatibility_matrix.md) for the count, which moves as tests are added) |
 | KiCad 7 footprint pad data | In the shipped table; `fpdata.kicad_majors()` and `SUPPORTED_KICAD` are now the same set |
 | **Cross-platform byte identity** — stated as an invariant, measured by nothing | 175 artifacts, all eight emit kinds, Windows against Debian, byte-identical |
 | That the gerber package is **orderable** | Boards carry a closed `Edge.Cuts` profile, asserted against the plotted gerber's own coordinates |
-| The `fpdata` rebuild being byte-reproducible | Dumped in three containers and rebuilt: 162 075 bytes, identical to what is committed |
+| The `fpdata` rebuild being byte-reproducible | Dumped in all four containers and rebuilt: 15 545 footprints, 182 109 bytes, identical to what is committed |
 | That the matrix pins are current | `tools/check_kicad_tags.py`, run against the live registry and gated in CI |
 | DRC/ERC rule-id drift (audit finding **F6**) | `_INFO_RULES` is a version-annotated union; the `.kicad_pro` writes both ERC spellings |
 | **The V007 geometry gate at all** — the one CI job nobody had ever run | Runs at all four versions; the KiCad 10 segfault and the since-KiCad-8 severity blindness both fixed |
 | A board Ohm could not READ reporting the board as WRONG | **V008**, naming the shape it could not find |
+| That the D tier measures what it claims | Two of its three geometric inputs were read wrong — a `(justify …)` it could not parse and a dead, divergent copy of its envelope computation. Both fixed; see [26](26_third_sweep.md) |
+| That the designs Ohm SHIPS pass Ohm's own drawing gate | They did not — four findings, three causes, all fixed at the place that chose the position. `test_every_shipped_design_draws_clean` holds the corpus at zero |
+| That the module graph still has the shape the documents describe | It did not — three mutual dependencies, each held apart only by an import inside a function body. Two removed, one declared; `tests/test_architecture.py` is the gate |
 
 ---
 
@@ -91,6 +95,16 @@ ubuntu/windows pair is measured.
 D001–D004 (`ohm/check_drawing.py`) are advisory **by design**, not by omission.
 "The drawing reads well" is not automatable, and saying so plainly is better than
 a matrix cell that implies a gap where there is a decision.
+
+What *is* now proven is narrower and worth separating from it: every design this
+repository ships produces **zero** D findings, gated by
+`test_every_shipped_design_draws_clean`. That is the four defects the tier can
+name, absent from the corpus — not a claim that the sheets read well. A drawing
+can pass all four and still be hard to follow.
+
+The four fixes are also measured by Ohm's own gate rather than by KiCad. The
+round-trip oracle that makes KiCad re-read the sheet runs in the four `kicad`
+matrix legs, and has not run since these changes.
 
 ### Undeclared intent
 

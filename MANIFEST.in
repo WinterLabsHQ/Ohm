@@ -5,5 +5,9 @@ recursive-include ohm/templates *
 recursive-include ohm/fpdata *.json.gz
 include tools/gen_fpdata.py
 recursive-include docs *.md
+# Superseded documents are kept in the REPOSITORY for provenance — see
+# docs/ci/history/README.md for why one of them is kept precisely because it
+# turned out to be wrong. They are not part of what an installed Ohm needs.
+prune docs/ci/history
 prune tests
 prune examples

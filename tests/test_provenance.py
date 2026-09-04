@@ -142,6 +142,32 @@ def test_same_pin_tolerates_naming(a, b):
 def test_same_pin_never_tolerates_position(a, b):
     """Every pair here is a real fmuv2 defect. None may be explained away."""
     assert not _same_pin(a, b)
+@pytest.mark.parametrize("a,b", [("VDD_1", "GND_1"), ("VDD_2", "VSS_2"),
+                                 ("SDA_1", "SCL_1"), ("IN_2", "OUT_2"),
+                                 ("NC_1", "VDD_1")])
+def test_same_pin_is_not_fooled_by_kicads_duplicate_pin_suffix(a, b):
+    """The direction the four pairs above never exercise: a suffix on BOTH sides.
+
+    `_same_pin` fell back to any shared underscore-delimited token, and KiCad's
+    disambiguating suffix on a duplicated pin (`VDD_1`, `VDD_2`, `GND_1`) is
+    itself such a token. So two completely different pins that both carried one
+    were declared the same pin, `verify_against_libs` dropped the finding, and
+    the component was reported `ok` — by the one tool whose whole purpose is to
+    catch a transposition that "passes every checker tier and arrives on copper".
+    A VDD/VSS transposition is a dead board.
+
+    Every existing negative pair has a suffix on at most ONE side
+    (`("PD6", "VSS_3")`, `("CS", "AUX_CL")`), which is why the branch was never
+    reached in the failing direction and the defect survived every run.
+    """
+    assert not _same_pin(a, b)
+
+
+@pytest.mark.parametrize("a,b", [("SCL_SPC", "SPC"), ("I_O1", "IO1_A")])
+def test_same_pin_still_tolerates_a_shared_meaningful_token(a, b):
+    """The token fallback is not junk — it is what makes these two work, and
+    `_canon` alone does not. Narrowing it must not cost them."""
+    assert _same_pin(a, b)
 
 
 # ---------- import-symbol stamps provenance ----------
