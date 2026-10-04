@@ -51,11 +51,16 @@ class _OhmIndenter(Indenter):
 
 
 def _parser() -> Lark:
+    # LALR(1): the grammar has no shift/reduce or reduce/reduce conflict, so it is
+    # unambiguous and LALR builds exactly the tree Earley built, in linear time
+    # (tests/test_parse_lalr.py holds both). The lexer stays "basic", the one
+    # Earley used, so tokenisation is unchanged; a contextual lexer could split
+    # differently and is deliberately not used.
     global _CACHED
     if _CACHED is None:
         _CACHED = Lark(
             _GRAMMAR,
-            parser="earley",
+            parser="lalr",
             lexer="basic",
             postlex=_OhmIndenter(),
             propagate_positions=True,
@@ -358,8 +363,34 @@ class _ToAst(Transformer):
         return A.Program(tuple(children))
 
 
+def _viable_terminals(source: str) -> set[str] | None:
+    """The terminals that may follow the prefix before the first bad token.
+
+    LALR merges LR(1) states, so on a bad token it may first make reductions the
+    full context would not allow, and the state it then reports has a narrower
+    `expected` set than the language does. Replay the token stream, keeping the
+    state from before each feed, and ask that state which terminals it really
+    accepts: by the viable-prefix property that is exactly the set of terminals
+    some sentence continues the prefix with, which is what an Earley parser
+    reports. `$END` is not a token in Earley's set and is left out.
+    """
+    ip = _parser().parse_interactive(source)
+    before = ip.copy(deepcopy_values=False)
+    try:
+        for tok in ip.lexer_thread.lex(ip.parser_state):
+            before = ip.copy(deepcopy_values=False)
+            ip.feed_token(tok)
+    except UnexpectedToken:
+        return {t for t in before.accepts() if t != "$END"}
+    except LarkError:
+        return None
+    return None
+
+
 def _syntax_diag(exc: LarkError, path: str, source: str = "") -> Diagnostic:
     raw_line = getattr(exc, "line", None)
+    if isinstance(exc, UnexpectedToken) and exc.token.type == "$END":
+        raw_line = -1  # LALR reports running out of input as a `$END` token
     if raw_line is not None and raw_line <= 0:
         # unexpected EOF (lark reports -1:-1): point at the last non-empty line
         src_lines = source.splitlines()
@@ -373,7 +404,10 @@ def _syntax_diag(exc: LarkError, path: str, source: str = "") -> Diagnostic:
         tok = exc.token
         shown = "end of file" if tok.type == "$END" else repr(str(tok))
         msg = f"unexpected {shown}"
-        expected = sorted(t for t in exc.expected if not t.startswith("__"))
+        viable = _viable_terminals(source)
+        if viable is None:
+            viable = exc.expected
+        expected = sorted(t for t in viable if not t.startswith("__"))
         help_ = f"expected one of: {', '.join(expected[:6])}" if expected else None
     else:
         msg = "invalid syntax"

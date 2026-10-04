@@ -8,6 +8,7 @@ squiggle before any build. No dependencies beyond the stdlib (ADR-005).
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
@@ -15,13 +16,43 @@ from ohm.driver import compile_source
 
 _SEVERITY = {"error": 1, "warning": 2, "info": 3}
 
+_PCT_RUN = re.compile(r"((?:%[0-9A-Fa-f]{2})+)")
+_DRIVE = re.compile(r"^/([A-Za-z])[:|](?=/|$)")
 
-def _uri_path(uri: str) -> str:
-    # minimal file:// decoding by hand — keeps the hermeticity grep strict
+
+def _unquote(text: str) -> str:
+    # percent-decoding as urllib.parse.unquote does it: a run of %XX escapes is
+    # one UTF-8 byte string, so `%C3%A9` is one character, not two
+    parts = _PCT_RUN.split(text)
+    return "".join(
+        bytes.fromhex(part.replace("%", "")).decode("utf-8", "replace") if i % 2 else part
+        for i, part in enumerate(parts))
+
+
+def _uri_path(uri: str, windows: bool | None = None) -> str:
+    """A `file://` URI as a local path, the way `urllib.request.url2pathname` reads it.
+
+    Decoded by hand to keep the hermeticity grep strict (no `urllib` on the build
+    path). On Windows the path part of `file:///D:/x/a.ohm` is `/D:/x/a.ohm`, and a
+    path that starts with `/` and names no drive is relative to the *current
+    drive's* root, so the drive letter's leading slash must go: `D:/x/a.ohm`.
+    Editors also send the colon escaped (`file:///d%3A/x`) and the old `|` form.
+    A non-local authority is a UNC share there (`//host/share/a.ohm`). On POSIX
+    the path part is already the path.
+    """
     if not uri.startswith("file://"):
         return uri
-    path = uri[len("file://"):]
-    return re.sub(r"%([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), path)
+    if windows is None:
+        windows = os.name == "nt"
+    authority, slash, path = uri[len("file://"):].partition("/")
+    path = _unquote(slash + path)
+    if authority and authority.lower() != "localhost":
+        return "//" + _unquote(authority) + path
+    if windows:
+        m = _DRIVE.match(path)
+        if m:
+            path = m.group(1).upper() + ":" + (path[m.end():] or "/")
+    return path
 
 
 def _lsp_diagnostics(text: str, uri: str) -> list[dict]:
