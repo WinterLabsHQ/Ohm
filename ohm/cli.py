@@ -574,6 +574,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="KiCad major version to target (default: ohm.toml 'target', "
                              "else 7), which decides how footprint pad ids are read")
     p_sign.add_argument("--json-diagnostics", action="store_true")
+    # The physics return channel (V009). Ohm records obligations and never
+    # evaluates them; a solver layer downstream discharges them and writes one
+    # verdict per obligation into this file, bound to the board, the source and
+    # the compiler it was computed against. Absent, signoff is exactly what it
+    # was: no obligation is reported on, and no byte of the output changes.
+    p_sign.add_argument("--physics-report", default=None, metavar="FILE",
+                        help="a physics_report.json with one verdict per obligation; "
+                             "a missing, stale or dropped verdict is V009")
 
     p_fmt = sub.add_parser("fmt", help="canonical reformat (deterministic)")
     p_fmt.add_argument("file")
@@ -878,6 +886,24 @@ def main(argv: list[str] | None = None) -> int:
                 diags = list(diags) + run_geometry_drc(args.board)
             except DrcUnavailable as exc:
                 print(f"warning: geometry gate skipped: {exc}", file=sys.stderr)
+        if args.physics_report is not None:
+            # read here, checked purely in ohm/physics_report.py (N1). An
+            # unreadable FILE is a V009 like an unreadable document: every
+            # obligation is then without a verdict, which is an error.
+            from ohm.diagnostics import Diagnostic, Span
+            from ohm.physics_report import check_physics_report
+
+            try:
+                report = Path(args.physics_report).read_bytes()
+            except OSError as exc:
+                diags = list(diags) + [Diagnostic(
+                    "error", "V009", f"the physics report could not be read: "
+                    f"{exc.strerror or exc}; {len(result.low.holes)} obligation(s) have "
+                    "no verdict", Span(1, 1, 1, 1), args.physics_report)]
+            else:
+                diags = list(diags) + check_physics_report(
+                    result.low, report, args.physics_report,
+                    Path(args.file).read_bytes(), Path(args.board).read_bytes())
         if args.json_diagnostics:
             print(json.dumps([{
                 "severity": d.severity, "code": d.code, "message": d.message,

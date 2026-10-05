@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **feat(signoff)**: **the physics return channel, read: `--physics-report FILE`
+  and V009.** Ohm records every `obligation` as a hole and never evaluates it,
+  and until now nothing came back: a routed board signed off clean while every
+  obligation its source declared had never been looked at. A solver layer now
+  writes `physics_report.json` — one verdict per hole (`proven` / `violated` /
+  `unproven` / `waived`), each named by a rebuild-stable `hole_ref` derived from
+  `(kind, args, op)` and the hole's ordinal within that group — and
+  `ohm signoff --physics-report FILE` reads it (`ohm/physics_report.py`, pure).
+  V009 is an **error** for an unreadable report; a **stale** one (its
+  `kicad_pcb_hash`, `constraints_hash`, `ohm_source_sha256` or `ohm_version` is
+  not that of what is being signed off), which is refused outright so none of
+  its verdicts is read; an obligation with no verdict (a dropped obligation is a
+  violation, never a pass) or with several; a verdict for an obligation the
+  source does not declare, or whose fields disagree with its identity; a count
+  that does not reconcile; a violated obligation; and a verdict that files one
+  number under both `verified` and `estimated`, or claims a result with none. A
+  **warning** for `unproven`, and **info** for a waiver, for a proof that rests
+  on an ESTIMATE, and for a summary counting verified and estimated results
+  separately. **Without the flag nothing changes**: measured over 165 sources
+  and 89 boards against cc4a52d, every `check`, `build` and `signoff` output —
+  stdout, stderr, exit status and every emitted file — is byte-identical.
+  tests/test_physics_report.py (25).
 - **fix(cli)**: **a diagnostic quoted a file it was not about.** `_report`
   renders one source text against every diagnostic in the list, which was right
   while the list held only findings about the `.ohm`. When the D tier joined it —
